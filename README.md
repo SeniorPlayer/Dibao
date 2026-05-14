@@ -9,4 +9,6 @@
 - [项目草案](./docs/project-brief.md)
 - [MVP PRD](./docs/mvp-prd.md)
 - [工程蓝图](./docs/engineering-blueprint.md)
-
+- [数据库 Schema](./docs/database-schema.md)
+- [API Contract](./docs/api-contract.md)
+- [低保真页面线框](./docs/wireframes.md)

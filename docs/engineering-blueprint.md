@@ -985,8 +985,6 @@ DIBAO_LOG_LEVEL=info
 ## 开发前仍需细化
 
 - 数据库 migration 具体 SQL。
-- API request / response schema。
-- React 页面低保真线框。
 - 设计 tokens 初稿。
 - Profile Algorithm v0 参数默认值。
 - Docker 构建策略。

@@ -407,11 +407,9 @@ MVP 可以认为完成，当以下场景全部通过：
 
 ## 后续文档需求
 
-MVP 开发前还需要继续细化：
+MVP 开发前后续还需要继续细化：
 
 - 视觉设计规范
-- 数据库 schema 文档
-- API contract
 - Profile Algorithm v0 参数表
 - Docker 部署文档
 - OPML 兼容性测试用例
