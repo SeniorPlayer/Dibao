@@ -1,0 +1,13 @@
+{
+  "name": "dibao",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike:sqlite-vec": "node scripts/spikes/sqlite-vec-node.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.10.0",
+    "sqlite-vec": "0.1.9"
+  }
+}

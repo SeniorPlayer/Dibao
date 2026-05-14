@@ -549,6 +549,7 @@ UNIQUE(embedding_index_id, vec_rowid)
 
 - sqlite-vec 虚拟表通常以整数 rowid 为核心。
 - 业务层不直接依赖虚拟表是否支持文本主键。
+- Node.js spike 中验证到当前 sqlite-vec `v0.1.9` 的 `vec0` 不适合手动插入 rowid；应插入 embedding 后读取自动生成的 `lastInsertRowid`，再写入本映射表。
 
 ### sqlite-vec 虚拟表
 
@@ -572,6 +573,7 @@ embedding float[dimension]
 - 虚拟表名存于 `embedding_indexes.table_name`。
 - 本表是可重建索引，不是权威数据。
 - 所有 sqlite-vec SQL 只能出现在 `SqliteVecVectorStore` adapter 中。
+- 插入策略为：先插入向量，让 sqlite-vec 自动生成 rowid，再将 rowid 写入 `article_vector_rows`。
 
 ## 用户画像
 

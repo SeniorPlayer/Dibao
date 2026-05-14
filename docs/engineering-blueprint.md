@@ -986,4 +986,3 @@ DIBAO_LOG_LEVEL=info
 
 - 数据库 migration 具体 SQL。
 - Docker 构建策略。
-- sqlite-vec Node.js 集成验证。

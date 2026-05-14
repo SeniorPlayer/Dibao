@@ -14,3 +14,4 @@
 - [低保真页面线框](./docs/wireframes.md)
 - [Design Tokens](./docs/design-tokens.md)
 - [Profile Algorithm v0 参数表](./docs/profile-algorithm-v0.md)
+- [sqlite-vec Node.js 集成验证](./docs/spikes/sqlite-vec-node.md)
