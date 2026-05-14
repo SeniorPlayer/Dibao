@@ -21,6 +21,8 @@ export interface FeedRepository {
   findByFeedUrl(feedUrl: string): FeedRow | null;
   list(input?: FeedListInput): FeedRow[];
   listActive(): FeedRow[];
+  recordFetchFailure(id: string, error: string, fetchedAt: number): void;
+  recordFetchSuccess(id: string, fetchedAt: number): void;
   upsert(input: UpsertFeedInput): FeedRow;
 }
 
@@ -72,6 +74,37 @@ export class SqliteFeedRepository implements FeedRepository {
 
   listActive(): FeedRow[] {
     return this.list({ enabled: true });
+  }
+
+  recordFetchFailure(id: string, error: string, fetchedAt: number): void {
+    this.db
+      .prepare(
+        `
+          update feeds
+          set
+            last_fetched_at = ?,
+            last_error = ?,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(fetchedAt, error, fetchedAt, id);
+  }
+
+  recordFetchSuccess(id: string, fetchedAt: number): void {
+    this.db
+      .prepare(
+        `
+          update feeds
+          set
+            last_fetched_at = ?,
+            last_success_at = ?,
+            last_error = null,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(fetchedAt, fetchedAt, fetchedAt, id);
   }
 
   upsert(input: UpsertFeedInput): FeedRow {

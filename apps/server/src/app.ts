@@ -16,6 +16,11 @@ import {
   type FeedRow
 } from "@dibao/db";
 import { dibaoVersion, type ApiError } from "@dibao/shared";
+import {
+  FeedIngestionError,
+  FeedRefreshService,
+  type FeedFetcher
+} from "./feed-refresh-service.js";
 
 type HealthStatus = "ok" | "error";
 
@@ -30,6 +35,15 @@ type HealthResponse = {
 type FeedQuery = {
   folderId?: string;
   enabled?: string;
+};
+
+type CreateFeedBody = {
+  feedUrl?: unknown;
+  folderId?: unknown;
+};
+
+type FeedParams = {
+  id: string;
 };
 
 type ArticleQuery = {
@@ -54,6 +68,8 @@ type BuildServerOptions = {
   databasePath?: string;
   migrate?: boolean;
   closeDatabaseOnClose?: boolean;
+  feedFetcher?: FeedFetcher;
+  now?: () => number;
   logger?: boolean;
 };
 
@@ -62,6 +78,13 @@ export function buildServer(options: BuildServerOptions = {}) {
   const closeDatabaseOnClose = options.closeDatabaseOnClose ?? !options.db;
   const feeds = new SqliteFeedRepository(db);
   const articles = new SqliteArticleRepository(db);
+  const feedRefreshService = new FeedRefreshService({
+    db,
+    feeds,
+    articles,
+    fetcher: options.feedFetcher,
+    now: options.now
+  });
 
   const app = Fastify({
     logger: options.logger ?? true
@@ -101,6 +124,40 @@ export function buildServer(options: BuildServerOptions = {}) {
     return {
       data: feeds.list(input).map(mapFeed)
     };
+  });
+
+  app.post<{ Body: CreateFeedBody }>("/api/feeds", async (request, reply) => {
+    const parsed = parseCreateFeedBody(request.body);
+    if (!parsed.ok) {
+      return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message);
+    }
+
+    try {
+      const result = await feedRefreshService.addFeed(parsed.input);
+
+      return {
+        data: {
+          feed: mapFeed(result.feed),
+          refreshJobId: result.jobId
+        }
+      };
+    } catch (error) {
+      return sendFeedIngestionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: FeedParams }>("/api/feeds/:id/refresh", async (request, reply) => {
+    try {
+      const result = await feedRefreshService.refreshFeed(request.params.id);
+
+      return {
+        data: {
+          jobId: result.jobId
+        }
+      };
+    } catch (error) {
+      return sendFeedIngestionError(reply, error);
+    }
   });
 
   app.get<{ Querystring: ArticleQuery }>("/api/articles", async (request, reply) => {
@@ -246,6 +303,30 @@ function parseArticleQuery(query: ArticleQuery):
   }
 
   return { ok: true, input };
+}
+
+function parseCreateFeedBody(body: CreateFeedBody | undefined):
+  | { ok: true; input: { feedUrl: string; folderId?: string | null } }
+  | { ok: false; message: string } {
+  if (!body || typeof body.feedUrl !== "string" || body.feedUrl.trim() === "") {
+    return { ok: false, message: "feedUrl is required" };
+  }
+
+  if (
+    body.folderId !== undefined &&
+    body.folderId !== null &&
+    typeof body.folderId !== "string"
+  ) {
+    return { ok: false, message: "folderId must be a string or null" };
+  }
+
+  return {
+    ok: true,
+    input: {
+      feedUrl: body.feedUrl,
+      ...(body.folderId !== undefined ? { folderId: body.folderId } : {})
+    }
+  };
 }
 
 function parseArticleView(value: string | undefined): ArticleListView | undefined | null {
@@ -400,4 +481,12 @@ function sendApiError(
   }
 
   return reply.status(statusCode).send({ error });
+}
+
+function sendFeedIngestionError(reply: FastifyReply, error: unknown) {
+  if (error instanceof FeedIngestionError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
 }

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@dibao/db": "0.0.0",
+    "@dibao/rss": "0.0.0",
     "@dibao/shared": "0.0.0",
     "fastify": "^5.8.5"
   }
