@@ -41,6 +41,8 @@ export function runMigrations(
       continue;
     }
 
+    const appliedAt = now();
+
     db.transaction(() => {
       db.exec(migration.sql);
       db.prepare(
@@ -48,13 +50,13 @@ export function runMigrations(
           insert into schema_migrations (version, name, applied_at, checksum)
           values (?, ?, ?, ?)
         `
-      ).run(migration.version, migration.name, now(), checksum);
+      ).run(migration.version, migration.name, appliedAt, checksum);
     })();
 
     appliedNow.push({
       version: migration.version,
       name: migration.name,
-      appliedAt: now(),
+      appliedAt,
       checksum
     });
   }

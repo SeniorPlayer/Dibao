@@ -93,6 +93,46 @@ describe("db package", () => {
     }
   });
 
+  it("applies the default schema to an empty database idempotently", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      expect(runMigrations(db)).toHaveLength(0);
+
+      expect(getSqliteVecVersion(db).version).toMatch(/^v\d+\./);
+      expect(
+        db.prepare("select sqlite_compileoption_used('ENABLE_FTS5') as enabled").get()
+      ).toEqual({ enabled: 1 });
+
+      for (const name of [
+        "schema_migrations",
+        "app_settings",
+        "auth_credentials",
+        "sessions",
+        "feed_folders",
+        "feeds",
+        "articles",
+        "article_contents",
+        "article_states",
+        "behavior_events",
+        "embedding_providers",
+        "embedding_indexes",
+        "article_embeddings",
+        "article_vector_rows",
+        "interest_clusters",
+        "feed_stats",
+        "article_rank_scores",
+        "article_rank_explanations",
+        "jobs"
+      ]) {
+        expect(hasTableOrView(db, name), name).toBe(true);
+      }
+
+      expect(hasFtsTable(db, "article_fts")).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("initializes schema, repositories, FTS5, and sqlite-vec vector rebuild flow", () => {
     const db = openDatabase(tempDatabasePath(), { migrate: true });
     try {
@@ -219,4 +259,35 @@ function tempDatabasePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "dibao-db-"));
   tempDirs.push(dir);
   return join(dir, "dibao.sqlite");
+}
+
+function hasTableOrView(db: ReturnType<typeof openDatabase>, name: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        `
+          select 1
+          from sqlite_schema
+          where name = ?
+            and type in ('table', 'view')
+        `
+      )
+      .get(name)
+  );
+}
+
+function hasFtsTable(db: ReturnType<typeof openDatabase>, name: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        `
+          select 1
+          from sqlite_schema
+          where name = ?
+            and type = 'table'
+            and sql like '%using fts5%'
+        `
+      )
+      .get(name)
+  );
 }
