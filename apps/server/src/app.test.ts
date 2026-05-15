@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -59,6 +59,113 @@ describe("server API vertical slice", () => {
           version: "0.0.0"
         }
       });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("serves configured web static files and falls back to index for SPA routes", async () => {
+    const db = createEmptyDatabase();
+    const webDistDir = createTempDir();
+    mkdirSync(join(webDistDir, "assets"), { recursive: true });
+    writeFileSync(
+      join(webDistDir, "index.html"),
+      "<!doctype html><html><body><div id=\"root\">Dibao shell</div></body></html>"
+    );
+    writeFileSync(join(webDistDir, "assets", "app.js"), "console.log('dibao');");
+    const app = buildServer({ db, logger: false, webDistDir });
+
+    try {
+      const root = await app.inject({
+        method: "GET",
+        url: "/"
+      });
+      const asset = await app.inject({
+        method: "GET",
+        url: "/assets/app.js"
+      });
+      const spaRoute = await app.inject({
+        method: "GET",
+        url: "/reader/latest"
+      });
+      const head = await app.inject({
+        method: "HEAD",
+        url: "/reader/latest"
+      });
+
+      expect(root.statusCode, root.body).toBe(200);
+      expect(root.headers["content-type"]).toContain("text/html");
+      expect(root.body).toContain("Dibao shell");
+      expect(asset.statusCode, asset.body).toBe(200);
+      expect(asset.headers["content-type"]).toContain("text/javascript");
+      expect(asset.body).toContain("dibao");
+      expect(spaRoute.statusCode, spaRoute.body).toBe(200);
+      expect(spaRoute.body).toContain("Dibao shell");
+      expect(head.statusCode, head.body).toBe(200);
+      expect(head.body).toBe("");
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("serves web static files before login while keeping API routes protected", async () => {
+    const db = createEmptyDatabase();
+    const webDistDir = createTempDir();
+    writeFileSync(
+      join(webDistDir, "index.html"),
+      "<!doctype html><html><body><div id=\"root\">Dibao public shell</div></body></html>"
+    );
+    const app = buildRealServer({ db, logger: false, webDistDir, cookieSecure: false });
+
+    try {
+      const root = await app.inject({
+        method: "GET",
+        url: "/"
+      });
+      const protectedApi = await app.inject({
+        method: "GET",
+        url: "/api/feeds"
+      });
+
+      expect(root.statusCode, root.body).toBe(200);
+      expect(root.body).toContain("Dibao public shell");
+      expect(protectedApi.statusCode, protectedApi.body).toBe(401);
+      expect(protectedApi.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("does not serve the SPA fallback for API paths", async () => {
+    const db = createEmptyDatabase();
+    const webDistDir = createTempDir();
+    writeFileSync(
+      join(webDistDir, "index.html"),
+      "<!doctype html><html><body>should not serve for api</body></html>"
+    );
+    const app = buildServer({ db, logger: false, webDistDir });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/missing-route"
+      });
+
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+      expect(response.body).not.toContain("should not serve for api");
     } finally {
       await app.close();
       db.close();
@@ -2579,9 +2686,14 @@ async function drainRankingJobs(db: DibaoDatabase, now: number): Promise<void> {
 }
 
 function tempDatabasePath(): string {
+  const dir = createTempDir();
+  return join(dir, "dibao.sqlite");
+}
+
+function createTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "dibao-server-"));
   tempDirs.push(dir);
-  return join(dir, "dibao.sqlite");
+  return dir;
 }
 
 function fixtureFetcher(fixtures: Record<string, string>): FeedFetcher {

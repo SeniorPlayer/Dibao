@@ -13,9 +13,12 @@
     "test": "npm run test --workspaces --if-present",
     "dev:server": "npm run dev -w @dibao/server",
     "dev:web": "npm run dev -w @dibao/web",
+    "e2e": "npm run build && node scripts/e2e/prepare.mjs && playwright test",
+    "e2e:install": "playwright install chromium",
     "spike:sqlite-vec": "node scripts/spikes/sqlite-vec-node.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.7.0",
     "@types/react": "^19.2.14",

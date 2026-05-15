@@ -1,6 +1,11 @@
-import { mkdirSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, extname, isAbsolute, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest
+} from "fastify";
 import {
   ARTICLE_ACTION_EVENT_WEIGHTS,
   getSqliteVecVersion,
@@ -176,6 +181,7 @@ type BuildServerOptions = {
   jobRunnerIntervalMs?: number;
   jobRetryDelayMs?: number;
   embeddingFetcher?: typeof fetch;
+  webDistDir?: string | false;
 };
 
 export function buildServer(options: BuildServerOptions = {}) {
@@ -411,6 +417,11 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("preHandler", async (request, reply) => {
+    const pathname = parseRequestPathname(request.url);
+    if (pathname && !isApiPath(pathname)) {
+      return;
+    }
+
     if (!authRequired || isAnonymousRoute(request.method, request.routeOptions.url)) {
       return;
     }
@@ -840,6 +851,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  registerWebStaticRoutes(app, options.webDistDir);
+
   return app;
 }
 
@@ -872,6 +885,148 @@ function ensureDatabaseDirectory(databasePath: string): void {
   }
 
   mkdirSync(dirname(databasePath), { recursive: true });
+}
+
+function registerWebStaticRoutes(
+  app: FastifyInstance,
+  webDistDirOption: BuildServerOptions["webDistDir"]
+): void {
+  if (webDistDirOption === false) {
+    return;
+  }
+
+  const webDistDir = resolveWebDistDir(webDistDirOption);
+
+  app.route({
+    method: ["GET", "HEAD"],
+    url: "/*",
+    handler: async (request, reply) => {
+      const pathname = parseRequestPathname(request.url);
+
+      if (!pathname || isApiPath(pathname)) {
+        return sendApiError(reply, 404, "NOT_FOUND", "Route not found");
+      }
+
+      const assetPath = resolveStaticAssetPath(webDistDir, pathname);
+      if (assetPath) {
+        return sendStaticFile(reply, request.method, assetPath);
+      }
+
+      const indexPath = resolveStaticAssetPath(webDistDir, "/index.html");
+      if (!indexPath) {
+        return reply.status(404).type("text/plain; charset=utf-8").send("Not found");
+      }
+
+      return sendStaticFile(reply, request.method, indexPath);
+    }
+  });
+}
+
+function resolveWebDistDir(webDistDirOption: string | undefined): string {
+  if (webDistDirOption) {
+    return isAbsolute(webDistDirOption)
+      ? webDistDirOption
+      : resolve(process.cwd(), webDistDirOption);
+  }
+
+  if (process.env.DIBAO_WEB_DIST_DIR) {
+    return isAbsolute(process.env.DIBAO_WEB_DIST_DIR)
+      ? process.env.DIBAO_WEB_DIST_DIR
+      : resolve(process.cwd(), process.env.DIBAO_WEB_DIST_DIR);
+  }
+
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+}
+
+function parseRequestPathname(requestUrl: string): string | null {
+  try {
+    return new URL(requestUrl, "http://localhost").pathname;
+  } catch {
+    return null;
+  }
+}
+
+function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+function resolveStaticAssetPath(webDistDir: string, pathname: string): string | null {
+  const decodedPathname = decodeStaticPathname(pathname);
+  if (decodedPathname === null) {
+    return null;
+  }
+
+  const requestedPath = decodedPathname === "/" ? "/index.html" : decodedPathname;
+  const relativePath = requestedPath.replace(/^\/+/, "");
+  const candidate = resolve(webDistDir, relativePath);
+  const rootPrefix = webDistDir.endsWith(sep) ? webDistDir : `${webDistDir}${sep}`;
+
+  if (candidate !== webDistDir && !candidate.startsWith(rootPrefix)) {
+    return null;
+  }
+
+  try {
+    const stat = statSync(candidate);
+    if (stat.isDirectory()) {
+      const directoryIndex = resolve(candidate, "index.html");
+      return existsSync(directoryIndex) ? directoryIndex : null;
+    }
+
+    return stat.isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeStaticPathname(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+}
+
+function sendStaticFile(reply: FastifyReply, method: string, filePath: string) {
+  reply.type(contentTypeForStaticFile(filePath));
+  if (method.toUpperCase() === "HEAD") {
+    return reply.send();
+  }
+
+  return reply.send(readFileSync(filePath));
+}
+
+function contentTypeForStaticFile(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".ico":
+      return "image/x-icon";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+    case ".map":
+      return "application/json; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".wasm":
+      return "application/wasm";
+    case ".webp":
+      return "image/webp";
+    case ".xml":
+      return "application/xml; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function resolveCookieSecure(value: boolean | undefined): boolean {
