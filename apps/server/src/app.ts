@@ -61,6 +61,7 @@ import {
   RetentionCleanupJobService,
   RetentionCleanupScheduler
 } from "./retention-cleanup-job-service.js";
+import { SettingsService, SettingsServiceError } from "./settings-service.js";
 
 type HealthStatus = "ok" | "error";
 
@@ -202,6 +203,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     settings,
     articles,
     vectorStore,
+    now: options.now
+  });
+  const settingsService = new SettingsService({
+    settings,
     now: options.now
   });
   const retentionCleanupJobService = new RetentionCleanupJobService({
@@ -361,6 +366,20 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/setup/status", async () => ({
     data: getSetupStatus(credentials.hasCredential(), feeds.list().length > 0)
   }));
+
+  app.get("/api/settings", async () => ({
+    data: settingsService.getSettings()
+  }));
+
+  app.patch<{ Body: unknown }>("/api/settings", async (request, reply) => {
+    try {
+      return {
+        data: settingsService.updateSettings(request.body)
+      };
+    } catch (error) {
+      return sendSettingsError(reply, error);
+    }
+  });
 
   app.get("/api/system/health", async (_request, reply) => {
     const data = getHealth(db);
@@ -1166,6 +1185,14 @@ function sendFeedManagementError(reply: FastifyReply, error: unknown) {
 
 function sendOpmlServiceError(reply: FastifyReply, error: unknown) {
   if (error instanceof OpmlServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendSettingsError(reply: FastifyReply, error: unknown) {
+  if (error instanceof SettingsServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

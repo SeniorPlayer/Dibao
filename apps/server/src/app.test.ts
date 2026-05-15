@@ -373,6 +373,175 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("protects, reads, and strictly updates app settings", async () => {
+    const db = createEmptyDatabase();
+    const app = buildRealServer({
+      db,
+      logger: false,
+      cookieSecure: false,
+      now: () => 5000
+    });
+
+    try {
+      const anonymous = await app.inject({
+        method: "GET",
+        url: "/api/settings"
+      });
+      expect(anonymous.statusCode, anonymous.body).toBe(401);
+      expect(anonymous.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED"
+        }
+      });
+
+      const setup = await postJson(app, "/api/auth/setup", {
+        password: "correct horse battery"
+      });
+      const cookie = cookieHeaderFromSetCookie(setup.headers["set-cookie"]);
+      db.prepare(
+        `
+          insert into app_settings (key, value_json, updated_at)
+          values (?, ?, ?)
+          on conflict(key) do update set value_json = excluded.value_json
+        `
+      ).run("retention.articleDays", JSON.stringify("invalid"), 5000);
+
+      const defaults = await app.inject({
+        method: "GET",
+        url: "/api/settings",
+        headers: {
+          cookie
+        }
+      });
+      expect(defaults.statusCode, defaults.body).toBe(200);
+      expect(defaults.json()).toEqual({
+        data: {
+          ui: {
+            locale: "zh-CN"
+          },
+          reader: {
+            fontSize: 18,
+            lineHeight: 1.75,
+            paragraphGap: 1.1,
+            readerWidth: 720,
+            theme: "paper"
+          },
+          retention: {
+            retentionDays: 60,
+            keepFavorites: true,
+            keepReadLater: true
+          },
+          ranking: {
+            preferFreshness: 0.5,
+            preferSource: 0.5,
+            preferDiversity: 0.5
+          }
+        }
+      });
+
+      const updated = await injectJsonWithCookie(app, "PATCH", "/api/settings", cookie, {
+        ui: {
+          locale: "en-US"
+        },
+        reader: {
+          fontSize: 20,
+          lineHeight: 1.8
+        },
+        retention: {
+          retentionDays: 45
+        }
+      });
+      expect(updated.statusCode, updated.body).toBe(200);
+      expect(updated.json()).toMatchObject({
+        data: {
+          ok: true,
+          settings: {
+            ui: {
+              locale: "en-US"
+            },
+            reader: {
+              fontSize: 20,
+              lineHeight: 1.8,
+              paragraphGap: 1.1,
+              readerWidth: 720
+            },
+            retention: {
+              retentionDays: 45
+            }
+          }
+        }
+      });
+      expect(
+        db.prepare("select value_json as valueJson from app_settings where key = ?").get(
+          "retention.articleDays"
+        )
+      ).toEqual({
+        valueJson: "45"
+      });
+
+      const partial = await injectJsonWithCookie(app, "PATCH", "/api/settings", cookie, {
+        reader: {
+          paragraphGap: 1.3
+        }
+      });
+      expect(partial.statusCode, partial.body).toBe(200);
+      expect(partial.json()).toMatchObject({
+        data: {
+          settings: {
+            reader: {
+              fontSize: 20,
+              lineHeight: 1.8,
+              paragraphGap: 1.3,
+              readerWidth: 720
+            },
+            retention: {
+              retentionDays: 45
+            }
+          }
+        }
+      });
+
+      for (const payload of [
+        {
+          reader: {
+            theme: "paper"
+          }
+        },
+        {
+          ui: {
+            locale: "fr-FR"
+          }
+        },
+        {
+          retention: {
+            retentionDays: 0
+          }
+        },
+        {
+          retention: {
+            retentionDays: "30"
+          }
+        },
+        {
+          ranking: {
+            preferFreshness: 0.9
+          }
+        }
+      ]) {
+        const invalid = await injectJsonWithCookie(app, "PATCH", "/api/settings", cookie, payload);
+        expect(invalid.statusCode, invalid.body).toBe(400);
+        expect(invalid.json()).toMatchObject({
+          error: {
+            code: "VALIDATION_ERROR"
+          }
+        });
+      }
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("lists feeds from the migrated database with API timestamps", async () => {
     const db = createFixtureDatabase();
     const app = buildServer({ db, logger: false });
@@ -2066,6 +2235,24 @@ async function injectJson(
     url,
     headers: {
       "content-type": "application/json"
+    },
+    payload: JSON.stringify(payload)
+  });
+}
+
+async function injectJsonWithCookie(
+  app: ReturnType<typeof buildServer>,
+  method: "PATCH" | "POST",
+  url: string,
+  cookie: string,
+  payload: unknown
+) {
+  return app.inject({
+    method,
+    url,
+    headers: {
+      "content-type": "application/json",
+      cookie
     },
     payload: JSON.stringify(payload)
   });

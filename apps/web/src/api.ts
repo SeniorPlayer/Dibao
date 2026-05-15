@@ -132,6 +132,50 @@ export type SetupStatus = {
   firstRefreshStatus: "idle" | "running" | "succeeded" | "failed";
 };
 
+export type SettingsLocale = "zh-CN" | "en-US";
+
+export type ReaderSettings = {
+  fontSize: number;
+  lineHeight: number;
+  paragraphGap: number;
+  readerWidth: number;
+  theme: "paper";
+};
+
+export type AppSettings = {
+  ui: {
+    locale: SettingsLocale;
+  };
+  reader: ReaderSettings;
+  retention: {
+    retentionDays: number;
+    keepFavorites: true;
+    keepReadLater: true;
+  };
+  ranking: {
+    preferFreshness: number;
+    preferSource: number;
+    preferDiversity: number;
+  };
+};
+
+export type UpdateSettingsInput = {
+  ui?: {
+    locale?: SettingsLocale;
+  };
+  reader?: Partial<
+    Pick<ReaderSettings, "fontSize" | "lineHeight" | "paragraphGap" | "readerWidth">
+  >;
+  retention?: {
+    retentionDays?: number;
+  };
+};
+
+export type UpdateSettingsResponse = {
+  ok: true;
+  settings: AppSettings;
+};
+
 export type AuthOkResponse = {
   ok: true;
 };
@@ -151,6 +195,29 @@ export type RefreshFeedResponse = {
 
 export type RefreshAllFeedsResponse = {
   jobIds: string[];
+};
+
+export const defaultAppSettings: AppSettings = {
+  ui: {
+    locale: "zh-CN"
+  },
+  reader: {
+    fontSize: 18,
+    lineHeight: 1.75,
+    paragraphGap: 1.1,
+    readerWidth: 720,
+    theme: "paper"
+  },
+  retention: {
+    retentionDays: 60,
+    keepFavorites: true,
+    keepReadLater: true
+  },
+  ranking: {
+    preferFreshness: 0.5,
+    preferSource: 0.5,
+    preferDiversity: 0.5
+  }
 };
 
 export class ApiRequestError extends Error {
@@ -279,6 +346,19 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
 
     async getSetupStatus(): Promise<SetupStatus> {
       return (await request<SetupStatus>("/api/setup/status")).data;
+    },
+
+    async getSettings(): Promise<AppSettings> {
+      return (await request<AppSettings>("/api/settings")).data;
+    },
+
+    async updateSettings(input: UpdateSettingsInput): Promise<UpdateSettingsResponse> {
+      return (
+        await request<UpdateSettingsResponse>("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(input)
+        })
+      ).data;
     },
 
     async listFeedFolders(): Promise<FeedFolder[]> {

@@ -139,11 +139,16 @@ updated_at INTEGER NOT NULL
 
 ```text
 setup.completed
+ui.locale
 reader.settings
+retention.articleDays
 retention.settings
 ranking.settings
 system.instance_id
 ```
+
+`GET/PATCH /api/settings` 中的 API 字段 `retention.retentionDays` 映射到
+`app_settings.retention.articleDays`。`retention.settings` 预留给后续更完整的保留策略对象。
 
 ### auth_credentials
 

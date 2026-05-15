@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 export const defaultLocale = "zh-CN";
 export const supportedLocales = ["zh-CN", "en-US"] as const;
@@ -157,6 +157,62 @@ export const zhCN = {
       folderTitleRequired: "请输入分组名称。",
       feedTitleRequired: "请输入订阅源标题。",
       sourceWeight: "来源权重必须是 -1 到 1 之间的数字。"
+    }
+  },
+  settings: {
+    pageTitle: "设置",
+    loading: "正在加载设置",
+    status: "设置已就绪",
+    sections: {
+      language: {
+        title: "语言",
+        body: "选择界面语言。设置保存后刷新页面仍会生效。",
+        localeLabel: "界面语言",
+        zhCN: "简体中文",
+        enUS: "English"
+      },
+      reader: {
+        title: "阅读",
+        body: "调整文章详情的阅读密度。修改会立即应用到当前阅读区域。",
+        fontSize: "字号",
+        lineHeight: "行高",
+        paragraphGap: "段距",
+        readerWidth: "阅读宽度"
+      },
+      retention: {
+        title: "文章保留",
+        body: "超过保留天数的普通文章会由后台清理。收藏和稍后读保留策略本轮固定开启。",
+        retentionDays: "保留天数",
+        keepFavorites: "保留收藏文章",
+        keepReadLater: "保留稍后读文章",
+        enabled: "已开启",
+        disabled: "已关闭",
+        mappingHint: "API 字段 retention.retentionDays 会保存到 storage key retention.articleDays。"
+      },
+      provider: {
+        title: "智能能力",
+        body: "当前使用基础排序。Embedding provider 将在后续版本配置，本页不会收集连接参数。",
+        disabled: "暂未配置"
+      }
+    },
+    actions: {
+      save: "保存设置",
+      saving: "保存中"
+    },
+    notices: {
+      saved: "设置已保存。"
+    },
+    errors: {
+      invalidNumber: "请输入有效数字。",
+      fontSize: "字号必须是 16 到 24。",
+      lineHeight: "行高必须是 1.45 到 2.1。",
+      paragraphGap: "段距必须是 0.6 到 1.6。",
+      readerWidth: "阅读宽度必须是 560 到 860。",
+      retentionDays: "保留天数必须是 1 到 3650 的整数。"
+    },
+    units: {
+      px: "px",
+      days: "天"
     }
   },
   opml: {
@@ -432,6 +488,62 @@ export const enUS = {
       sourceWeight: "Source weight must be a number between -1 and 1."
     }
   },
+  settings: {
+    pageTitle: "Settings",
+    loading: "Loading settings",
+    status: "Settings ready",
+    sections: {
+      language: {
+        title: "Language",
+        body: "Choose the interface language. Saved settings remain after refresh.",
+        localeLabel: "Interface language",
+        zhCN: "简体中文",
+        enUS: "English"
+      },
+      reader: {
+        title: "Reading",
+        body: "Adjust article detail reading density. Changes apply immediately to the reader.",
+        fontSize: "Font size",
+        lineHeight: "Line height",
+        paragraphGap: "Paragraph gap",
+        readerWidth: "Reader width"
+      },
+      retention: {
+        title: "Article retention",
+        body: "Background cleanup removes ordinary articles older than the retention window. Favorite and read-later retention stay enabled in this version.",
+        retentionDays: "Retention days",
+        keepFavorites: "Keep favorited articles",
+        keepReadLater: "Keep read-later articles",
+        enabled: "On",
+        disabled: "Off",
+        mappingHint: "API field retention.retentionDays is stored as storage key retention.articleDays."
+      },
+      provider: {
+        title: "Intelligence",
+        body: "Baseline ranking is active. Embedding providers will be configured later, and this page does not collect connection parameters.",
+        disabled: "Not configured"
+      }
+    },
+    actions: {
+      save: "Save settings",
+      saving: "Saving"
+    },
+    notices: {
+      saved: "Settings saved."
+    },
+    errors: {
+      invalidNumber: "Enter a valid number.",
+      fontSize: "Font size must be between 16 and 24.",
+      lineHeight: "Line height must be between 1.45 and 2.1.",
+      paragraphGap: "Paragraph gap must be between 0.6 and 1.6.",
+      readerWidth: "Reader width must be between 560 and 860.",
+      retentionDays: "Retention days must be an integer between 1 and 3650."
+    },
+    units: {
+      px: "px",
+      days: "days"
+    }
+  },
   opml: {
     import: "Import OPML",
     importing: "Importing",
@@ -550,6 +662,7 @@ export const dictionaries = {
 
 export type I18nValue = {
   locale: Locale;
+  setLocale: (locale: Locale) => void;
   t: Dictionary;
   formatDate: (value: string | Date) => string;
 };
@@ -563,8 +676,23 @@ const defaultI18n = createI18n(defaultLocale);
 const I18nContext = createContext<I18nValue>(defaultI18n);
 
 export function DibaoI18nProvider(props: DibaoI18nProviderProps) {
-  const locale = props.locale ?? defaultLocale;
-  const value = useMemo(() => createI18n(locale), [locale]);
+  const [locale, setLocale] = useState<Locale>(props.locale ?? defaultLocale);
+  const value = useMemo(() => createI18n(locale, {}, setLocale), [locale]);
+
+  useEffect(() => {
+    if (props.locale !== undefined) {
+      setLocale(props.locale);
+    }
+  }, [props.locale]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.documentElement.lang = locale;
+    document.title = dictionaries[locale].common.brandName;
+  }, [locale]);
 
   return <I18nContext.Provider value={value}>{props.children}</I18nContext.Provider>;
 }
@@ -575,12 +703,14 @@ export function useI18n(): I18nValue {
 
 export function createI18n(
   locale: Locale = defaultLocale,
-  options: { timeZone?: string } = {}
+  options: { timeZone?: string } = {},
+  setLocale: (locale: Locale) => void = () => undefined
 ): I18nValue {
   const formatter = createDateFormatter(locale, options);
 
   return {
     locale,
+    setLocale,
     t: dictionaries[locale],
     formatDate(value) {
       return formatter.format(new Date(value));

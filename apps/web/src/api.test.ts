@@ -144,6 +144,110 @@ describe("web API client", () => {
     expect(calls).toEqual(["/api/setup/status"]);
   });
 
+  it("fetches and updates app settings", async () => {
+    const calls: Array<{ path: string; method: string | undefined; body: unknown }> = [];
+    const api = createDibaoApi(async (input, init) => {
+      calls.push({
+        path: String(input),
+        method: init?.method,
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      });
+
+      const settings = {
+        ui: {
+          locale: "en-US"
+        },
+        reader: {
+          fontSize: 20,
+          lineHeight: 1.8,
+          paragraphGap: 1.2,
+          readerWidth: 760,
+          theme: "paper"
+        },
+        retention: {
+          retentionDays: 45,
+          keepFavorites: true,
+          keepReadLater: true
+        },
+        ranking: {
+          preferFreshness: 0.5,
+          preferSource: 0.5,
+          preferDiversity: 0.5
+        }
+      };
+
+      return new Response(
+        JSON.stringify({
+          data:
+            init?.method === "PATCH"
+              ? {
+                  ok: true,
+                  settings
+                }
+              : settings
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await expect(api.getSettings()).resolves.toMatchObject({
+      ui: {
+        locale: "en-US"
+      },
+      retention: {
+        retentionDays: 45
+      }
+    });
+    await expect(
+      api.updateSettings({
+        ui: {
+          locale: "en-US"
+        },
+        reader: {
+          fontSize: 20
+        },
+        retention: {
+          retentionDays: 45
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      settings: {
+        reader: {
+          fontSize: 20
+        }
+      }
+    });
+
+    expect(calls).toEqual([
+      {
+        path: "/api/settings",
+        method: undefined,
+        body: null
+      },
+      {
+        path: "/api/settings",
+        method: "PATCH",
+        body: {
+          ui: {
+            locale: "en-US"
+          },
+          reader: {
+            fontSize: 20
+          },
+          retention: {
+            retentionDays: 45
+          }
+        }
+      }
+    ]);
+  });
+
   it("calls feed and folder management endpoints", async () => {
     const calls: Array<{ path: string; method: string | undefined; body: unknown }> = [];
     const api = createDibaoApi(async (input, init) => {

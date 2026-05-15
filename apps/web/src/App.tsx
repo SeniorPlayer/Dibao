@@ -1,7 +1,8 @@
-import type { ChangeEvent, FormEvent, MouseEvent } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dibaoVersion } from "@dibao/shared";
 import {
+  defaultAppSettings,
   dibaoApi,
   userMessageForError,
   type ArticleActionRequest,
@@ -9,19 +10,22 @@ import {
   type ArticleListItem,
   type ArticleState,
   type ArticleView,
+  type AppSettings,
   type AuthSession,
   type Feed,
   type FeedFolder,
   type OpmlImportResponse,
   type RankExplanation,
   type RankExplanationReason,
+  type ReaderSettings,
   type SetupStatus,
   type UpdateFeedFolderInput,
-  type UpdateFeedInput
+  type UpdateFeedInput,
+  type UpdateSettingsInput
 } from "./api.js";
 import styles from "./design-system/AppShell/AppShell.module.css";
 import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
-import { useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
+import { defaultLocale, useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
 
 const navigationItems: NavigationItemKey[] = [
   "latest",
@@ -38,7 +42,8 @@ type Notice =
   | { type: "feedRefreshed"; feedTitle: string }
   | { type: "allFeedsRefreshQueued"; jobCount: number }
   | { type: "opmlImported"; result: OpmlImportResponse }
-  | { type: "opmlExported" };
+  | { type: "opmlExported" }
+  | { type: "settingsSaved" };
 
 export type SourceSelection =
   | { type: "all" }
@@ -49,7 +54,8 @@ type AuthMode = "setup" | "login";
 
 export type AppPage =
   | { type: "reader"; view: ArticleView }
-  | { type: "feed-management" };
+  | { type: "feed-management" }
+  | { type: "settings" };
 
 export type AppStage =
   | { type: "auth-loading" }
@@ -105,12 +111,16 @@ export function correctSourceSelection(
 }
 
 export function App() {
-  const { t } = useI18n();
+  const { t, setLocale } = useI18n();
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [setupSourceError, setSetupSourceError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
+  const [isSettingsLoading, setIsSettingsLoading] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [feedFolders, setFeedFolders] = useState<FeedFolder[]>([]);
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [articles, setArticles] = useState<ArticleListItem[]>([]);
@@ -144,6 +154,7 @@ export function App() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const openedArticleIds = useRef(new Set<string>());
   const articleRequestVersion = useRef(0);
+  const hasLoadedSettingsForSession = useRef(false);
 
   const selectedFeed = useMemo(
     () =>
@@ -235,13 +246,19 @@ export function App() {
     setExplanationError(null);
     setArticleActionError(null);
     setSetupSourceError(null);
+    setAppSettings(defaultAppSettings);
+    setIsSettingsLoading(false);
+    setIsSavingSettings(false);
+    setSettingsError(null);
+    setLocale(defaultLocale);
     setOpmlSummary(null);
     setNextArticleCursor(null);
     setPendingArticleAction(null);
     setNotice(null);
+    hasLoadedSettingsForSession.current = false;
     openedArticleIds.current.clear();
     articleRequestVersion.current += 1;
-  }, []);
+  }, [setLocale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,6 +326,50 @@ export function App() {
       cancelled = true;
     };
   }, [appStage.type, resetReaderState, t.errors.api]);
+
+  const applySettings = useCallback(
+    (settings: AppSettings) => {
+      setAppSettings(settings);
+      setLocale(settings.ui.locale);
+    },
+    [setLocale]
+  );
+
+  useEffect(() => {
+    if (appStage.type !== "reader" || hasLoadedSettingsForSession.current) {
+      return;
+    }
+
+    hasLoadedSettingsForSession.current = true;
+    let cancelled = false;
+
+    async function loadSettings() {
+      setIsSettingsLoading(true);
+      setSettingsError(null);
+
+      try {
+        const settings = await dibaoApi.getSettings();
+        if (!cancelled) {
+          applySettings(settings);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSettingsError(userMessageForError(error, t.errors.api));
+          applySettings(defaultAppSettings);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSettingsLoading(false);
+        }
+      }
+    }
+
+    void loadSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appStage.type, applySettings, t.errors.api]);
 
   const refreshArticleExplanation = useCallback(async (articleId: string) => {
     setIsExplanationLoading(true);
@@ -746,6 +807,27 @@ export function App() {
     await refreshSourcesAfterManagementMutation();
   }
 
+  function handlePreviewSettings(settings: AppSettings) {
+    applySettings(settings);
+    setSettingsError(null);
+  }
+
+  async function handleSaveSettings(input: UpdateSettingsInput) {
+    setIsSavingSettings(true);
+    setSettingsError(null);
+    setNotice(null);
+
+    try {
+      const result = await dibaoApi.updateSettings(input);
+      applySettings(result.settings);
+      setNotice({ type: "settingsSaved" });
+    } catch (error) {
+      setSettingsError(userMessageForError(error, t.errors.api));
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
   async function handleLoadMoreArticles() {
     if (!nextArticleCursor) {
       return;
@@ -817,12 +899,16 @@ export function App() {
   const pageTitle =
     appPage.type === "feed-management"
       ? t.feedManagement.pageTitle
+      : appPage.type === "settings"
+        ? t.settings.pageTitle
       : t.shell.pageTitles[currentArticleView];
   const topbarStatus =
     appPage.type === "feed-management"
       ? isFeedsLoading
         ? t.feedManagement.loading
         : t.feedManagement.status(feeds.length, feedFolders.length)
+      : appPage.type === "settings"
+        ? settingsError ?? noticeText ?? (isSettingsLoading ? t.settings.loading : t.settings.status)
       : noticeText ??
         (isArticlesLoading ? t.shell.loadingArticles : t.shell.viewStatus[currentArticleView]);
 
@@ -938,6 +1024,15 @@ export function App() {
             onUpdateFeed={handleUpdateManagedFeed}
             onUpdateFolder={handleUpdateManagedFolder}
           />
+        ) : appPage.type === "settings" ? (
+          <SettingsWorkspace
+            error={settingsError}
+            isLoading={isSettingsLoading}
+            isSaving={isSavingSettings}
+            onPreviewSettings={handlePreviewSettings}
+            onSaveSettings={handleSaveSettings}
+            settings={appSettings}
+          />
         ) : (
           <div className={styles.workspace}>
             <FeedPanel
@@ -996,6 +1091,7 @@ export function App() {
                   ? pendingArticleAction.intent
                   : null
               }
+              readerSettings={appSettings.reader}
             />
           </div>
         )}
@@ -1213,6 +1309,221 @@ export function SetupProviderPlaceholderPanel(props: { onContinue: () => void })
         {t.setup.provider.continue}
       </button>
     </section>
+  );
+}
+
+type SettingsDraft = {
+  locale: AppSettings["ui"]["locale"];
+  fontSize: string;
+  lineHeight: string;
+  paragraphGap: string;
+  readerWidth: string;
+  retentionDays: string;
+};
+
+export function SettingsWorkspace(props: {
+  error: string | null;
+  isLoading: boolean;
+  isSaving: boolean;
+  onPreviewSettings: (settings: AppSettings) => void;
+  onSaveSettings: (input: UpdateSettingsInput) => Promise<void>;
+  settings: AppSettings;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState<SettingsDraft>(() => draftForSettings(props.settings));
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(draftForSettings(props.settings));
+  }, [props.settings]);
+
+  function applyDraft(nextDraft: SettingsDraft) {
+    setDraft(nextDraft);
+    setLocalError(null);
+
+    const parsed = parseSettingsDraft(nextDraft, props.settings, t);
+    if (parsed.ok) {
+      props.onPreviewSettings(parsed.settings);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsed = parseSettingsDraft(draft, props.settings, t);
+
+    if (!parsed.ok) {
+      setLocalError(parsed.error);
+      return;
+    }
+
+    await props.onSaveSettings(parsed.input);
+  }
+
+  return (
+    <form
+      className={styles.settingsWorkspace}
+      onSubmit={(event) => void handleSubmit(event)}
+      aria-labelledby="settings-title"
+    >
+      <div className={styles.settingsHeader}>
+        <div>
+          <p className={styles.kicker}>{t.navigation.items.settings}</p>
+          <h2 id="settings-title">{t.settings.pageTitle}</h2>
+        </div>
+        <button className={styles.primaryButton} disabled={props.isSaving} type="submit">
+          {props.isSaving ? t.settings.actions.saving : t.settings.actions.save}
+        </button>
+      </div>
+
+      <div className={styles.settingsContent}>
+        {props.isLoading ? <p className={styles.settingsNotice}>{t.settings.loading}</p> : null}
+        {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
+        {localError ? <p className={styles.errorText}>{localError}</p> : null}
+
+        <section className={styles.settingsSection} aria-labelledby="settings-language-title">
+          <div>
+            <h3 id="settings-language-title">{t.settings.sections.language.title}</h3>
+            <p>{t.settings.sections.language.body}</p>
+          </div>
+          <label className={styles.settingsField} htmlFor="settings-locale">
+            <span>{t.settings.sections.language.localeLabel}</span>
+            <select
+              id="settings-locale"
+              onChange={(event) =>
+                applyDraft({
+                  ...draft,
+                  locale: event.target.value === "en-US" ? "en-US" : "zh-CN"
+                })
+              }
+              value={draft.locale}
+            >
+              <option value="zh-CN">{t.settings.sections.language.zhCN}</option>
+              <option value="en-US">{t.settings.sections.language.enUS}</option>
+            </select>
+          </label>
+        </section>
+
+        <section className={styles.settingsSection} aria-labelledby="settings-reader-title">
+          <div>
+            <h3 id="settings-reader-title">{t.settings.sections.reader.title}</h3>
+            <p>{t.settings.sections.reader.body}</p>
+          </div>
+          <div className={styles.settingsGrid}>
+            <NumberSettingField
+              id="settings-font-size"
+              label={t.settings.sections.reader.fontSize}
+              max={24}
+              min={16}
+              onChange={(value) => applyDraft({ ...draft, fontSize: value })}
+              step={1}
+              unit={t.settings.units.px}
+              value={draft.fontSize}
+            />
+            <NumberSettingField
+              id="settings-line-height"
+              label={t.settings.sections.reader.lineHeight}
+              max={2.1}
+              min={1.45}
+              onChange={(value) => applyDraft({ ...draft, lineHeight: value })}
+              step={0.05}
+              value={draft.lineHeight}
+            />
+            <NumberSettingField
+              id="settings-paragraph-gap"
+              label={t.settings.sections.reader.paragraphGap}
+              max={1.6}
+              min={0.6}
+              onChange={(value) => applyDraft({ ...draft, paragraphGap: value })}
+              step={0.1}
+              value={draft.paragraphGap}
+            />
+            <NumberSettingField
+              id="settings-reader-width"
+              label={t.settings.sections.reader.readerWidth}
+              max={860}
+              min={560}
+              onChange={(value) => applyDraft({ ...draft, readerWidth: value })}
+              step={40}
+              unit={t.settings.units.px}
+              value={draft.readerWidth}
+            />
+          </div>
+        </section>
+
+        <section className={styles.settingsSection} aria-labelledby="settings-retention-title">
+          <div>
+            <h3 id="settings-retention-title">{t.settings.sections.retention.title}</h3>
+            <p>{t.settings.sections.retention.body}</p>
+          </div>
+          <NumberSettingField
+            id="settings-retention-days"
+            label={t.settings.sections.retention.retentionDays}
+            max={3650}
+            min={1}
+            onChange={(value) => applyDraft({ ...draft, retentionDays: value })}
+            step={1}
+            unit={t.settings.units.days}
+            value={draft.retentionDays}
+          />
+          <div className={styles.settingsInlineStatus}>
+            <span>{t.settings.sections.retention.keepFavorites}</span>
+            <strong>
+              {props.settings.retention.keepFavorites
+                ? t.settings.sections.retention.enabled
+                : t.settings.sections.retention.disabled}
+            </strong>
+          </div>
+          <div className={styles.settingsInlineStatus}>
+            <span>{t.settings.sections.retention.keepReadLater}</span>
+            <strong>
+              {props.settings.retention.keepReadLater
+                ? t.settings.sections.retention.enabled
+                : t.settings.sections.retention.disabled}
+            </strong>
+          </div>
+          <p className={styles.managementHint}>{t.settings.sections.retention.mappingHint}</p>
+        </section>
+
+        <section className={styles.settingsSection} aria-labelledby="settings-provider-title">
+          <div>
+            <h3 id="settings-provider-title">{t.settings.sections.provider.title}</h3>
+            <p>{t.settings.sections.provider.body}</p>
+          </div>
+          <div className={styles.setupStatusBox}>
+            <strong>{t.settings.sections.provider.disabled}</strong>
+          </div>
+        </section>
+      </div>
+    </form>
+  );
+}
+
+function NumberSettingField(props: {
+  id: string;
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: string) => void;
+  step: number;
+  unit?: string;
+  value: string;
+}) {
+  return (
+    <label className={styles.settingsField} htmlFor={props.id}>
+      <span>{props.label}</span>
+      <div className={styles.settingsNumberRow}>
+        <input
+          id={props.id}
+          max={props.max}
+          min={props.min}
+          onChange={(event) => props.onChange(event.target.value)}
+          step={props.step}
+          type="number"
+          value={props.value}
+        />
+        {props.unit ? <small>{props.unit}</small> : null}
+      </div>
+    </label>
   );
 }
 
@@ -1504,6 +1815,7 @@ function ArticleDetailPanel(props: {
   isExplanationLoading: boolean;
   onArticleAction: (article: ArticleDetail, intent: ArticleActionIntent) => void;
   pendingAction: ArticleActionIntent | null;
+  readerSettings: ReaderSettings;
 }) {
   const { t, formatDate } = useI18n();
   const safeHtml = useMemo(
@@ -1512,7 +1824,11 @@ function ArticleDetailPanel(props: {
   );
 
   return (
-    <section className={styles.readerPanel} aria-labelledby="reader-title">
+    <section
+      className={styles.readerPanel}
+      style={readerStyleFor(props.readerSettings)}
+      aria-labelledby="reader-title"
+    >
       {props.isDetailLoading ? <ReaderSkeleton /> : null}
 
       {!props.isDetailLoading && props.detailError ? (
@@ -1524,7 +1840,7 @@ function ArticleDetailPanel(props: {
       ) : null}
 
       {!props.isDetailLoading && !props.detailError && props.article ? (
-        <article className={styles.reader} data-reader-theme="paper">
+        <article className={styles.reader} data-reader-theme={props.readerSettings.theme}>
           <header className={styles.readerHeader}>
             <a href={props.article.url} rel="noreferrer" target="_blank">
               {t.reader.originalLink}
@@ -1748,6 +2064,126 @@ function ReaderSkeleton() {
   );
 }
 
+function draftForSettings(settings: AppSettings): SettingsDraft {
+  return {
+    locale: settings.ui.locale,
+    fontSize: String(settings.reader.fontSize),
+    lineHeight: String(settings.reader.lineHeight),
+    paragraphGap: String(settings.reader.paragraphGap),
+    readerWidth: String(settings.reader.readerWidth),
+    retentionDays: String(settings.retention.retentionDays)
+  };
+}
+
+function parseSettingsDraft(
+  draft: SettingsDraft,
+  current: AppSettings,
+  t: Dictionary
+):
+  | { ok: true; input: UpdateSettingsInput; settings: AppSettings }
+  | { ok: false; error: string } {
+  const fontSize = parseNumberDraft(draft.fontSize, 16, 24, true);
+  if (fontSize === null) {
+    return { ok: false, error: t.settings.errors.fontSize };
+  }
+
+  const lineHeight = parseNumberDraft(draft.lineHeight, 1.45, 2.1);
+  if (lineHeight === null) {
+    return { ok: false, error: t.settings.errors.lineHeight };
+  }
+
+  const paragraphGap = parseNumberDraft(draft.paragraphGap, 0.6, 1.6);
+  if (paragraphGap === null) {
+    return { ok: false, error: t.settings.errors.paragraphGap };
+  }
+
+  const readerWidth = parseNumberDraft(draft.readerWidth, 560, 860, true);
+  if (readerWidth === null) {
+    return { ok: false, error: t.settings.errors.readerWidth };
+  }
+
+  const retentionDays = parseNumberDraft(draft.retentionDays, 1, 3650, true);
+  if (retentionDays === null) {
+    return { ok: false, error: t.settings.errors.retentionDays };
+  }
+
+  const settings: AppSettings = {
+    ...current,
+    ui: {
+      locale: draft.locale
+    },
+    reader: {
+      ...current.reader,
+      fontSize,
+      lineHeight,
+      paragraphGap,
+      readerWidth
+    },
+    retention: {
+      ...current.retention,
+      retentionDays
+    }
+  };
+
+  return {
+    ok: true,
+    settings,
+    input: {
+      ui: {
+        locale: draft.locale
+      },
+      reader: {
+        fontSize,
+        lineHeight,
+        paragraphGap,
+        readerWidth
+      },
+      retention: {
+        retentionDays
+      }
+    }
+  };
+}
+
+function parseNumberDraft(
+  value: string,
+  min: number,
+  max: number,
+  integer = false
+): number | null {
+  if (value.trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < min ||
+    parsed > max ||
+    (integer && !Number.isInteger(parsed))
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+type ReaderStyle = CSSProperties & {
+  "--reader-font-size": string;
+  "--reader-line-height": string;
+  "--reader-paragraph-gap": string;
+  "--reader-width": string;
+};
+
+export function readerStyleFor(settings: ReaderSettings): ReaderStyle {
+  return {
+    "--reader-font-size": `${settings.fontSize}px`,
+    "--reader-line-height": String(settings.lineHeight),
+    "--reader-paragraph-gap": `${settings.paragraphGap}em`,
+    "--reader-width": `${settings.readerWidth}px`
+  };
+}
+
 function articleQueryFor(source: SourceSelection): { feedId?: string; folderId?: string } {
   if (source.type === "feed") {
     return { feedId: source.feedId };
@@ -1814,6 +2250,10 @@ function pageForNavigationItem(item: NavigationItemKey): AppPage | null {
     return { type: "feed-management" };
   }
 
+  if (item === "settings") {
+    return { type: "settings" };
+  }
+
   return null;
 }
 
@@ -1822,7 +2262,11 @@ function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean
     return item === page.view;
   }
 
-  return item === "feeds";
+  if (page.type === "feed-management") {
+    return item === "feeds";
+  }
+
+  return item === "settings";
 }
 
 function noticeTextFor(notice: Notice, t: Dictionary): string {
@@ -1841,6 +2285,8 @@ function noticeTextFor(notice: Notice, t: Dictionary): string {
       );
     case "opmlExported":
       return t.notices.opmlExported;
+    case "settingsSaved":
+      return t.settings.notices.saved;
   }
 }
 

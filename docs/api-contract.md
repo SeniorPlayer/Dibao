@@ -863,6 +863,9 @@ cursor
 ```json
 {
   "data": {
+    "ui": {
+      "locale": "zh-CN"
+    },
     "reader": {
       "fontSize": 18,
       "lineHeight": 1.75,
@@ -888,13 +891,26 @@ cursor
 
 更新设置。
 
+请求是严格 partial merge：
+
+- 只更新请求中出现的字段。
+- 未出现字段保持原值；如果原值缺失或非法，使用默认值。
+- 任意未知字段、不可写字段、类型错误或越界值返回 `VALIDATION_ERROR`。
+- API 字段 `retention.retentionDays` 持久化到 storage key `retention.articleDays`。
+
 请求：
 
 ```json
 {
+  "ui": {
+    "locale": "en-US"
+  },
   "reader": {
     "fontSize": 19,
     "lineHeight": 1.8
+  },
+  "retention": {
+    "retentionDays": 90
   }
 }
 ```
@@ -904,7 +920,29 @@ cursor
 ```json
 {
   "data": {
-    "ok": true
+    "ok": true,
+    "settings": {
+      "ui": {
+        "locale": "en-US"
+      },
+      "reader": {
+        "fontSize": 19,
+        "lineHeight": 1.8,
+        "paragraphGap": 1.1,
+        "readerWidth": 720,
+        "theme": "paper"
+      },
+      "retention": {
+        "retentionDays": 90,
+        "keepFavorites": true,
+        "keepReadLater": true
+      },
+      "ranking": {
+        "preferFreshness": 0.5,
+        "preferSource": 0.5,
+        "preferDiversity": 0.5
+      }
+    }
   }
 }
 ```

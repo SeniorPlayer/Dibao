@@ -7,13 +7,16 @@ import {
   AuthGatePanel,
   FeedPanel,
   RankExplanationPanel,
+  SettingsWorkspace,
   SetupProviderPlaceholderPanel,
   SetupSourcesPanel,
   SetupWelcomePanel,
   correctSourceSelection,
+  readerStyleFor,
   stageForAuthSession,
   stageForSetupStatus
 } from "./App.js";
+import { defaultAppSettings } from "./api.js";
 import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import {
   DibaoI18nProvider,
@@ -301,6 +304,53 @@ describe("web i18n", () => {
     expect(html).not.toContain("Provider URL");
     expect(html).not.toContain("API Key");
     expect(html).not.toContain("Embedding");
+  });
+
+  it("renders settings page controls and provider placeholder without real provider fields", () => {
+    const html = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <SettingsWorkspace
+          error={null}
+          isLoading={false}
+          isSaving={false}
+          onPreviewSettings={() => undefined}
+          onSaveSettings={() => Promise.resolve()}
+          settings={defaultAppSettings}
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(html).toContain("设置");
+    expect(html).toContain("界面语言");
+    expect(html).toContain("字号");
+    expect(html).toContain("行高");
+    expect(html).toContain("段距");
+    expect(html).toContain("阅读宽度");
+    expect(html).toContain("保留天数");
+    expect(html).toContain("retention.retentionDays");
+    expect(html).toContain("智能能力");
+    expect(html).not.toContain("API Key");
+    expect(html).not.toContain("Base URL");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("Test connection");
+    expect(html).not.toContain("测试连接");
+  });
+
+  it("builds reader CSS variables from persisted reader settings", () => {
+    expect(
+      readerStyleFor({
+        fontSize: 20,
+        lineHeight: 1.8,
+        paragraphGap: 1.2,
+        readerWidth: 760,
+        theme: "paper"
+      })
+    ).toEqual({
+      "--reader-font-size": "20px",
+      "--reader-line-height": "1.8",
+      "--reader-paragraph-gap": "1.2em",
+      "--reader-width": "760px"
+    });
   });
 
   it("renders article action buttons from dictionary copy", () => {
