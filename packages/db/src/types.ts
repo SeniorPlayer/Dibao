@@ -90,6 +90,31 @@ export type ArticleStateSnapshot = {
   readingProgress: number;
 };
 
+export type ArticleActionType =
+  | "open"
+  | "mark_read"
+  | "mark_unread"
+  | "favorite"
+  | "unfavorite"
+  | "read_later"
+  | "remove_read_later"
+  | "hide"
+  | "not_interested"
+  | "read_progress";
+
+export type RecordArticleActionInput = {
+  articleId: string;
+  type: ArticleActionType;
+  progress?: number;
+  metadata?: Record<string, unknown>;
+  now?: number;
+  eventId?: string;
+};
+
+export type RecordArticleActionResult = {
+  state: ArticleStateSnapshot;
+};
+
 export type ArticleRankSnapshot = {
   score: number;
   calculatedAt: number;

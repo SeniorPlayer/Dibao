@@ -2,10 +2,13 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import Fastify, { type FastifyReply } from "fastify";
 import {
+  ARTICLE_ACTION_EVENT_WEIGHTS,
   getSqliteVecVersion,
   openDatabase,
+  SqliteArticleActionRepository,
   SqliteArticleRepository,
   SqliteFeedRepository,
+  type ArticleActionType,
   type ArticleDetailRow,
   type ArticleListInput,
   type ArticleListItemRow,
@@ -16,6 +19,10 @@ import {
   type FeedRow
 } from "@dibao/db";
 import { dibaoVersion, type ApiError } from "@dibao/shared";
+import {
+  ArticleActionService,
+  ArticleActionServiceError
+} from "./article-action-service.js";
 import {
   FeedIngestionError,
   FeedRefreshService,
@@ -59,6 +66,13 @@ type ArticleParams = {
   id: string;
 };
 
+type ArticleActionBody = {
+  type?: unknown;
+  value?: unknown;
+  progress?: unknown;
+  metadata?: unknown;
+};
+
 type CursorPayload = {
   offset: number;
 };
@@ -78,11 +92,16 @@ export function buildServer(options: BuildServerOptions = {}) {
   const closeDatabaseOnClose = options.closeDatabaseOnClose ?? !options.db;
   const feeds = new SqliteFeedRepository(db);
   const articles = new SqliteArticleRepository(db);
+  const articleActions = new SqliteArticleActionRepository(db);
   const feedRefreshService = new FeedRefreshService({
     db,
     feeds,
     articles,
     fetcher: options.feedFetcher,
+    now: options.now
+  });
+  const articleActionService = new ArticleActionService({
+    actions: articleActions,
     now: options.now
   });
 
@@ -187,6 +206,31 @@ export function buildServer(options: BuildServerOptions = {}) {
       data: mapArticleDetail(article)
     };
   });
+
+  app.post<{ Params: ArticleParams; Body: ArticleActionBody }>(
+    "/api/articles/:id/actions",
+    async (request, reply) => {
+      const parsed = parseArticleActionBody(request.body);
+      if (!parsed.ok) {
+        return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+      }
+
+      try {
+        const result = articleActionService.record({
+          articleId: request.params.id,
+          ...parsed.input
+        });
+
+        return {
+          data: {
+            state: result.state
+          }
+        };
+      } catch (error) {
+        return sendArticleActionError(reply, error);
+      }
+    }
+  );
 
   return app;
 }
@@ -329,6 +373,63 @@ function parseCreateFeedBody(body: CreateFeedBody | undefined):
   };
 }
 
+function parseArticleActionBody(body: ArticleActionBody | undefined):
+  | {
+      ok: true;
+      input: {
+        type: ArticleActionType;
+        progress?: number;
+        metadata?: Record<string, unknown>;
+      };
+    }
+  | { ok: false; message: string; details?: unknown } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, message: "request body must be an object" };
+  }
+
+  const type = normalizeArticleActionType(body.type, body.value);
+  if (!type) {
+    return {
+      ok: false,
+      message:
+        "type must be open, mark_read, mark_unread, favorite, unfavorite, read_later, remove_read_later, hide, not_interested, or read_progress"
+    };
+  }
+
+  const metadata = parseMetadata(body.metadata);
+  if (metadata === null) {
+    return { ok: false, message: "metadata must be an object" };
+  }
+
+  if (type === "read_progress") {
+    const progress = parseProgress(body.progress ?? body.value);
+    if (progress === null) {
+      return {
+        ok: false,
+        message: "progress or value must be a number between 0 and 1",
+        details: { fields: ["progress", "value"], min: 0, max: 1 }
+      };
+    }
+
+    return {
+      ok: true,
+      input: {
+        type,
+        progress,
+        ...(metadata !== undefined ? { metadata } : {})
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    input: {
+      type,
+      ...(metadata !== undefined ? { metadata } : {})
+    }
+  };
+}
+
 function parseArticleView(value: string | undefined): ArticleListView | undefined | null {
   if (value === undefined) {
     return undefined;
@@ -344,6 +445,53 @@ function parseArticleView(value: string | undefined): ArticleListView | undefine
   }
 
   return null;
+}
+
+function isArticleActionType(value: unknown): value is ArticleActionType {
+  return (
+    typeof value === "string" &&
+    Object.hasOwn(ARTICLE_ACTION_EVENT_WEIGHTS, value)
+  );
+}
+
+function normalizeArticleActionType(type: unknown, value: unknown): ArticleActionType | null {
+  if (!isArticleActionType(type)) {
+    return null;
+  }
+
+  if (value === false) {
+    if (type === "favorite") {
+      return "unfavorite";
+    }
+    if (type === "read_later") {
+      return "remove_read_later";
+    }
+    if (type === "mark_read") {
+      return "mark_unread";
+    }
+  }
+
+  return type;
+}
+
+function parseProgress(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    return null;
+  }
+
+  return value;
+}
+
+function parseMetadata(value: unknown): Record<string, unknown> | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function parseArticleStatus(value: string | undefined): ArticleReadStatus | undefined | null {
@@ -485,6 +633,14 @@ function sendApiError(
 
 function sendFeedIngestionError(reply: FastifyReply, error: unknown) {
   if (error instanceof FeedIngestionError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendArticleActionError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ArticleActionServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

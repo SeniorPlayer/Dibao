@@ -651,22 +651,29 @@ cursor
 
 ```text
 open
-read_progress
-read_complete
-favorite
-read_later
-hide
-not_interested
 mark_read
 mark_unread
+favorite
+unfavorite
+read_later
+remove_read_later
+hide
+not_interested
+read_progress
 ```
 
-`read_progress` 示例：
+说明：
+
+- `favorite`、`read_later`、`mark_read` 支持 `value: false`，服务端会分别规范化为 `unfavorite`、`remove_read_later`、`mark_unread`。
+- 也可以直接发送 `unfavorite`、`remove_read_later`、`mark_unread`。
+- `read_complete` 不作为 MVP 显式 API action；后续可由阅读进度或阅读时长派生。
+
+`read_progress` 示例，`progress` 与 `value` 都可用，推荐新代码使用 `progress`：
 
 ```json
 {
   "type": "read_progress",
-  "value": 0.72,
+  "progress": 0.72,
   "metadata": {
     "durationMs": 42000
   }
