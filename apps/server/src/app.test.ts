@@ -452,6 +452,273 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("creates, renames, and deletes feed folders without deleting feeds", async () => {
+    const db = createEmptyDatabase();
+    const feedRepository = new SqliteFeedRepository(db);
+    const app = buildServer({ db, logger: false, now: () => 7000 });
+
+    try {
+      const invalid = await postJson(app, "/api/feed-folders", {
+        title: "   "
+      });
+      expect(invalid.statusCode, invalid.body).toBe(400);
+      expect(invalid.json()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR"
+        }
+      });
+
+      const created = await postJson(app, "/api/feed-folders", {
+        title: "Design"
+      });
+      expect(created.statusCode, created.body).toBe(200);
+      expect(created.json()).toMatchObject({
+        data: {
+          id: expect.stringMatching(/^folder_/),
+          title: "Design",
+          sortOrder: 0
+        }
+      });
+
+      const folderId = created.json().data.id as string;
+      const renamed = await injectJson(app, "PATCH", `/api/feed-folders/${folderId}`, {
+        title: "Design Systems"
+      });
+      expect(renamed.statusCode, renamed.body).toBe(200);
+      expect(renamed.json()).toMatchObject({
+        data: {
+          id: folderId,
+          title: "Design Systems"
+        }
+      });
+
+      feedRepository.upsert({
+        id: "feed_folder_delete",
+        folderId,
+        title: "Folder Delete Feed",
+        feedUrl: "https://example.com/folder-delete.xml",
+        now: 7100
+      });
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/feed-folders/${folderId}`
+      });
+      expect(deleted.statusCode, deleted.body).toBe(200);
+      expect(deleted.json()).toEqual({
+        data: {
+          ok: true
+        }
+      });
+      expect(feedRepository.findById("feed_folder_delete")).toMatchObject({
+        folderId: null
+      });
+      const foldersAfterDelete = await app.inject({
+        method: "GET",
+        url: "/api/feed-folders"
+      });
+      expect(
+        foldersAfterDelete.json().data.map((folder: { id: string }) => folder.id)
+      ).not.toContain(folderId);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("returns not found for missing feed folders", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const update = await injectJson(app, "PATCH", "/api/feed-folders/missing", {
+        title: "Missing"
+      });
+      const remove = await app.inject({
+        method: "DELETE",
+        url: "/api/feed-folders/missing"
+      });
+
+      expect(update.statusCode, update.body).toBe(404);
+      expect(update.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+      expect(remove.statusCode, remove.body).toBe(404);
+      expect(remove.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("updates feed management fields and validates folder and source weight", async () => {
+    const db = createEmptyDatabase();
+    const folders = new SqliteFeedFolderRepository(db);
+    const feeds = new SqliteFeedRepository(db);
+    const folder = folders.upsert({
+      id: "folder_design",
+      title: "Design",
+      now: 1000
+    });
+    feeds.upsert({
+      id: "feed_manage",
+      title: "Original Feed",
+      feedUrl: "https://example.com/manage.xml",
+      now: 1000
+    });
+    const app = buildServer({ db, logger: false, now: () => 8000 });
+
+    try {
+      const updated = await injectJson(app, "PATCH", "/api/feeds/feed_manage", {
+        title: "Managed Feed",
+        folderId: folder.id,
+        enabled: false,
+        sourceWeight: 0.2
+      });
+      expect(updated.statusCode, updated.body).toBe(200);
+      expect(updated.json()).toMatchObject({
+        data: {
+          id: "feed_manage",
+          title: "Managed Feed",
+          folderId: "folder_design",
+          enabled: false,
+          sourceWeight: 0.2,
+          updatedAt: "1970-01-01T00:00:08.000Z"
+        }
+      });
+
+      const missingFolder = await injectJson(app, "PATCH", "/api/feeds/feed_manage", {
+        folderId: "folder_missing"
+      });
+      expect(missingFolder.statusCode, missingFolder.body).toBe(404);
+      expect(missingFolder.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+
+      const invalidWeight = await injectJson(app, "PATCH", "/api/feeds/feed_manage", {
+        sourceWeight: 1.5
+      });
+      expect(invalidWeight.statusCode, invalidWeight.body).toBe(400);
+      expect(invalidWeight.json()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          details: {
+            field: "sourceWeight",
+            min: -1,
+            max: 1
+          }
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("validates folderId when creating feeds", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const response = await postJson(app, "/api/feeds", {
+        feedUrl: "https://example.com/feed.xml",
+        folderId: "folder_missing"
+      });
+
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND",
+          message: "Folder not found"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("soft deletes feeds and removes their articles from API lists", async () => {
+    const db = createFixtureDatabase();
+    const app = buildServer({ db, logger: false, now: () => 9000 });
+
+    try {
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: "/api/feeds/feed_design"
+      });
+      expect(deleted.statusCode, deleted.body).toBe(200);
+      expect(deleted.json()).toEqual({
+        data: {
+          ok: true
+        }
+      });
+
+      const feeds = await app.inject({
+        method: "GET",
+        url: "/api/feeds"
+      });
+      expect(feeds.statusCode, feeds.body).toBe(200);
+      expect(feeds.json().data.map((feed: { id: string }) => feed.id)).not.toContain(
+        "feed_design"
+      );
+
+      const articles = await app.inject({
+        method: "GET",
+        url: "/api/articles?view=latest"
+      });
+      expect(articles.statusCode, articles.body).toBe(200);
+      expect(articles.json().data).toEqual([]);
+      expect(
+        db.prepare("select deleted_at as deletedAt from feeds where id = ?").get("feed_design")
+      ).toEqual({
+        deletedAt: 9000
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("returns not found for missing feed management targets", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const update = await injectJson(app, "PATCH", "/api/feeds/missing", {
+        title: "Missing"
+      });
+      const remove = await app.inject({
+        method: "DELETE",
+        url: "/api/feeds/missing"
+      });
+
+      expect(update.statusCode, update.body).toBe(404);
+      expect(update.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+      expect(remove.statusCode, remove.body).toBe(404);
+      expect(remove.json()).toMatchObject({
+        error: {
+          code: "NOT_FOUND"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("adds a feed and imports feed articles synchronously", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({
@@ -1744,8 +2011,17 @@ function sequenceFetcher(url: string, responses: string[]): FeedFetcher {
 }
 
 async function postJson(app: ReturnType<typeof buildServer>, url: string, payload: unknown) {
+  return injectJson(app, "POST", url, payload);
+}
+
+async function injectJson(
+  app: ReturnType<typeof buildServer>,
+  method: "PATCH" | "POST",
+  url: string,
+  payload: unknown
+) {
   return app.inject({
-    method: "POST",
+    method,
     url,
     headers: {
       "content-type": "application/json"

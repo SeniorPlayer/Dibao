@@ -36,6 +36,10 @@ import {
 } from "./auth-cookie.js";
 import { AuthService, AuthServiceError } from "./auth-service.js";
 import {
+  FeedManagementService,
+  FeedManagementServiceError
+} from "./feed-management-service.js";
+import {
   FeedIngestionError,
   FeedRefreshService,
   type FeedFetcher
@@ -68,6 +72,10 @@ type FeedQuery = {
 type CreateFeedBody = {
   feedUrl?: unknown;
   folderId?: unknown;
+};
+
+type FeedFolderParams = {
+  id: string;
 };
 
 type PasswordBody = {
@@ -139,6 +147,12 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   const articleActionService = new ArticleActionService({
     actions: articleActions,
+    ranking: rankingService,
+    now: options.now
+  });
+  const feedManagementService = new FeedManagementService({
+    feeds,
+    folders,
     ranking: rankingService,
     now: options.now
   });
@@ -278,6 +292,39 @@ export function buildServer(options: BuildServerOptions = {}) {
     data: folders.list().map(mapFeedFolder)
   }));
 
+  app.post<{ Body: unknown }>("/api/feed-folders", async (request, reply) => {
+    try {
+      return {
+        data: mapFeedFolder(feedManagementService.createFolder(request.body))
+      };
+    } catch (error) {
+      return sendFeedManagementError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: FeedFolderParams; Body: unknown }>(
+    "/api/feed-folders/:id",
+    async (request, reply) => {
+      try {
+        return {
+          data: mapFeedFolder(feedManagementService.updateFolder(request.params.id, request.body))
+        };
+      } catch (error) {
+        return sendFeedManagementError(reply, error);
+      }
+    }
+  );
+
+  app.delete<{ Params: FeedFolderParams }>("/api/feed-folders/:id", async (request, reply) => {
+    try {
+      return {
+        data: feedManagementService.deleteFolder(request.params.id)
+      };
+    } catch (error) {
+      return sendFeedManagementError(reply, error);
+    }
+  });
+
   app.get<{ Querystring: FeedQuery }>("/api/feeds", async (request, reply) => {
     const enabled = parseBooleanParam(request.query.enabled);
     if (enabled === null) {
@@ -304,6 +351,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
 
     try {
+      feedManagementService.validateFolderReference(parsed.input.folderId);
       const result = await feedRefreshService.addFeed(parsed.input);
 
       return {
@@ -313,7 +361,30 @@ export function buildServer(options: BuildServerOptions = {}) {
         }
       };
     } catch (error) {
+      if (error instanceof FeedManagementServiceError) {
+        return sendFeedManagementError(reply, error);
+      }
       return sendFeedIngestionError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: FeedParams; Body: unknown }>("/api/feeds/:id", async (request, reply) => {
+    try {
+      return {
+        data: mapFeed(feedManagementService.updateFeed(request.params.id, request.body))
+      };
+    } catch (error) {
+      return sendFeedManagementError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: FeedParams }>("/api/feeds/:id", async (request, reply) => {
+    try {
+      return {
+        data: feedManagementService.deleteFeed(request.params.id)
+      };
+    } catch (error) {
+      return sendFeedManagementError(reply, error);
     }
   });
 
@@ -593,19 +664,22 @@ function parseCreateFeedBody(body: CreateFeedBody | undefined):
     return { ok: false, message: "feedUrl is required" };
   }
 
-  if (
-    body.folderId !== undefined &&
-    body.folderId !== null &&
-    typeof body.folderId !== "string"
-  ) {
-    return { ok: false, message: "folderId must be a string or null" };
+  let folderId: string | null | undefined;
+  if (body.folderId !== undefined) {
+    if (body.folderId === null) {
+      folderId = null;
+    } else if (typeof body.folderId === "string" && body.folderId.trim() !== "") {
+      folderId = body.folderId.trim();
+    } else {
+      return { ok: false, message: "folderId must be a string or null" };
+    }
   }
 
   return {
     ok: true,
     input: {
       feedUrl: body.feedUrl,
-      ...(body.folderId !== undefined ? { folderId: body.folderId } : {})
+      ...(folderId !== undefined ? { folderId } : {})
     }
   };
 }
@@ -983,6 +1057,14 @@ function sendAuthError(reply: FastifyReply, error: unknown) {
 
 function sendArticleActionError(reply: FastifyReply, error: unknown) {
   if (error instanceof ArticleActionServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendFeedManagementError(reply: FastifyReply, error: unknown) {
+  if (error instanceof FeedManagementServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

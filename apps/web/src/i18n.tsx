@@ -100,6 +100,63 @@ export const zhCN = {
     title: "分组",
     feedCount: (count: number) => `${count} 个订阅源`
   },
+  feedManagement: {
+    pageTitle: "订阅源管理",
+    loading: "正在加载订阅源",
+    status: (feedCount: number, folderCount: number) =>
+      `${feedCount} 个订阅源 · ${folderCount} 个分组`,
+    na: "暂无",
+    folders: {
+      kicker: "Folders",
+      title: "分组",
+      newLabel: "新建分组",
+      newPlaceholder: "例如：科技",
+      create: "创建",
+      emptyTitle: "还没有分组",
+      emptyBody: "创建分组后，可以把订阅源整理到一起。",
+      renameLabel: (title: string) => `重命名 ${title}`,
+      confirmDelete: "确认删除",
+      deleteHint: "删除分组不会删除订阅源，订阅源会移动到未分组。"
+    },
+    feeds: {
+      kicker: "Feeds",
+      title: "订阅源",
+      emptyTitle: "还没有订阅源",
+      emptyBody: "可以在阅读器侧栏添加 RSS / Atom 源，或导入 OPML。",
+      ungrouped: "未分组",
+      enabled: "已启用",
+      disabled: "已禁用",
+      weight: (value: number) => `权重 ${value}`,
+      lastSuccess: (value: string) => `最近成功：${value}`,
+      confirmDelete: "确认删除",
+      deleteHint: "删除订阅源不会物理删除历史文章，但它们不会继续出现在文章列表中。"
+    },
+    editor: {
+      kicker: "Edit feed",
+      titleLabel: "标题",
+      feedUrlLabel: "Feed URL",
+      folderLabel: "分组",
+      enabledLabel: "启用订阅源",
+      sourceWeightLabel: "来源权重",
+      lastFetchedAt: "最近抓取",
+      lastSuccessAt: "最近成功",
+      lastError: "最近错误",
+      emptyTitle: "选择一个订阅源",
+      emptyBody: "选择后可以编辑标题、分组、启用状态和来源权重。"
+    },
+    actions: {
+      save: "保存",
+      saving: "保存中",
+      cancel: "取消",
+      rename: "重命名",
+      delete: "删除"
+    },
+    errors: {
+      folderTitleRequired: "请输入分组名称。",
+      feedTitleRequired: "请输入订阅源标题。",
+      sourceWeight: "来源权重必须是 -1 到 1 之间的数字。"
+    }
+  },
   opml: {
     import: "导入 OPML",
     importing: "导入中",
@@ -311,6 +368,63 @@ export const enUS = {
   folders: {
     title: "Folders",
     feedCount: (count: number) => `${count} ${count === 1 ? "feed" : "feeds"}`
+  },
+  feedManagement: {
+    pageTitle: "Feed Management",
+    loading: "Loading feeds",
+    status: (feedCount: number, folderCount: number) =>
+      `${feedCount} ${feedCount === 1 ? "feed" : "feeds"} · ${folderCount} ${folderCount === 1 ? "folder" : "folders"}`,
+    na: "None",
+    folders: {
+      kicker: "Folders",
+      title: "Folders",
+      newLabel: "New folder",
+      newPlaceholder: "For example: Tech",
+      create: "Create",
+      emptyTitle: "No folders yet",
+      emptyBody: "Create folders to organize feeds together.",
+      renameLabel: (title: string) => `Rename ${title}`,
+      confirmDelete: "Confirm delete",
+      deleteHint: "Deleting a folder does not delete feeds. Its feeds move to Ungrouped."
+    },
+    feeds: {
+      kicker: "Feeds",
+      title: "Feeds",
+      emptyTitle: "No feeds yet",
+      emptyBody: "Add an RSS / Atom feed in the reader sidebar, or import OPML.",
+      ungrouped: "Ungrouped",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      weight: (value: number) => `Weight ${value}`,
+      lastSuccess: (value: string) => `Last success: ${value}`,
+      confirmDelete: "Confirm delete",
+      deleteHint: "Deleting a feed does not physically delete historical articles, but they stop appearing in article lists."
+    },
+    editor: {
+      kicker: "Edit feed",
+      titleLabel: "Title",
+      feedUrlLabel: "Feed URL",
+      folderLabel: "Folder",
+      enabledLabel: "Enable feed",
+      sourceWeightLabel: "Source weight",
+      lastFetchedAt: "Last fetched",
+      lastSuccessAt: "Last success",
+      lastError: "Last error",
+      emptyTitle: "Select a feed",
+      emptyBody: "Select a feed to edit its title, folder, enabled state, and source weight."
+    },
+    actions: {
+      save: "Save",
+      saving: "Saving",
+      cancel: "Cancel",
+      rename: "Rename",
+      delete: "Delete"
+    },
+    errors: {
+      folderTitleRequired: "Enter a folder name.",
+      feedTitleRequired: "Enter a feed title.",
+      sourceWeight: "Source weight must be a number between -1 and 1."
+    }
   },
   opml: {
     import: "Import OPML",

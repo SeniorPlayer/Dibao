@@ -10,9 +10,11 @@ import {
   SetupProviderPlaceholderPanel,
   SetupSourcesPanel,
   SetupWelcomePanel,
+  correctSourceSelection,
   stageForAuthSession,
   stageForSetupStatus
 } from "./App.js";
+import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import {
   DibaoI18nProvider,
   createI18n,
@@ -80,6 +82,30 @@ describe("web i18n", () => {
         firstRefreshStatus: "idle"
       })
     ).toEqual({ type: "reader" });
+  });
+
+  it("corrects source selection when feeds or folders disappear", () => {
+    expect(
+      correctSourceSelection(
+        { type: "feed", feedId: "feed_missing" },
+        [{ id: "feed_design" }],
+        [{ id: "folder_design" }]
+      )
+    ).toEqual({ type: "all" });
+    expect(
+      correctSourceSelection(
+        { type: "folder", folderId: "folder_missing" },
+        [{ id: "feed_design" }],
+        [{ id: "folder_design" }]
+      )
+    ).toEqual({ type: "all" });
+    expect(
+      correctSourceSelection(
+        { type: "feed", feedId: "feed_design" },
+        [{ id: "feed_design" }],
+        [{ id: "folder_design" }]
+      )
+    ).toEqual({ type: "feed", feedId: "feed_design" });
   });
 
   it("renders setup and login auth gate copy from the dictionary", () => {
@@ -220,6 +246,58 @@ describe("web i18n", () => {
     expect(feedPanel).toContain("分组");
     expect(articlePanel).toContain("加载更多");
     expect(articlePanel).toContain("设计");
+  });
+
+  it("renders feed management fields without provider configuration copy", () => {
+    const html = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <FeedManagementWorkspace
+          feedFolders={[
+            {
+              id: "folder_design",
+              title: "设计",
+              sortOrder: 0
+            }
+          ]}
+          feeds={[
+            {
+              id: "feed_design",
+              folderId: "folder_design",
+              title: "Design Feed",
+              siteUrl: null,
+              feedUrl: "https://example.com/feed.xml",
+              description: null,
+              enabled: true,
+              sourceWeight: 0.2,
+              lastFetchedAt: "2026-05-14T08:00:00.000Z",
+              lastSuccessAt: "2026-05-14T08:10:00.000Z",
+              lastError: "403 Forbidden",
+              createdAt: "2026-05-14T08:00:00.000Z",
+              updatedAt: "2026-05-14T08:00:00.000Z"
+            }
+          ]}
+          isLoading={false}
+          onCreateFolder={() => Promise.resolve()}
+          onDeleteFeed={() => Promise.resolve()}
+          onDeleteFolder={() => Promise.resolve()}
+          onUpdateFeed={() => Promise.resolve()}
+          onUpdateFolder={() => Promise.resolve()}
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(html).toContain("新建分组");
+    expect(html).toContain("重命名");
+    expect(html).toContain("删除");
+    expect(html).toContain("Design Feed");
+    expect(html).toContain("https://example.com/feed.xml");
+    expect(html).toContain("启用订阅源");
+    expect(html).toContain("来源权重");
+    expect(html).toContain("最近错误");
+    expect(html).toContain("403 Forbidden");
+    expect(html).not.toContain("Provider URL");
+    expect(html).not.toContain("API Key");
+    expect(html).not.toContain("Embedding");
   });
 
   it("renders article action buttons from dictionary copy", () => {

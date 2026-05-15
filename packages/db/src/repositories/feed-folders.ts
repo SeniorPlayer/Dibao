@@ -1,4 +1,9 @@
-import type { DibaoDatabase, FeedFolderRow, UpsertFeedFolderInput } from "../types.js";
+import type {
+  DibaoDatabase,
+  FeedFolderRow,
+  UpdateFeedFolderInput,
+  UpsertFeedFolderInput
+} from "../types.js";
 
 type FeedFolderDbRow = {
   id: string;
@@ -12,6 +17,9 @@ export interface FeedFolderRepository {
   findById(id: string): FeedFolderRow | null;
   findByTitle(title: string): FeedFolderRow | null;
   list(): FeedFolderRow[];
+  nextSortOrder(): number;
+  softDelete(id: string, now: number): boolean;
+  update(input: UpdateFeedFolderInput): FeedFolderRow | null;
   upsert(input: UpsertFeedFolderInput): FeedFolderRow;
 }
 
@@ -48,6 +56,64 @@ export class SqliteFeedFolderRepository implements FeedFolderRepository {
         )
         .all() as FeedFolderDbRow[]
     ).map(mapFeedFolder);
+  }
+
+  nextSortOrder(): number {
+    const row = this.db
+      .prepare(
+        `
+          select coalesce(max(sort_order), -1) + 1 as sortOrder
+          from feed_folders
+          where deleted_at is null
+        `
+      )
+      .get() as { sortOrder: number };
+
+    return row.sortOrder;
+  }
+
+  softDelete(id: string, now: number): boolean {
+    const result = this.db
+      .prepare(
+        `
+          update feed_folders
+          set
+            deleted_at = ?,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(now, now, id);
+
+    return result.changes > 0;
+  }
+
+  update(input: UpdateFeedFolderInput): FeedFolderRow | null {
+    const existing = this.findById(input.id);
+    if (!existing) {
+      return null;
+    }
+
+    const now = input.now ?? Date.now();
+    this.db
+      .prepare(
+        `
+          update feed_folders
+          set
+            title = ?,
+            sort_order = ?,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(
+        input.title ?? existing.title,
+        input.sortOrder ?? existing.sortOrder,
+        now,
+        input.id
+      );
+
+    return this.findById(input.id);
   }
 
   upsert(input: UpsertFeedFolderInput): FeedFolderRow {

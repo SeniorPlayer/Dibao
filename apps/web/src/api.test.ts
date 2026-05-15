@@ -144,6 +144,127 @@ describe("web API client", () => {
     expect(calls).toEqual(["/api/setup/status"]);
   });
 
+  it("calls feed and folder management endpoints", async () => {
+    const calls: Array<{ path: string; method: string | undefined; body: unknown }> = [];
+    const api = createDibaoApi(async (input, init) => {
+      const path = String(input);
+      calls.push({
+        path,
+        method: init?.method,
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      });
+
+      const data = path.includes("/feed-folders")
+        ? {
+            id: "folder_design",
+            title: "Design",
+            sortOrder: 1
+          }
+        : path === "/api/feeds"
+          ? {
+              feed: {
+                id: "feed_design",
+                folderId: "folder_design",
+                title: "Design Feed",
+                siteUrl: null,
+                feedUrl: "https://example.com/feed.xml",
+                description: null,
+                enabled: true,
+                sourceWeight: 0,
+                lastFetchedAt: null,
+                lastSuccessAt: null,
+                lastError: null,
+                createdAt: "2026-05-14T08:00:00.000Z",
+                updatedAt: "2026-05-14T08:00:00.000Z"
+              },
+              refreshJobId: "job_1"
+            }
+          : path.includes("/feeds/")
+            ? init?.method === "DELETE"
+              ? { ok: true }
+              : {
+                  id: "feed_design",
+                  folderId: "folder_design",
+                  title: "Design Feed",
+                  siteUrl: null,
+                  feedUrl: "https://example.com/feed.xml",
+                  description: null,
+                  enabled: false,
+                  sourceWeight: 0.2,
+                  lastFetchedAt: null,
+                  lastSuccessAt: null,
+                  lastError: null,
+                  createdAt: "2026-05-14T08:00:00.000Z",
+                  updatedAt: "2026-05-14T08:00:00.000Z"
+                }
+            : { ok: true };
+
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    await api.createFeed("https://example.com/feed.xml", "folder_design");
+    await api.createFeedFolder("Design");
+    await api.updateFeedFolder("folder/design", { title: "Design Systems" });
+    await api.deleteFeedFolder("folder/design");
+    await api.updateFeed("feed/design", {
+      title: "Design Feed",
+      folderId: "folder_design",
+      enabled: false,
+      sourceWeight: 0.2
+    });
+    await api.deleteFeed("feed/design");
+
+    expect(calls).toEqual([
+      {
+        path: "/api/feeds",
+        method: "POST",
+        body: {
+          feedUrl: "https://example.com/feed.xml",
+          folderId: "folder_design"
+        }
+      },
+      {
+        path: "/api/feed-folders",
+        method: "POST",
+        body: {
+          title: "Design"
+        }
+      },
+      {
+        path: "/api/feed-folders/folder%2Fdesign",
+        method: "PATCH",
+        body: {
+          title: "Design Systems"
+        }
+      },
+      {
+        path: "/api/feed-folders/folder%2Fdesign",
+        method: "DELETE",
+        body: null
+      },
+      {
+        path: "/api/feeds/feed%2Fdesign",
+        method: "PATCH",
+        body: {
+          title: "Design Feed",
+          folderId: "folder_design",
+          enabled: false,
+          sourceWeight: 0.2
+        }
+      },
+      {
+        path: "/api/feeds/feed%2Fdesign",
+        method: "DELETE",
+        body: null
+      }
+    ]);
+  });
+
   it("lists articles with view, folder, and cursor query", async () => {
     const calls: string[] = [];
     const api = createDibaoApi(async (input) => {

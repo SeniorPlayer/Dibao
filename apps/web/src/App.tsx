@@ -15,9 +15,12 @@ import {
   type OpmlImportResponse,
   type RankExplanation,
   type RankExplanationReason,
-  type SetupStatus
+  type SetupStatus,
+  type UpdateFeedFolderInput,
+  type UpdateFeedInput
 } from "./api.js";
 import styles from "./design-system/AppShell/AppShell.module.css";
+import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import { useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
 
 const navigationItems: NavigationItemKey[] = [
@@ -36,12 +39,16 @@ type Notice =
   | { type: "opmlImported"; result: OpmlImportResponse }
   | { type: "opmlExported" };
 
-type SourceSelection =
+export type SourceSelection =
   | { type: "all" }
   | { type: "folder"; folderId: string }
   | { type: "feed"; feedId: string };
 
 type AuthMode = "setup" | "login";
+
+export type AppPage =
+  | { type: "reader"; view: ArticleView }
+  | { type: "feed-management" };
 
 export type AppStage =
   | { type: "auth-loading" }
@@ -80,6 +87,22 @@ export function stageForSetupStatus(status: SetupStatus): AppStage {
   return { type: status.hasFeeds ? "reader" : "setup-sources" };
 }
 
+export function correctSourceSelection(
+  source: SourceSelection,
+  feeds: Pick<Feed, "id">[],
+  folders: Pick<FeedFolder, "id">[]
+): SourceSelection {
+  if (source.type === "feed") {
+    return feeds.some((feed) => feed.id === source.feedId) ? source : { type: "all" };
+  }
+
+  if (source.type === "folder") {
+    return folders.some((folder) => folder.id === source.folderId) ? source : { type: "all" };
+  }
+
+  return source;
+}
+
 export function App() {
   const { t } = useI18n();
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
@@ -91,7 +114,7 @@ export function App() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [articles, setArticles] = useState<ArticleListItem[]>([]);
   const [sourceSelection, setSourceSelection] = useState<SourceSelection>({ type: "all" });
-  const [articleView, setArticleView] = useState<ArticleView>("latest");
+  const [appPage, setAppPage] = useState<AppPage>({ type: "reader", view: "latest" });
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
   const [rankExplanation, setRankExplanation] = useState<RankExplanation | null>(null);
@@ -135,6 +158,7 @@ export function App() {
         : null,
     [feedFolders, sourceSelection]
   );
+  const currentArticleView = appPage.type === "reader" ? appPage.view : "latest";
 
   function applyArticleState(articleId: string, state: ArticleState) {
     setArticles((current) =>
@@ -176,10 +200,10 @@ export function App() {
   }
 
   function handleArticleViewChange(view: ArticleView) {
-    if (articleView !== view) {
+    if (appPage.type !== "reader" || appPage.view !== view) {
       resetArticleListForPendingQuery();
     }
-    setArticleView(view);
+    setAppPage({ type: "reader", view });
   }
 
   const resetReaderState = useCallback(() => {
@@ -187,7 +211,7 @@ export function App() {
     setFeeds([]);
     setArticles([]);
     setSourceSelection({ type: "all" });
-    setArticleView("latest");
+    setAppPage({ type: "reader", view: "latest" });
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
@@ -379,15 +403,15 @@ export function App() {
     }
 
     void Promise.all([loadFeedFolders(), loadFeeds()]);
-  }, [appStage.type, loadFeedFolders, loadFeeds]);
+  }, [appPage.type, appStage.type, loadFeedFolders, loadFeeds]);
 
   useEffect(() => {
-    if (appStage.type !== "reader") {
+    if (appStage.type !== "reader" || appPage.type !== "reader") {
       return;
     }
 
-    void loadArticles(sourceSelection, articleView);
-  }, [articleView, appStage.type, loadArticles, sourceSelection]);
+    void loadArticles(sourceSelection, appPage.view);
+  }, [appPage, appStage.type, loadArticles, sourceSelection]);
 
   useEffect(() => {
     let cancelled = false;
@@ -590,7 +614,12 @@ export function App() {
     try {
       await dibaoApi.refreshFeed(feed.id);
       setNotice({ type: "feedRefreshed", feedTitle: feed.title });
-      await Promise.all([loadFeeds(), loadArticles(sourceSelection, articleView)]);
+      await Promise.all([
+        loadFeeds(),
+        appPage.type === "reader"
+          ? loadArticles(sourceSelection, appPage.view)
+          : Promise.resolve()
+      ]);
     } catch (error) {
       setFeedError(userMessageForError(error, t.errors.api));
     } finally {
@@ -618,7 +647,9 @@ export function App() {
       await Promise.all([
         loadFeedFolders(),
         loadFeeds(),
-        loadArticles(sourceSelection, articleView)
+        appPage.type === "reader"
+          ? loadArticles(sourceSelection, appPage.view)
+          : Promise.resolve()
       ]);
     } catch (error) {
       setFeedError(userMessageForError(error, t.errors.api));
@@ -643,6 +674,59 @@ export function App() {
     }
   }
 
+  async function refreshSourcesAfterManagementMutation() {
+    const [nextFolders, nextFeeds] = await Promise.all([
+      dibaoApi.listFeedFolders(),
+      dibaoApi.listFeeds()
+    ]);
+    const nextSourceSelection = correctSourceSelection(sourceSelection, nextFeeds, nextFolders);
+
+    setFeedFolders(nextFolders);
+    setFeeds(nextFeeds);
+
+    if (!sameSourceSelection(sourceSelection, nextSourceSelection)) {
+      resetArticleListForPendingQuery();
+    }
+    setSourceSelection(nextSourceSelection);
+
+    if (articleDetail && !nextFeeds.some((feed) => feed.id === articleDetail.feedId)) {
+      setSelectedArticleId(null);
+      setArticleDetail(null);
+      setRankExplanation(null);
+      setDetailError(null);
+      setExplanationError(null);
+    }
+
+    if (appPage.type === "reader") {
+      await loadArticles(nextSourceSelection, appPage.view);
+    }
+  }
+
+  async function handleCreateManagedFolder(title: string) {
+    await dibaoApi.createFeedFolder(title);
+    await refreshSourcesAfterManagementMutation();
+  }
+
+  async function handleUpdateManagedFolder(folderId: string, input: UpdateFeedFolderInput) {
+    await dibaoApi.updateFeedFolder(folderId, input);
+    await refreshSourcesAfterManagementMutation();
+  }
+
+  async function handleDeleteManagedFolder(folderId: string) {
+    await dibaoApi.deleteFeedFolder(folderId);
+    await refreshSourcesAfterManagementMutation();
+  }
+
+  async function handleUpdateManagedFeed(feedId: string, input: UpdateFeedInput) {
+    await dibaoApi.updateFeed(feedId, input);
+    await refreshSourcesAfterManagementMutation();
+  }
+
+  async function handleDeleteManagedFeed(feedId: string) {
+    await dibaoApi.deleteFeed(feedId);
+    await refreshSourcesAfterManagementMutation();
+  }
+
   async function handleLoadMoreArticles() {
     if (!nextArticleCursor) {
       return;
@@ -655,7 +739,7 @@ export function App() {
     try {
       const response = await dibaoApi.listArticles({
         ...articleQueryFor(sourceSelection),
-        view: articleView,
+        view: currentArticleView,
         limit: 50,
         cursor: nextArticleCursor
       });
@@ -697,16 +781,31 @@ export function App() {
   }
 
   function handleNavigationClick(event: MouseEvent<HTMLAnchorElement>, item: NavigationItemKey) {
-    const view = navigationViewFor(item);
-    if (!view) {
+    event.preventDefault();
+    const page = pageForNavigationItem(item);
+    if (!page) {
       return;
     }
 
-    event.preventDefault();
-    handleArticleViewChange(view);
+    if (page.type === "reader") {
+      handleArticleViewChange(page.view);
+    } else {
+      setAppPage(page);
+    }
   }
 
   const noticeText = notice ? noticeTextFor(notice, t) : null;
+  const pageTitle =
+    appPage.type === "feed-management"
+      ? t.feedManagement.pageTitle
+      : t.shell.pageTitles[currentArticleView];
+  const topbarStatus =
+    appPage.type === "feed-management"
+      ? isFeedsLoading
+        ? t.feedManagement.loading
+        : t.feedManagement.status(feeds.length, feedFolders.length)
+      : noticeText ??
+        (isArticlesLoading ? t.shell.loadingArticles : t.shell.viewStatus[currentArticleView]);
 
   if (appStage.type === "auth-loading" || appStage.type === "setup-status-loading") {
     return (
@@ -775,9 +874,7 @@ export function App() {
         <nav className={styles.nav}>
           {navigationItems.map((item) => (
             <a
-              className={
-                navigationViewFor(item) === articleView ? styles.navItemActive : styles.navItem
-              }
+              className={isNavigationItemActive(item, appPage) ? styles.navItemActive : styles.navItem}
               href="#"
               key={item}
               onClick={(event) => handleNavigationClick(event, item)}
@@ -792,12 +889,11 @@ export function App() {
         <header className={styles.topbar}>
           <div>
             <p className={styles.kicker}>{t.shell.kicker}</p>
-            <h1 id="page-title">{t.shell.pageTitles[articleView]}</h1>
+            <h1 id="page-title">{pageTitle}</h1>
           </div>
           <div className={styles.topbarMeta}>
             <span className={styles.statusText} aria-live="polite">
-              {noticeText ??
-                (isArticlesLoading ? t.shell.loadingArticles : t.shell.viewStatus[articleView])}
+              {topbarStatus}
             </span>
             {logoutError ? <span className={styles.logoutError}>{logoutError}</span> : null}
             <button
@@ -812,63 +908,76 @@ export function App() {
           </div>
         </header>
 
-        <div className={styles.workspace}>
-          <FeedPanel
-            feedError={feedError}
+        {appPage.type === "feed-management" ? (
+          <FeedManagementWorkspace
             feedFolders={feedFolders}
             feeds={feeds}
-            feedUrl={feedUrl}
-            isAddingFeed={isAddingFeed}
-            isFeedsLoading={isFeedsLoading}
-            isExportingOpml={isExportingOpml}
-            isImportingOpml={isImportingOpml}
-            onAddFeed={handleAddFeed}
-            onExportOpml={handleExportOpml}
-            onImportOpml={handleImportOpml}
-            onRefreshFeed={handleRefreshFeed}
-            onSelectSource={handleSelectSource}
-            onUpdateFeedUrl={setFeedUrl}
-            opmlSummary={opmlSummary}
-            refreshingFeedId={refreshingFeedId}
-            sourceSelection={sourceSelection}
+            isLoading={isFeedsLoading}
+            onCreateFolder={handleCreateManagedFolder}
+            onDeleteFeed={handleDeleteManagedFeed}
+            onDeleteFolder={handleDeleteManagedFolder}
+            onUpdateFeed={handleUpdateManagedFeed}
+            onUpdateFolder={handleUpdateManagedFolder}
           />
+        ) : (
+          <div className={styles.workspace}>
+            <FeedPanel
+              feedError={feedError}
+              feedFolders={feedFolders}
+              feeds={feeds}
+              feedUrl={feedUrl}
+              isAddingFeed={isAddingFeed}
+              isFeedsLoading={isFeedsLoading}
+              isExportingOpml={isExportingOpml}
+              isImportingOpml={isImportingOpml}
+              onAddFeed={handleAddFeed}
+              onExportOpml={handleExportOpml}
+              onImportOpml={handleImportOpml}
+              onRefreshFeed={handleRefreshFeed}
+              onSelectSource={handleSelectSource}
+              onUpdateFeedUrl={setFeedUrl}
+              opmlSummary={opmlSummary}
+              refreshingFeedId={refreshingFeedId}
+              sourceSelection={sourceSelection}
+            />
 
-          <ArticleListPanel
-            articleError={articleError}
-            articleView={articleView}
-            articles={articles}
-            feedCount={feeds.length}
-            isArticlesLoading={isArticlesLoading}
-            isLoadingMore={isLoadingMoreArticles}
-            loadMoreError={loadMoreError}
-            nextCursor={nextArticleCursor}
-            onLoadMore={handleLoadMoreArticles}
-            onSelectArticle={setSelectedArticleId}
-            selectedArticleId={selectedArticleId}
-            selectedFeed={selectedFeed}
-            selectedFolder={selectedFolder}
-          />
+            <ArticleListPanel
+              articleError={articleError}
+              articleView={currentArticleView}
+              articles={articles}
+              feedCount={feeds.length}
+              isArticlesLoading={isArticlesLoading}
+              isLoadingMore={isLoadingMoreArticles}
+              loadMoreError={loadMoreError}
+              nextCursor={nextArticleCursor}
+              onLoadMore={handleLoadMoreArticles}
+              onSelectArticle={setSelectedArticleId}
+              selectedArticleId={selectedArticleId}
+              selectedFeed={selectedFeed}
+              selectedFolder={selectedFolder}
+            />
 
-          <ArticleDetailPanel
-            actionError={articleActionError}
-            article={articleDetail}
-            detailError={detailError}
-            explanation={
-              articleDetail && rankExplanation?.articleId === articleDetail.id
-                ? rankExplanation
-                : null
-            }
-            explanationError={explanationError}
-            isDetailLoading={isDetailLoading}
-            isExplanationLoading={isExplanationLoading}
-            onArticleAction={handleArticleAction}
-            pendingAction={
-              articleDetail && pendingArticleAction?.articleId === articleDetail.id
-                ? pendingArticleAction.intent
-                : null
-            }
-          />
-        </div>
+            <ArticleDetailPanel
+              actionError={articleActionError}
+              article={articleDetail}
+              detailError={detailError}
+              explanation={
+                articleDetail && rankExplanation?.articleId === articleDetail.id
+                  ? rankExplanation
+                  : null
+              }
+              explanationError={explanationError}
+              isDetailLoading={isDetailLoading}
+              isExplanationLoading={isExplanationLoading}
+              onArticleAction={handleArticleAction}
+              pendingAction={
+                articleDetail && pendingArticleAction?.articleId === articleDetail.id
+                  ? pendingArticleAction.intent
+                  : null
+              }
+            />
+          </div>
+        )}
       </section>
     </main>
   );
@@ -1665,12 +1774,24 @@ function countFeedsByFolder(feeds: Feed[]): Map<string, number> {
   return counts;
 }
 
-function navigationViewFor(item: NavigationItemKey): ArticleView | null {
+function pageForNavigationItem(item: NavigationItemKey): AppPage | null {
   if (item === "latest" || item === "recommended") {
-    return item;
+    return { type: "reader", view: item };
+  }
+
+  if (item === "feeds") {
+    return { type: "feed-management" };
   }
 
   return null;
+}
+
+function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean {
+  if (page.type === "reader") {
+    return item === page.view;
+  }
+
+  return item === "feeds";
 }
 
 function noticeTextFor(notice: Notice, t: Dictionary): string {

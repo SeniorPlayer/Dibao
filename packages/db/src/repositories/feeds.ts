@@ -1,4 +1,10 @@
-import type { DibaoDatabase, FeedListInput, FeedRow, UpsertFeedInput } from "../types.js";
+import type {
+  DibaoDatabase,
+  FeedListInput,
+  FeedRow,
+  UpdateFeedInput,
+  UpsertFeedInput
+} from "../types.js";
 
 type FeedDbRow = {
   id: string;
@@ -17,17 +23,34 @@ type FeedDbRow = {
 };
 
 export interface FeedRepository {
+  clearFolder(folderId: string, now: number): void;
   findById(id: string): FeedRow | null;
   findByFeedUrl(feedUrl: string): FeedRow | null;
   list(input?: FeedListInput): FeedRow[];
   listActive(): FeedRow[];
   recordFetchFailure(id: string, error: string, fetchedAt: number): void;
   recordFetchSuccess(id: string, fetchedAt: number): void;
+  softDelete(id: string, now: number): boolean;
+  update(input: UpdateFeedInput): FeedRow | null;
   upsert(input: UpsertFeedInput): FeedRow;
 }
 
 export class SqliteFeedRepository implements FeedRepository {
   constructor(private readonly db: DibaoDatabase) {}
+
+  clearFolder(folderId: string, now: number): void {
+    this.db
+      .prepare(
+        `
+          update feeds
+          set
+            folder_id = null,
+            updated_at = ?
+          where folder_id = ? and deleted_at is null
+        `
+      )
+      .run(now, folderId);
+  }
 
   findById(id: string): FeedRow | null {
     const row = this.selectBase().get(id) as FeedDbRow | undefined;
@@ -105,6 +128,54 @@ export class SqliteFeedRepository implements FeedRepository {
         `
       )
       .run(fetchedAt, fetchedAt, fetchedAt, id);
+  }
+
+  softDelete(id: string, now: number): boolean {
+    const result = this.db
+      .prepare(
+        `
+          update feeds
+          set
+            deleted_at = ?,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(now, now, id);
+
+    return result.changes > 0;
+  }
+
+  update(input: UpdateFeedInput): FeedRow | null {
+    const existing = this.findById(input.id);
+    if (!existing) {
+      return null;
+    }
+
+    const now = input.now ?? Date.now();
+    this.db
+      .prepare(
+        `
+          update feeds
+          set
+            title = ?,
+            folder_id = ?,
+            enabled = ?,
+            source_weight = ?,
+            updated_at = ?
+          where id = ? and deleted_at is null
+        `
+      )
+      .run(
+        input.title ?? existing.title,
+        input.folderId === undefined ? existing.folderId : input.folderId,
+        input.enabled === undefined ? (existing.enabled ? 1 : 0) : input.enabled ? 1 : 0,
+        input.sourceWeight ?? existing.sourceWeight,
+        now,
+        input.id
+      );
+
+    return this.findById(input.id);
   }
 
   upsert(input: UpsertFeedInput): FeedRow {

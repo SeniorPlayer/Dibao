@@ -57,9 +57,25 @@ export type UpsertFeedInput = {
   now?: number;
 };
 
+export type UpdateFeedInput = {
+  id: string;
+  title?: string;
+  folderId?: string | null;
+  enabled?: boolean;
+  sourceWeight?: number;
+  now?: number;
+};
+
 export type UpsertFeedFolderInput = {
   id: string;
   title: string;
+  sortOrder?: number;
+  now?: number;
+};
+
+export type UpdateFeedFolderInput = {
+  id: string;
+  title?: string;
   sortOrder?: number;
   now?: number;
 };

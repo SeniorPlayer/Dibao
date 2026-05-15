@@ -24,6 +24,18 @@ export type FeedFolder = {
   sortOrder: number;
 };
 
+export type UpdateFeedInput = {
+  title?: string;
+  folderId?: string | null;
+  enabled?: boolean;
+  sourceWeight?: number;
+};
+
+export type UpdateFeedFolderInput = {
+  title?: string;
+  sortOrder?: number;
+};
+
 export type ArticleState = {
   read: boolean;
   favorited: boolean;
@@ -121,6 +133,10 @@ export type SetupStatus = {
 };
 
 export type AuthOkResponse = {
+  ok: true;
+};
+
+export type DeleteResponse = {
   ok: true;
 };
 
@@ -269,11 +285,31 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (await request<Feed[]>("/api/feeds")).data;
     },
 
-    async createFeed(feedUrl: string): Promise<CreateFeedResponse> {
+    async createFeed(feedUrl: string, folderId?: string | null): Promise<CreateFeedResponse> {
       return (
         await request<CreateFeedResponse>("/api/feeds", {
           method: "POST",
-          body: JSON.stringify({ feedUrl })
+          body: JSON.stringify({
+            feedUrl,
+            ...(folderId !== undefined ? { folderId } : {})
+          })
+        })
+      ).data;
+    },
+
+    async updateFeed(feedId: string, input: UpdateFeedInput): Promise<Feed> {
+      return (
+        await request<Feed>(`/api/feeds/${encodeURIComponent(feedId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(input)
+        })
+      ).data;
+    },
+
+    async deleteFeed(feedId: string): Promise<DeleteResponse> {
+      return (
+        await request<DeleteResponse>(`/api/feeds/${encodeURIComponent(feedId)}`, {
+          method: "DELETE"
         })
       ).data;
     },
@@ -282,6 +318,35 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (
         await request<RefreshFeedResponse>(`/api/feeds/${encodeURIComponent(feedId)}/refresh`, {
           method: "POST"
+        })
+      ).data;
+    },
+
+    async createFeedFolder(title: string): Promise<FeedFolder> {
+      return (
+        await request<FeedFolder>("/api/feed-folders", {
+          method: "POST",
+          body: JSON.stringify({ title })
+        })
+      ).data;
+    },
+
+    async updateFeedFolder(
+      folderId: string,
+      input: UpdateFeedFolderInput
+    ): Promise<FeedFolder> {
+      return (
+        await request<FeedFolder>(`/api/feed-folders/${encodeURIComponent(folderId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(input)
+        })
+      ).data;
+    },
+
+    async deleteFeedFolder(folderId: string): Promise<DeleteResponse> {
+      return (
+        await request<DeleteResponse>(`/api/feed-folders/${encodeURIComponent(folderId)}`, {
+          method: "DELETE"
         })
       ).data;
     },

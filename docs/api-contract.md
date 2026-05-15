@@ -402,6 +402,18 @@ failed
 }
 ```
 
+响应：
+
+```json
+{
+  "data": {
+    "id": "folder_01",
+    "title": "设计",
+    "sortOrder": 2
+  }
+}
+```
+
 ### DELETE /api/feed-folders/:id
 
 删除分组。
@@ -410,6 +422,16 @@ failed
 
 - 删除分组不会删除 feeds。
 - feeds 的 `folderId` 置为 `null`。
+
+响应：
+
+```json
+{
+  "data": {
+    "ok": true
+  }
+}
+```
 
 ### GET /api/feeds
 
@@ -459,6 +481,8 @@ enabled=true|false
 }
 ```
 
+`folderId` 可选。若传入非空值，目标 folder 必须存在，否则返回 `NOT_FOUND`。
+
 响应：
 
 ```json
@@ -485,6 +509,30 @@ enabled=true|false
 }
 ```
 
+`sourceWeight` 范围为 `-1..1`。
+
+响应：
+
+```json
+{
+  "data": {
+    "id": "feed_01",
+    "folderId": null,
+    "title": "Example",
+    "siteUrl": "https://example.com",
+    "feedUrl": "https://example.com/feed.xml",
+    "description": null,
+    "enabled": true,
+    "sourceWeight": 0.2,
+    "lastFetchedAt": null,
+    "lastSuccessAt": null,
+    "lastError": null,
+    "createdAt": "2026-05-14T12:00:00.000Z",
+    "updatedAt": "2026-05-14T12:05:00.000Z"
+  }
+}
+```
+
 ### DELETE /api/feeds/:id
 
 删除订阅源。
@@ -493,6 +541,16 @@ enabled=true|false
 
 - MVP 使用软删除。
 - 默认不立即物理删除历史文章。
+
+响应：
+
+```json
+{
+  "data": {
+    "ok": true
+  }
+}
+```
 
 ### POST /api/feeds/:id/refresh
 
