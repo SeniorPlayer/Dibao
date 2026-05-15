@@ -504,6 +504,13 @@ feed_stats_updated
 daily_decay_completed
 ```
 
+实现说明：
+
+- `behavior_events.event_weight` 是行为 API 的基础权重，不作为画像权重的唯一来源；Profile Service 按本文档的事件类型和 read progress 档位重新映射画像权重。
+- Profile 事件处理必须按 `eventId` 幂等。当前实现将 processed 标记写入 `article_behavior_summaries.topic_snapshot_json`，并按 `embeddingIndexId + contentHash` 分组。
+- 如果文章 `contentHash` 变化，MVP 不把旧事件重放到新向量；等待后续 full profile rebuild。
+- article action 请求路径只同步处理本次事件和 profile，不同步全量 ranking；推荐重算通过 `ranking_recalculate` job 完成。
+
 候选范围：
 
 ```text
@@ -548,6 +555,8 @@ API page size 50
   ]
 }
 ```
+
+MVP 当前实时生成解释，不写入 `article_rank_explanations`。`interest` reason 表示正向兴趣簇匹配；无 provider、embedding pending 或画像不足时返回 `fallback`。
 
 ## Ranking Settings 映射
 

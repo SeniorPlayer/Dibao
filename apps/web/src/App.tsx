@@ -2841,6 +2841,8 @@ function actionErrorMessageFor(intent: ArticleActionIntent, t: Dictionary) {
 
 function explanationReasonText(reason: RankExplanationReason, t: Dictionary): string {
   switch (reason.type) {
+    case "interest":
+      return t.explanation.reasons.interest;
     case "source":
       return reason.impact === "negative"
         ? t.explanation.reasons.sourceNegative(reason.label)

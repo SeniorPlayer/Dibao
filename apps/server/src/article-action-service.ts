@@ -3,7 +3,8 @@ import type {
   ArticleActionType,
   RecordArticleActionResult
 } from "@dibao/db";
-import type { ArticleRankingRecalculator } from "./ranking-service.js";
+import type { ProfileService } from "./profile-service.js";
+import type { RankingRecalculateJobService } from "./ranking-job-service.js";
 
 export class ArticleActionServiceError extends Error {
   constructor(
@@ -26,7 +27,8 @@ export type RecordArticleActionServiceInput = {
 
 export type ArticleActionServiceOptions = {
   actions: ArticleActionRepository;
-  ranking?: ArticleRankingRecalculator;
+  profile?: Pick<ProfileService, "processEvent">;
+  rankingJobs?: Pick<RankingRecalculateJobService, "enqueueAll" | "enqueueArticles">;
   now?: () => number;
 };
 
@@ -47,7 +49,12 @@ export class ArticleActionService {
       throw new ArticleActionServiceError(404, "NOT_FOUND", "Article not found");
     }
 
-    this.options.ranking?.recalculateArticle(input.articleId);
+    const profileResult = this.options.profile?.processEvent(result.eventId);
+    if (profileResult?.profileChanged || profileResult?.feedStatsChanged) {
+      this.options.rankingJobs?.enqueueAll();
+    } else {
+      this.options.rankingJobs?.enqueueArticles([input.articleId]);
+    }
 
     return result;
   }

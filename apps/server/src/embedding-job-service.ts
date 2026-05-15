@@ -10,6 +10,8 @@ import type {
 import { EmbeddingProviderError, type EmbeddingProviderAdapter } from "./embedding/types.js";
 import type { EmbeddingProviderService } from "./embedding-provider-service.js";
 import { PermanentJobFailure } from "./job-runner.js";
+import type { ProfileService } from "./profile-service.js";
+import type { RankingRecalculateJobService } from "./ranking-job-service.js";
 
 export const EMBEDDING_GENERATE_JOB_TYPE = "embedding_generate" as const;
 export const EMBEDDING_JOB_ARTICLE_LIMIT = 16;
@@ -27,6 +29,8 @@ export type EmbeddingJobServiceOptions = {
   jobs: JobRepository;
   providerService: Pick<EmbeddingProviderService, "activeProviderConfig">;
   adapter: EmbeddingProviderAdapter;
+  profile?: Pick<ProfileService, "processArticleEvents">;
+  rankingJobs?: Pick<RankingRecalculateJobService, "enqueueAll" | "enqueueArticles">;
   vectorStore: Pick<VectorStore, "upsertArticleVector">;
   now?: () => number;
   jobIdFactory?: () => string;
@@ -118,6 +122,7 @@ export class EmbeddingJobService {
       });
       const vectorByArticleId = new Map(vectors.map((vector) => [vector.id, vector.vector]));
       const now = this.now();
+      const writtenArticleIds: string[] = [];
 
       for (const candidate of candidates) {
         const vector = vectorByArticleId.get(candidate.articleId);
@@ -132,6 +137,14 @@ export class EmbeddingJobService {
           contentHash: candidate.contentHash,
           now
         });
+        writtenArticleIds.push(candidate.articleId);
+      }
+
+      const profileResult = this.options.profile?.processArticleEvents(writtenArticleIds);
+      if (profileResult?.profileChanged || profileResult?.feedStatsChanged) {
+        this.options.rankingJobs?.enqueueAll();
+      } else {
+        this.options.rankingJobs?.enqueueArticles(writtenArticleIds);
       }
     } catch (error) {
       if (error instanceof PermanentJobFailure) {

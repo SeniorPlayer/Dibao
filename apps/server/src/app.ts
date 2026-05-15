@@ -13,6 +13,7 @@ import {
   SqliteFeedFolderRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
+  SqliteProfileRepository,
   SqliteRankingRepository,
   SqliteSessionRepository,
   SqliteVecVectorStore,
@@ -65,7 +66,17 @@ import {
 } from "./feed-refresh-service.js";
 import { JobRunner } from "./job-runner.js";
 import { OpmlService, OpmlServiceError } from "./opml-service.js";
-import { BaselineRankingService } from "./ranking-service.js";
+import {
+  DEFAULT_PROFILE_DECAY_INTERVAL_MS,
+  ProfileDecayJobService,
+  ProfileDecayScheduler
+} from "./profile-decay-job-service.js";
+import { ProfileService } from "./profile-service.js";
+import {
+  RankingRecalculateJobService,
+  RANKING_RECALCULATE_JOB_TYPE
+} from "./ranking-job-service.js";
+import { RecommendationRankingService } from "./ranking-service.js";
 import {
   DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
   RetentionCleanupJobService,
@@ -161,6 +172,7 @@ type BuildServerOptions = {
   backgroundJobs?: boolean;
   feedRefreshIntervalMs?: number;
   retentionCleanupIntervalMs?: number;
+  profileDecayIntervalMs?: number;
   jobRunnerIntervalMs?: number;
   jobRetryDelayMs?: number;
   embeddingFetcher?: typeof fetch;
@@ -179,6 +191,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const embeddings = new SqliteEmbeddingRepository(db);
   const articleActions = new SqliteArticleActionRepository(db);
   const rankings = new SqliteRankingRepository(db);
+  const profiles = new SqliteProfileRepository(db);
   const vectorStore = new SqliteVecVectorStore(db);
   const embeddingAdapter = new OpenAiCompatibleEmbeddingAdapter({
     fetcher: options.embeddingFetcher
@@ -189,12 +202,30 @@ export function buildServer(options: BuildServerOptions = {}) {
     adapter: embeddingAdapter,
     now: options.now
   });
+  const profileService = new ProfileService({
+    embeddings,
+    profiles,
+    now: options.now
+  });
+  const rankingService = new RecommendationRankingService({
+    embeddings,
+    profiles,
+    rankings,
+    now: options.now
+  });
+  const rankingJobService = new RankingRecalculateJobService({
+    jobs,
+    ranking: rankingService,
+    now: options.now
+  });
   const embeddingJobService = new EmbeddingJobService({
     articles,
     embeddings,
     jobs,
     providerService: embeddingProviderService,
     adapter: embeddingAdapter,
+    profile: profileService,
+    rankingJobs: rankingJobService,
     vectorStore,
     now: options.now
   });
@@ -202,10 +233,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     embeddings,
     jobs,
     vectorStore,
-    now: options.now
-  });
-  const rankingService = new BaselineRankingService({
-    rankings,
     now: options.now
   });
   const feedRefreshService = new FeedRefreshService({
@@ -230,7 +257,8 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   const articleActionService = new ArticleActionService({
     actions: articleActions,
-    ranking: rankingService,
+    profile: profileService,
+    rankingJobs: rankingJobService,
     now: options.now
   });
   const feedManagementService = new FeedManagementService({
@@ -265,6 +293,13 @@ export function buildServer(options: BuildServerOptions = {}) {
     retention: articleRetentionService,
     now: options.now
   });
+  const profileDecayJobService = new ProfileDecayJobService({
+    jobs,
+    profile: profileService,
+    rankingJobs: rankingJobService,
+    settings,
+    now: options.now
+  });
   const cookieOptions = {
     secure: resolveCookieSecure(options.cookieSecure)
   };
@@ -279,6 +314,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     handlers: {
       feed_refresh: (job) => feedRefreshJobService.handleFeedRefreshJob(job),
       retention_cleanup: (job) => retentionCleanupJobService.handleRetentionCleanupJob(job),
+      profile_decay: (job) => profileDecayJobService.handleProfileDecayJob(job),
+      [RANKING_RECALCULATE_JOB_TYPE]: (job) =>
+        rankingJobService.handleRankingRecalculateJob(job),
       [EMBEDDING_GENERATE_JOB_TYPE]: (job) =>
         embeddingJobService.handleEmbeddingGenerateJob(job),
       [VECTOR_INDEX_REBUILD_JOB_TYPE]: (job) =>
@@ -299,6 +337,12 @@ export function buildServer(options: BuildServerOptions = {}) {
     cleanupJobs: retentionCleanupJobService,
     runner: jobRunner,
     intervalMs: options.retentionCleanupIntervalMs ?? DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
+    onError: (error) => app.log.error(error)
+  });
+  const profileDecayScheduler = new ProfileDecayScheduler({
+    decayJobs: profileDecayJobService,
+    runner: jobRunner,
+    intervalMs: options.profileDecayIntervalMs ?? DEFAULT_PROFILE_DECAY_INTERVAL_MS,
     onError: (error) => app.log.error(error)
   });
 
@@ -325,6 +369,15 @@ export function buildServer(options: BuildServerOptions = {}) {
       if (queued.length > 0) {
         drainBackgroundJobs();
       }
+    } catch (error) {
+      app.log.error(error);
+    }
+  }
+
+  function enqueueRankingAll(): void {
+    try {
+      rankingJobService.enqueueAll();
+      drainBackgroundJobs();
     } catch (error) {
       app.log.error(error);
     }
@@ -373,10 +426,12 @@ export function buildServer(options: BuildServerOptions = {}) {
       jobRunner.start();
       feedRefreshScheduler.start();
       retentionCleanupScheduler.start();
+      profileDecayScheduler.start();
     });
   }
 
   app.addHook("onClose", async () => {
+    profileDecayScheduler.stop();
     retentionCleanupScheduler.stop();
     feedRefreshScheduler.stop();
     jobRunner.stop();
@@ -477,6 +532,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       const provider = embeddingProviderService.createProvider(request.body);
       if (provider.enabled) {
         enqueueEmbeddingBackfill();
+        enqueueRankingAll();
       }
       return {
         data: {
@@ -495,6 +551,7 @@ export function buildServer(options: BuildServerOptions = {}) {
         const provider = embeddingProviderService.updateProvider(request.params.id, request.body);
         if (provider.enabled) {
           enqueueEmbeddingBackfill();
+          enqueueRankingAll();
         }
         return {
           data: provider
@@ -541,6 +598,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       try {
         embeddingProviderService.rebuildIndex(request.params.id);
         const job = vectorIndexRebuildJobService.enqueueRebuildIndex(request.params.id);
+        enqueueRankingAll();
         drainBackgroundJobs();
         return {
           data: {
@@ -714,7 +772,10 @@ export function buildServer(options: BuildServerOptions = {}) {
       return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
     }
 
-    const result = articles.list(parsed.input);
+    const result = articles.list({
+      ...parsed.input,
+      rankContext: rankingService.getActiveRankContext()
+    });
 
     return {
       data: result.items.map(mapArticleListItem),
@@ -725,7 +786,9 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get<{ Params: ArticleParams }>("/api/articles/:id", async (request, reply) => {
-    const article = articles.findDetailById(request.params.id);
+    const article = articles.findDetailById(request.params.id, {
+      rankContext: rankingService.getActiveRankContext()
+    });
 
     if (!article) {
       return sendApiError(reply, 404, "NOT_FOUND", "Article not found");

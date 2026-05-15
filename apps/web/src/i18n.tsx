@@ -312,6 +312,7 @@ export const zhCN = {
     empty: "当前没有明确的推荐信号。",
     generatedAt: (date: string) => `生成于 ${date}`,
     types: {
+      interest: "兴趣匹配",
       source: "来源",
       freshness: "新鲜度",
       state: "状态",
@@ -320,6 +321,7 @@ export const zhCN = {
       penalty: "过滤"
     },
     reasons: {
+      interest: "与你近期的正向兴趣相似，因此排序更靠前。",
       sourcePositive: (label: string) => `来源 ${label} 对排序有正向影响。`,
       sourceNegative: (label: string) => `来源 ${label} 当前权重偏低。`,
       freshness: "文章较新，获得新鲜度加分。",
@@ -693,6 +695,7 @@ export const enUS = {
     empty: "No clear recommendation signal yet.",
     generatedAt: (date: string) => `Generated ${date}`,
     types: {
+      interest: "Interest",
       source: "Source",
       freshness: "Freshness",
       state: "State",
@@ -701,6 +704,7 @@ export const enUS = {
       penalty: "Filter"
     },
     reasons: {
+      interest: "This is similar to recent positive interests, so it ranks higher.",
       sourcePositive: (label: string) => `Source ${label} is helping this rank higher.`,
       sourceNegative: (label: string) => `Source ${label} currently has a lower weight.`,
       freshness: "The article is recent and receives a freshness boost.",

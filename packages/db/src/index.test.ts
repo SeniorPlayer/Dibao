@@ -11,11 +11,13 @@ import {
   SqliteEmbeddingRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
+  SqliteProfileRepository,
   SqliteRankingRepository,
   SqliteSessionRepository,
   SqliteVecVectorStore,
   checksumSql,
   float32VectorToBuffer,
+  fromVectorBlob,
   getAppliedMigrations,
   getSqliteVecVersion,
   openDatabase,
@@ -617,6 +619,104 @@ describe("db package", () => {
       expect(articles.list({ view: "recommended" }).items[0]?.rank).toEqual({
         score: 0.75,
         calculatedAt: 3000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reads active ranking candidates, profile snapshots, and active rank fallback", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const feeds = new SqliteFeedRepository(db);
+      const articles = new SqliteArticleRepository(db);
+      const embeddings = new SqliteEmbeddingRepository(db);
+      const vectorStore = new SqliteVecVectorStore(db);
+      const rankings = new SqliteRankingRepository(db);
+      const profiles = new SqliteProfileRepository(db);
+
+      feeds.upsert({
+        id: "feed_profile",
+        title: "Profile Feed",
+        feedUrl: "https://example.com/profile.xml",
+        now: 1000
+      });
+      articles.upsert({
+        id: "article_profile",
+        feedId: "feed_profile",
+        url: "https://example.com/profile",
+        title: "Profile candidate",
+        publishedAt: 1000,
+        discoveredAt: 1000,
+        contentHash: "hash_profile",
+        dedupeKey: "profile",
+        now: 1000
+      });
+      embeddings.upsertProvider({
+        id: "provider_profile",
+        type: "openai_compatible",
+        name: "Provider",
+        model: "fixture",
+        dimension: 3,
+        enabled: true,
+        now: 1000
+      });
+      embeddings.createIndex({
+        id: "index_profile",
+        providerId: "provider_profile",
+        model: "fixture",
+        dimension: 3,
+        now: 1000
+      });
+      vectorStore.upsertArticleVector({
+        articleId: "article_profile",
+        embeddingIndexId: "index_profile",
+        vector: [1, 0, 0],
+        contentHash: "hash_profile",
+        now: 1000
+      });
+
+      const candidate = rankings.listCandidates({
+        embeddingIndexId: "index_profile",
+        articleIds: ["article_profile"]
+      })[0];
+      expect(candidate?.embeddingContentHash).toBe("hash_profile");
+      expect(candidate?.vectorBlob ? fromVectorBlob(candidate.vectorBlob) : null).toEqual([
+        1, 0, 0
+      ]);
+
+      profiles.upsertTopicSnapshot({
+        articleId: "article_profile",
+        feedId: "feed_profile",
+        topicSnapshotJson: JSON.stringify({
+          profileV0: {
+            index_profile: {
+              hash_profile: {
+                processedEventIds: ["event_1"]
+              }
+            }
+          }
+        }),
+        now: 2000
+      });
+      expect(profiles.getTopicSnapshot("article_profile")).toContain("event_1");
+
+      rankings.upsertBaseScore({
+        articleId: "article_profile",
+        score: 0.42,
+        interestScore: 0,
+        sourceScore: 0,
+        freshnessScore: 0.42,
+        stateScore: 0,
+        diversityScore: 0,
+        penaltyScore: 0,
+        calculatedAt: 2000
+      });
+      expect(
+        articles.list({ view: "recommended", rankContext: "index_profile" }).items[0]?.rank
+      ).toEqual({
+        score: 0.42,
+        calculatedAt: 2000
       });
     } finally {
       db.close();

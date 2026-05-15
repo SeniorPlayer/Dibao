@@ -50,7 +50,8 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
       this.applyStateChange(input);
 
       return {
-        state: this.getState(input.articleId)
+        state: this.getState(input.articleId),
+        eventId: input.eventId
       };
     });
   }

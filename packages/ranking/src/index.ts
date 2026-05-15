@@ -1,10 +1,18 @@
 export const profileAlgorithmDefaults = {
   maxPositiveClusters: 24,
   maxNegativeClusters: 16,
+  minClusterWeight: 0.8,
+  maxClusterWeight: 100,
   positiveMergeThreshold: 0.72,
   positiveCreateThreshold: 0.48,
   negativeMergeThreshold: 0.76,
   negativeCreateThreshold: 0.55,
+  negativePenaltyThreshold: 0.62,
+  dailyDecayRate: 0.985,
+  inactiveDecayRate: 0.96,
+  inactiveAfterDays: 21,
+  deleteWeightBelow: 0.5,
+  deleteSingleSampleInactiveDays: 30,
   freshnessHalfLifeHours: 36
 } as const;
 
@@ -57,6 +65,42 @@ export type BaselineRankScore = {
   calculatedAt: number;
 };
 
+export const recommendationRankingDefaults = {
+  interestScoreMax: 0.55,
+  sourceScoreMax: 0.18,
+  sourceWeightMaxScore: 0.08,
+  feedStatMaxScore: 0.08,
+  feedRateMaxScore: 0.02,
+  freshnessScoreMax: 0.18,
+  unreadScore: 0.06,
+  readLaterScore: 0.08,
+  favoriteScore: 0.04,
+  readPenalty: -0.08,
+  negativeInterestPenaltyMax: 0.45,
+  scoreMin: 0,
+  scoreMax: 1
+} as const;
+
+export type RecommendationRankInput = {
+  now: number;
+  publishedAt: number | null;
+  discoveredAt: number;
+  sourceWeight: number;
+  feedPositiveScore: number;
+  feedNegativeScore: number;
+  feedOpenRate: number;
+  feedFavoriteRate: number;
+  feedNotInterestedRate: number;
+  read: boolean;
+  favorited: boolean;
+  readLater: boolean;
+  hidden: boolean;
+  notInterested: boolean;
+  positiveInterestMatch: number;
+  negativeInterestMatch: number;
+  negativeSimilarity: number;
+};
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -88,6 +132,44 @@ export function calculateBaselineRankScore(input: BaselineRankInput): BaselineRa
   return {
     score: roundScore(
       clamp(score, baselineRankingDefaults.scoreMin, baselineRankingDefaults.scoreMax)
+    ),
+    interestScore: roundScore(interest),
+    sourceScore: roundScore(source),
+    freshnessScore: roundScore(freshness),
+    stateScore: roundScore(state),
+    diversityScore: 0,
+    penaltyScore: roundScore(penalty),
+    calculatedAt: input.now
+  };
+}
+
+export function calculateRecommendationRankScore(
+  input: RecommendationRankInput
+): BaselineRankScore {
+  const ageHours = Math.max(
+    0,
+    (input.now - (input.publishedAt ?? input.discoveredAt)) / 3_600_000
+  );
+  const freshness = freshnessScore(
+    ageHours,
+    recommendationRankingDefaults.freshnessScoreMax,
+    profileAlgorithmDefaults.freshnessHalfLifeHours
+  );
+  const source = calculateRecommendationSourceScore(input);
+  const state = calculateRecommendationStateScore(input);
+  const interest =
+    Math.max(0, input.positiveInterestMatch) *
+    recommendationRankingDefaults.interestScoreMax;
+  const penalty = calculateRecommendationPenaltyScore(input);
+  const score = freshness + source + state + interest + penalty;
+
+  return {
+    score: roundScore(
+      clamp(
+        score,
+        recommendationRankingDefaults.scoreMin,
+        recommendationRankingDefaults.scoreMax
+      )
     ),
     interestScore: roundScore(interest),
     sourceScore: roundScore(source),
@@ -136,6 +218,54 @@ function calculatePenaltyScore(input: BaselineRankInput): number {
   );
 }
 
+function calculateRecommendationSourceScore(input: RecommendationRankInput): number {
+  const explicitSourceWeight =
+    clamp(input.sourceWeight, -1, 1) * recommendationRankingDefaults.sourceWeightMaxScore;
+  const feedScore =
+    Math.tanh((input.feedPositiveScore - input.feedNegativeScore) / 20) *
+    recommendationRankingDefaults.feedStatMaxScore;
+  const feedRateScore =
+    clamp(input.feedFavoriteRate - input.feedNotInterestedRate, -1, 1) *
+      recommendationRankingDefaults.feedRateMaxScore +
+    clamp(input.feedOpenRate, 0, 1) * 0.01;
+
+  return clamp(
+    explicitSourceWeight + feedScore + feedRateScore,
+    -recommendationRankingDefaults.sourceScoreMax,
+    recommendationRankingDefaults.sourceScoreMax
+  );
+}
+
+function calculateRecommendationStateScore(input: RecommendationRankInput): number {
+  return (
+    (!input.read ? recommendationRankingDefaults.unreadScore : 0) +
+    (input.readLater ? recommendationRankingDefaults.readLaterScore : 0) +
+    (input.favorited ? recommendationRankingDefaults.favoriteScore : 0) +
+    (input.read ? recommendationRankingDefaults.readPenalty : 0)
+  );
+}
+
+function calculateRecommendationPenaltyScore(input: RecommendationRankInput): number {
+  const statePenalty =
+    (input.hidden ? baselineRankingDefaults.hiddenPenalty : 0) +
+    (input.notInterested ? baselineRankingDefaults.notInterestedPenalty : 0);
+  const negativeInterestPenalty =
+    input.negativeSimilarity >= profileAlgorithmDefaults.negativePenaltyThreshold
+      ? -Math.max(0, input.negativeInterestMatch) *
+        recommendationRankingDefaults.negativeInterestPenaltyMax
+      : 0;
+
+  return statePenalty + negativeInterestPenalty;
+}
+
 function roundScore(value: number): number {
   return Number(value.toFixed(6));
 }
+
+export {
+  assertSameDimension,
+  cosineSimilarity,
+  mergeCentroid,
+  normalizeVector,
+  VectorDimensionMismatchError
+} from "./vector.js";

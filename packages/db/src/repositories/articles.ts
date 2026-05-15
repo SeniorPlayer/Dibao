@@ -55,7 +55,7 @@ type ArticleDetailDbRow = ArticleReadDbRow & {
 export interface ArticleRepository {
   cleanupForRetention(articleIds: string[], now: number): ArticleRetentionCleanupResult;
   findById(id: string): ArticleRow | null;
-  findDetailById(id: string): ArticleDetailRow | null;
+  findDetailById(id: string, input?: { rankContext?: string }): ArticleDetailRow | null;
   listEmbeddingCandidates(input: {
     embeddingIndexId: string;
     articleIds?: string[];
@@ -138,7 +138,8 @@ export class SqliteArticleRepository implements ArticleRepository {
     return row ? mapArticle(row) : null;
   }
 
-  findDetailById(id: string): ArticleDetailRow | null {
+  findDetailById(id: string, input: { rankContext?: string } = {}): ArticleDetailRow | null {
+    const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
     const row = this.db
       .prepare(
         `
@@ -154,7 +155,7 @@ export class SqliteArticleRepository implements ArticleRepository {
             and a.status != 'deleted'
         `
       )
-      .get(BASE_RANK_CONTEXT, id) as ArticleDetailDbRow | undefined;
+      .get(rankContext, BASE_RANK_CONTEXT, id) as ArticleDetailDbRow | undefined;
 
     return row ? mapArticleDetail(row) : null;
   }
@@ -247,7 +248,8 @@ export class SqliteArticleRepository implements ArticleRepository {
       "s.hidden_at is null",
       "s.not_interested_at is null"
     ];
-    const params: unknown[] = [BASE_RANK_CONTEXT];
+    const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
+    const params: unknown[] = [rankContext, BASE_RANK_CONTEXT];
 
     if (input.feedId) {
       conditions.push("a.feed_id = ?");
@@ -482,8 +484,8 @@ function baseArticleReadSelect(): string {
       case when s.hidden_at is not null then 1 else 0 end as hidden,
       case when s.not_interested_at is not null then 1 else 0 end as notInterested,
       coalesce(s.reading_progress, 0) as readingProgress,
-      rs.score as rankScore,
-      rs.calculated_at as rankCalculatedAt
+      coalesce(rs.score, base_rs.score) as rankScore,
+      coalesce(rs.calculated_at, base_rs.calculated_at) as rankCalculatedAt
   `;
 }
 
@@ -495,6 +497,9 @@ function baseArticleReadFrom(): string {
     left join article_rank_scores rs
       on rs.article_id = a.id
       and rs.rank_context = ?
+    left join article_rank_scores base_rs
+      on base_rs.article_id = a.id
+      and base_rs.rank_context = ?
   `;
 }
 
@@ -502,8 +507,8 @@ function orderByForView(view: ArticleListInput["view"]): string {
   if (view === "recommended") {
     return `
       order by
-        case when rs.score is null then 1 else 0 end,
-        rs.score desc,
+        case when coalesce(rs.score, base_rs.score) is null then 1 else 0 end,
+        coalesce(rs.score, base_rs.score) desc,
         coalesce(a.published_at, a.discovered_at) desc,
         a.id desc
     `;

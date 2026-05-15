@@ -192,6 +192,7 @@ export type ArticleListInput = {
   status?: ArticleReadStatus;
   limit?: number;
   offset?: number;
+  rankContext?: string;
 };
 
 export type ArticleStateSnapshot = {
@@ -215,6 +216,8 @@ export type ArticleActionType =
   | "not_interested"
   | "read_progress";
 
+export type BehaviorEventType = ArticleActionType | "impression" | "read_complete" | "quick_bounce";
+
 export type RecordArticleActionInput = {
   articleId: string;
   type: ArticleActionType;
@@ -226,6 +229,7 @@ export type RecordArticleActionInput = {
 
 export type RecordArticleActionResult = {
   state: ArticleStateSnapshot;
+  eventId: string;
 };
 
 export type ArticleRankSnapshot = {
@@ -247,11 +251,14 @@ export type ArticleRankingCandidateRow = {
   state: ArticleStateSnapshot;
   behaviorEventWeightSum: number;
   behaviorEventCount: number;
+  vectorBlob: Buffer | null;
+  embeddingContentHash: string | null;
 };
 
 export type UpsertArticleRankScoreInput = {
   articleId: string;
   rankContext?: string;
+  embeddingIndexId?: string | null;
   score: number;
   interestScore: number;
   sourceScore: number;
@@ -280,6 +287,73 @@ export type ArticleRankExplanationSourceRow = {
   discoveredAt: number;
   state: ArticleStateSnapshot;
   rank: ArticleRankScoreComponentsRow | null;
+};
+
+export type InterestClusterPolarity = "positive" | "negative";
+
+export type InterestClusterRow = {
+  id: string;
+  embeddingIndexId: string;
+  polarity: InterestClusterPolarity;
+  label: string | null;
+  centroidVectorBlob: Buffer;
+  weight: number;
+  sampleCount: number;
+  lastMatchedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type UpsertInterestClusterInput = {
+  id: string;
+  embeddingIndexId: string;
+  polarity: InterestClusterPolarity;
+  label?: string | null;
+  centroidVectorBlob: Buffer;
+  weight: number;
+  sampleCount: number;
+  lastMatchedAt?: number | null;
+  now?: number;
+};
+
+export type UpdateInterestClusterInput = {
+  id: string;
+  centroidVectorBlob?: Buffer;
+  weight?: number;
+  sampleCount?: number;
+  lastMatchedAt?: number | null;
+  now?: number;
+};
+
+export type ProfileBehaviorEventRow = {
+  id: string;
+  articleId: string;
+  feedId: string;
+  eventType: BehaviorEventType;
+  metadataJson: string | null;
+  createdAt: number;
+  articleUpdatedAt: number;
+  readingProgress: number;
+  contentHash: string;
+  embeddingIndexId: string | null;
+  embeddingContentHash: string | null;
+  vectorBlob: Buffer | null;
+};
+
+export type FeedBehaviorEventRow = {
+  eventType: BehaviorEventType;
+  metadataJson: string | null;
+  readingProgress: number;
+};
+
+export type FeedStatsInput = {
+  feedId: string;
+  positiveScore: number;
+  negativeScore: number;
+  openRate: number;
+  favoriteRate: number;
+  notInterestedRate: number;
+  now?: number;
 };
 
 export type ArticleListItemRow = {

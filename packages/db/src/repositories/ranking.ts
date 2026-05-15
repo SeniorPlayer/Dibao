@@ -26,6 +26,8 @@ type ArticleRankingCandidateDbRow = {
   readingProgress: number;
   behaviorEventWeightSum: number;
   behaviorEventCount: number;
+  vectorBlob: Buffer | null;
+  embeddingContentHash: string | null;
 };
 
 type ArticleRankExplanationSourceDbRow = {
@@ -50,15 +52,28 @@ type ArticleRankExplanationSourceDbRow = {
 };
 
 export interface RankingRepository {
+  findExplanationSource(input: {
+    articleId: string;
+    rankContext?: string;
+  }): ArticleRankExplanationSourceRow | null;
   findBaseExplanationSource(articleId: string): ArticleRankExplanationSourceRow | null;
+  listCandidates(input?: {
+    articleIds?: string[];
+    embeddingIndexId?: string | null;
+  }): ArticleRankingCandidateRow[];
   listBaseCandidates(input?: { articleIds?: string[] }): ArticleRankingCandidateRow[];
+  upsertScore(input: UpsertArticleRankScoreInput): void;
   upsertBaseScore(input: UpsertArticleRankScoreInput): void;
 }
 
 export class SqliteRankingRepository implements RankingRepository {
   constructor(private readonly db: DibaoDatabase) {}
 
-  findBaseExplanationSource(articleId: string): ArticleRankExplanationSourceRow | null {
+  findExplanationSource(input: {
+    articleId: string;
+    rankContext?: string;
+  }): ArticleRankExplanationSourceRow | null {
+    const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
     const row = this.db
       .prepare(
         `
@@ -73,32 +88,43 @@ export class SqliteRankingRepository implements RankingRepository {
             case when s.hidden_at is not null then 1 else 0 end as hidden,
             case when s.not_interested_at is not null then 1 else 0 end as notInterested,
             coalesce(s.reading_progress, 0) as readingProgress,
-            rs.score,
-            rs.interest_score as interestScore,
-            rs.source_score as sourceScore,
-            rs.freshness_score as freshnessScore,
-            rs.state_score as stateScore,
-            rs.diversity_score as diversityScore,
-            rs.penalty_score as penaltyScore,
-            rs.calculated_at as calculatedAt
+            coalesce(rs.score, base_rs.score) as score,
+            coalesce(rs.interest_score, base_rs.interest_score) as interestScore,
+            coalesce(rs.source_score, base_rs.source_score) as sourceScore,
+            coalesce(rs.freshness_score, base_rs.freshness_score) as freshnessScore,
+            coalesce(rs.state_score, base_rs.state_score) as stateScore,
+            coalesce(rs.diversity_score, base_rs.diversity_score) as diversityScore,
+            coalesce(rs.penalty_score, base_rs.penalty_score) as penaltyScore,
+            coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt
           from articles a
           join feeds f on f.id = a.feed_id
           left join article_states s on s.article_id = a.id
           left join article_rank_scores rs
             on rs.article_id = a.id
             and rs.rank_context = ?
+          left join article_rank_scores base_rs
+            on base_rs.article_id = a.id
+            and base_rs.rank_context = ?
           where a.id = ?
             and a.deleted_at is null
             and a.status != 'deleted'
             and f.deleted_at is null
         `
       )
-      .get(BASE_RANK_CONTEXT, articleId) as ArticleRankExplanationSourceDbRow | undefined;
+      .get(rankContext, BASE_RANK_CONTEXT, input.articleId) as
+      | ArticleRankExplanationSourceDbRow
+      | undefined;
 
     return row ? mapExplanationSource(row) : null;
   }
 
-  listBaseCandidates(input: { articleIds?: string[] } = {}): ArticleRankingCandidateRow[] {
+  findBaseExplanationSource(articleId: string): ArticleRankExplanationSourceRow | null {
+    return this.findExplanationSource({ articleId, rankContext: BASE_RANK_CONTEXT });
+  }
+
+  listCandidates(
+    input: { articleIds?: string[]; embeddingIndexId?: string | null } = {}
+  ): ArticleRankingCandidateRow[] {
     const articleIds = input.articleIds;
     if (articleIds !== undefined && articleIds.length === 0) {
       return [];
@@ -106,6 +132,10 @@ export class SqliteRankingRepository implements RankingRepository {
 
     const articleFilter =
       articleIds === undefined ? "" : `and a.id in (${articleIds.map(() => "?").join(", ")})`;
+    const params: unknown[] = [input.embeddingIndexId ?? ""];
+    if (articleIds) {
+      params.push(...articleIds);
+    }
 
     return (
       this.db
@@ -137,12 +167,17 @@ export class SqliteRankingRepository implements RankingRepository {
               case when s.not_interested_at is not null then 1 else 0 end as notInterested,
               coalesce(s.reading_progress, 0) as readingProgress,
               coalesce(es.behaviorEventWeightSum, 0) as behaviorEventWeightSum,
-              coalesce(es.behaviorEventCount, 0) as behaviorEventCount
+              coalesce(es.behaviorEventCount, 0) as behaviorEventCount,
+              ae.vector_blob as vectorBlob,
+              ae.content_hash as embeddingContentHash
             from articles a
             join feeds f on f.id = a.feed_id
             left join article_states s on s.article_id = a.id
             left join feed_stats fs on fs.feed_id = a.feed_id
             left join event_stats es on es.article_id = a.id
+            left join article_embeddings ae
+              on ae.article_id = a.id
+             and ae.embedding_index_id = ?
             where a.deleted_at is null
               and a.status != 'deleted'
               and f.deleted_at is null
@@ -151,11 +186,15 @@ export class SqliteRankingRepository implements RankingRepository {
             order by a.id
           `
         )
-        .all(...(articleIds ?? [])) as ArticleRankingCandidateDbRow[]
+        .all(...params) as ArticleRankingCandidateDbRow[]
     ).map(mapCandidate);
   }
 
-  upsertBaseScore(input: UpsertArticleRankScoreInput): void {
+  listBaseCandidates(input: { articleIds?: string[] } = {}): ArticleRankingCandidateRow[] {
+    return this.listCandidates(input);
+  }
+
+  upsertScore(input: UpsertArticleRankScoreInput): void {
     this.db
       .prepare(
         `
@@ -172,9 +211,9 @@ export class SqliteRankingRepository implements RankingRepository {
             penalty_score,
             calculated_at
           )
-          values (?, ?, null, ?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(article_id, rank_context) do update set
-            embedding_index_id = null,
+            embedding_index_id = excluded.embedding_index_id,
             score = excluded.score,
             interest_score = excluded.interest_score,
             source_score = excluded.source_score,
@@ -188,6 +227,7 @@ export class SqliteRankingRepository implements RankingRepository {
       .run(
         input.articleId,
         input.rankContext ?? BASE_RANK_CONTEXT,
+        input.embeddingIndexId ?? null,
         input.score,
         input.interestScore,
         input.sourceScore,
@@ -197,6 +237,14 @@ export class SqliteRankingRepository implements RankingRepository {
         input.penaltyScore,
         input.calculatedAt
       );
+  }
+
+  upsertBaseScore(input: UpsertArticleRankScoreInput): void {
+    this.upsertScore({
+      ...input,
+      rankContext: input.rankContext ?? BASE_RANK_CONTEXT,
+      embeddingIndexId: null
+    });
   }
 }
 
@@ -262,6 +310,8 @@ function mapCandidate(row: ArticleRankingCandidateDbRow): ArticleRankingCandidat
       readingProgress: row.readingProgress
     },
     behaviorEventWeightSum: row.behaviorEventWeightSum,
-    behaviorEventCount: row.behaviorEventCount
+    behaviorEventCount: row.behaviorEventCount,
+    vectorBlob: row.vectorBlob,
+    embeddingContentHash: row.embeddingContentHash
   };
 }

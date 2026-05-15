@@ -9,6 +9,7 @@ import {
   SqliteEmbeddingRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
+  SqliteProfileRepository,
   SqliteRankingRepository,
   SqliteVecVectorStore,
   type DibaoDatabase,
@@ -32,6 +33,16 @@ import {
 } from "./feed-refresh-job-service.js";
 import { FeedRefreshService, type FeedFetcher } from "./feed-refresh-service.js";
 import { JobRunner } from "./job-runner.js";
+import {
+  ProfileDecayJobService,
+  PROFILE_DECAY_JOB_TYPE
+} from "./profile-decay-job-service.js";
+import { ProfileService } from "./profile-service.js";
+import {
+  RankingRecalculateJobService,
+  RANKING_RECALCULATE_JOB_TYPE
+} from "./ranking-job-service.js";
+import { RecommendationRankingService } from "./ranking-service.js";
 import {
   RetentionCleanupJobService,
   RetentionCleanupScheduler
@@ -627,6 +638,81 @@ describe("job runner foundation", () => {
       await expect(scheduler.tick()).resolves.toBe("job_retention_cleanup");
       expect(drained).toBe(true);
       expect(jobs.listOpenByType("retention_cleanup")).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails invalid ranking and profile decay payloads without retrying", async () => {
+    const db = createEmptyDatabase();
+    try {
+      const jobs = new SqliteJobRepository(db);
+      const settings = new SqliteAppSettingsRepository(db);
+      const embeddings = new SqliteEmbeddingRepository(db);
+      const profiles = new SqliteProfileRepository(db);
+      const rankings = new SqliteRankingRepository(db);
+      const ranking = new RecommendationRankingService({
+        embeddings,
+        profiles,
+        rankings,
+        now: () => 1000
+      });
+      const rankingJobs = new RankingRecalculateJobService({
+        jobs,
+        ranking,
+        now: () => 1000
+      });
+      const profile = new ProfileService({
+        embeddings,
+        profiles,
+        now: () => 1000
+      });
+      const profileDecayJobs = new ProfileDecayJobService({
+        jobs,
+        profile,
+        rankingJobs,
+        settings,
+        now: () => 1000
+      });
+
+      jobs.enqueue({
+        id: "job_invalid_rank",
+        type: RANKING_RECALCULATE_JOB_TYPE,
+        payloadJson: JSON.stringify({ articleIds: [] }),
+        maxAttempts: 3,
+        runAfter: 1000,
+        now: 1000
+      });
+      jobs.enqueue({
+        id: "job_invalid_profile_decay",
+        type: PROFILE_DECAY_JOB_TYPE,
+        payloadJson: JSON.stringify({ force: true }),
+        maxAttempts: 3,
+        runAfter: 1000,
+        now: 1000
+      });
+
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [RANKING_RECALCULATE_JOB_TYPE]: (job) =>
+            rankingJobs.handleRankingRecalculateJob(job),
+          [PROFILE_DECAY_JOB_TYPE]: (job) => profileDecayJobs.handleProfileDecayJob(job)
+        },
+        now: () => 1000
+      });
+
+      await expect(runner.drainDue()).resolves.toBe(2);
+      expect(jobs.findById("job_invalid_rank")).toMatchObject({
+        status: "failed",
+        attempts: 1,
+        error: "Invalid ranking_recalculate job payload"
+      });
+      expect(jobs.findById("job_invalid_profile_decay")).toMatchObject({
+        status: "failed",
+        attempts: 1,
+        error: "Invalid profile_decay job payload"
+      });
     } finally {
       db.close();
     }

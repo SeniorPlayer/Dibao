@@ -339,7 +339,7 @@ type RankExplanation = {
 `firstRefreshStatus`：
 
 - `hasEmbeddingProvider` 为真实状态：存在已启用 provider 且存在 active embedding index 时为 `true`。
-- 本轮不表示 embedding 已接入推荐排序；无 provider 或 provider 失败时继续使用 baseline ranking。
+- 有 active embedding index 时，`recommended` 可使用 Ranking v1；无 provider、无 embedding、无画像或 provider 失败时继续 fallback 到 baseline ranking。
 
 ```text
 idle
@@ -645,6 +645,12 @@ MVP 也接受 `application/xml` 请求体，便于本地自托管和自动化测
 
 获取文章列表。
 
+说明：
+
+- `latest` 始终按发布时间/发现时间排序。
+- `recommended` 在无 active embedding index 时使用 `rank_context = "base"`。
+- 存在 active embedding index 时使用 `rank_context = embeddingIndexId`，并在 active context 缺分数时 fallback 到 base rank，避免推荐列表为空。
+
 查询参数：
 
 ```text
@@ -801,6 +807,11 @@ read_progress
     "articleId": "article_01",
     "reasons": [
       {
+        "type": "interest",
+        "label": "Interest match",
+        "impact": "positive"
+      },
+      {
         "type": "source",
         "label": "The Verge",
         "impact": "positive"
@@ -825,7 +836,7 @@ read_progress
     "reasons": [
       {
         "type": "fallback",
-        "label": "Basic ranking has not been calculated yet",
+        "label": "Ranking has not been calculated yet",
         "impact": "neutral"
       }
     ],
@@ -833,6 +844,20 @@ read_progress
   }
 }
 ```
+
+`reason.type` 当前可选：
+
+```text
+interest
+source
+freshness
+state
+fallback
+negative
+penalty
+```
+
+前端 UI 应按 `type` 和 `impact` 本地化展示文案；`label` 只作为可读提示或来源名，不应作为最终 UI 文案。
 
 ## Search
 

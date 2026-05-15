@@ -1,5 +1,21 @@
-import { calculateBaselineRankScore } from "@dibao/ranking";
-import type { ArticleRankExplanationSourceRow, RankingRepository } from "@dibao/db";
+import {
+  calculateBaselineRankScore,
+  calculateRecommendationRankScore,
+  clamp,
+  cosineSimilarity,
+  profileAlgorithmDefaults
+} from "@dibao/ranking";
+import {
+  BASE_RANK_CONTEXT,
+  fromVectorBlob,
+  type ArticleRankExplanationSourceRow,
+  type ArticleRankingCandidateRow,
+  type EmbeddingRepository,
+  type InterestClusterPolarity,
+  type InterestClusterRow,
+  type ProfileRepository,
+  type RankingRepository
+} from "@dibao/db";
 
 export interface ArticleRankingRecalculator {
   recalculateArticle(articleId: string): number;
@@ -8,6 +24,7 @@ export interface ArticleRankingRecalculator {
 }
 
 export type RankExplanationReasonType =
+  | "interest"
   | "source"
   | "freshness"
   | "state"
@@ -27,16 +44,29 @@ export type RankExplanationResult = {
   generatedAt: number;
 };
 
-export type BaselineRankingServiceOptions = {
+export type RecommendationRankingServiceOptions = {
+  embeddings?: Pick<EmbeddingRepository, "findActiveProviderWithIndex">;
+  profiles?: Pick<ProfileRepository, "listClusters">;
   rankings: RankingRepository;
   now?: () => number;
 };
 
-export class BaselineRankingService implements ArticleRankingRecalculator {
+type ClusterVector = {
+  cluster: InterestClusterRow;
+  polarity: InterestClusterPolarity;
+  vector: number[];
+  weightNorm: number;
+};
+
+export class RecommendationRankingService implements ArticleRankingRecalculator {
   private readonly now: () => number;
 
-  constructor(private readonly options: BaselineRankingServiceOptions) {
+  constructor(private readonly options: RecommendationRankingServiceOptions) {
     this.now = options.now ?? Date.now;
+  }
+
+  getActiveRankContext(): string {
+    return this.activeEmbeddingIndexId() ?? BASE_RANK_CONTEXT;
   }
 
   recalculateArticle(articleId: string): number {
@@ -44,16 +74,21 @@ export class BaselineRankingService implements ArticleRankingRecalculator {
   }
 
   recalculateArticles(articleIds: string[]): number {
-    const candidates = this.options.rankings.listBaseCandidates({ articleIds });
-    return this.writeScores(candidates);
+    if (articleIds.length === 0) {
+      return 0;
+    }
+    return this.writeScores(uniqueStrings(articleIds));
   }
 
   recalculateAll(): number {
-    return this.writeScores(this.options.rankings.listBaseCandidates());
+    return this.writeScores();
   }
 
   explainArticle(articleId: string): RankExplanationResult | null {
-    const source = this.options.rankings.findBaseExplanationSource(articleId);
+    const source = this.options.rankings.findExplanationSource({
+      articleId,
+      rankContext: this.getActiveRankContext()
+    });
     if (!source) {
       return null;
     }
@@ -65,11 +100,17 @@ export class BaselineRankingService implements ArticleRankingRecalculator {
     };
   }
 
-  private writeScores(candidates: ReturnType<RankingRepository["listBaseCandidates"]>): number {
+  private writeScores(articleIds?: string[]): number {
+    const activeIndexId = this.activeEmbeddingIndexId();
+    const candidates = this.options.rankings.listCandidates({
+      articleIds,
+      embeddingIndexId: activeIndexId
+    });
     const now = this.now();
+    const clusters = activeIndexId ? this.clusterVectorsFor(activeIndexId) : [];
 
     for (const candidate of candidates) {
-      const score = calculateBaselineRankScore({
+      const baseScore = calculateBaselineRankScore({
         now,
         publishedAt: candidate.publishedAt,
         discoveredAt: candidate.discoveredAt,
@@ -91,16 +132,115 @@ export class BaselineRankingService implements ArticleRankingRecalculator {
 
       this.options.rankings.upsertBaseScore({
         articleId: candidate.articleId,
-        ...score
+        ...baseScore
       });
+
+      if (activeIndexId) {
+        const matches = interestMatchesFor(candidate, clusters);
+        const recommendationScore = calculateRecommendationRankScore({
+          now,
+          publishedAt: candidate.publishedAt,
+          discoveredAt: candidate.discoveredAt,
+          sourceWeight: candidate.sourceWeight,
+          feedPositiveScore: candidate.feedPositiveScore,
+          feedNegativeScore: candidate.feedNegativeScore,
+          feedOpenRate: candidate.feedOpenRate,
+          feedFavoriteRate: candidate.feedFavoriteRate,
+          feedNotInterestedRate: candidate.feedNotInterestedRate,
+          read: candidate.state.read,
+          favorited: candidate.state.favorited,
+          readLater: candidate.state.readLater,
+          hidden: candidate.state.hidden,
+          notInterested: candidate.state.notInterested,
+          positiveInterestMatch: matches.positiveInterestMatch,
+          negativeInterestMatch: matches.negativeInterestMatch,
+          negativeSimilarity: matches.negativeSimilarity
+        });
+
+        this.options.rankings.upsertScore({
+          articleId: candidate.articleId,
+          rankContext: activeIndexId,
+          embeddingIndexId: activeIndexId,
+          ...recommendationScore
+        });
+      }
     }
 
     return candidates.length;
+  }
+
+  private activeEmbeddingIndexId(): string | null {
+    return this.options.embeddings?.findActiveProviderWithIndex()?.index.id ?? null;
+  }
+
+  private clusterVectorsFor(embeddingIndexId: string): ClusterVector[] {
+    if (!this.options.profiles) {
+      return [];
+    }
+
+    return this.options.profiles.listClusters({ embeddingIndexId }).map((cluster) => ({
+      cluster,
+      polarity: cluster.polarity,
+      vector: fromVectorBlob(cluster.centroidVectorBlob),
+      weightNorm: clamp(
+        Math.log1p(cluster.weight) / Math.log1p(profileAlgorithmDefaults.maxClusterWeight),
+        0,
+        1
+      )
+    }));
+  }
+}
+
+export class BaselineRankingService extends RecommendationRankingService {
+  constructor(options: Omit<RecommendationRankingServiceOptions, "embeddings" | "profiles">) {
+    super(options);
   }
 }
 
 const MIN_REASON_SCORE = 0.001;
 const MAX_REASONS = 5;
+
+function interestMatchesFor(
+  candidate: ArticleRankingCandidateRow,
+  clusters: ClusterVector[]
+): {
+  positiveInterestMatch: number;
+  negativeInterestMatch: number;
+  negativeSimilarity: number;
+} {
+  if (!candidate.vectorBlob || clusters.length === 0) {
+    return {
+      positiveInterestMatch: 0,
+      negativeInterestMatch: 0,
+      negativeSimilarity: 0
+    };
+  }
+
+  const articleVector = fromVectorBlob(candidate.vectorBlob);
+  let positiveInterestMatch = 0;
+  let negativeInterestMatch = 0;
+  let negativeSimilarity = 0;
+
+  for (const cluster of clusters) {
+    const similarity = cosineSimilarity(articleVector, cluster.vector);
+    const weightedMatch = Math.max(0, similarity) * cluster.weightNorm;
+
+    if (cluster.polarity === "positive") {
+      positiveInterestMatch = Math.max(positiveInterestMatch, weightedMatch);
+    } else {
+      negativeInterestMatch = Math.max(negativeInterestMatch, weightedMatch);
+      if (weightedMatch === negativeInterestMatch) {
+        negativeSimilarity = Math.max(negativeSimilarity, similarity);
+      }
+    }
+  }
+
+  return {
+    positiveInterestMatch,
+    negativeInterestMatch,
+    negativeSimilarity
+  };
+}
 
 function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanationReason[] {
   const rank = source.rank;
@@ -108,13 +248,23 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
     return [
       {
         type: "fallback",
-        label: "Basic ranking has not been calculated yet",
+        label: "Ranking has not been calculated yet",
         impact: "neutral"
       }
     ];
   }
 
   const candidates: Array<RankExplanationReason & { magnitude: number; priority: number }> = [];
+
+  if (rank.interestScore > MIN_REASON_SCORE) {
+    candidates.push({
+      type: "interest",
+      label: "Interest match",
+      impact: "positive",
+      magnitude: rank.interestScore,
+      priority: 1
+    });
+  }
 
   if (rank.sourceScore > MIN_REASON_SCORE) {
     candidates.push({
@@ -144,14 +294,12 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
     });
   }
 
-  const positiveStateMagnitude =
-    Math.max(rank.stateScore, 0) + Math.max(rank.interestScore, 0);
-  if (positiveStateMagnitude > MIN_REASON_SCORE) {
+  if (rank.stateScore > MIN_REASON_SCORE) {
     candidates.push({
       type: "state",
-      label: positiveStateLabelFor(source, rank.stateScore, rank.interestScore),
+      label: positiveStateLabelFor(source),
       impact: "positive",
-      magnitude: positiveStateMagnitude,
+      magnitude: rank.stateScore,
       priority: 4
     });
   } else if (rank.stateScore < -MIN_REASON_SCORE) {
@@ -164,24 +312,14 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
     });
   }
 
-  if (rank.interestScore < -MIN_REASON_SCORE) {
-    candidates.push({
-      type: "negative",
-      label: "Recent behavior lowered the score",
-      impact: "negative",
-      magnitude: Math.abs(rank.interestScore),
-      priority: 1
-    });
-  }
-
   if (rank.penaltyScore < -MIN_REASON_SCORE) {
     candidates.push({
-      type: "penalty",
+      type: rank.penaltyScore <= -0.2 ? "negative" : "penalty",
       label: source.state.notInterested
         ? "Marked not interested"
         : source.state.hidden
           ? "Hidden article"
-          : "Negative state penalty",
+          : "Negative interest match",
       impact: "negative",
       magnitude: Math.abs(rank.penaltyScore),
       priority: 0
@@ -198,17 +336,13 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
     : [
         {
           type: "fallback",
-          label: "Basic ranking has no strong signal yet",
+          label: "Profile is still learning or embedding is pending",
           impact: "neutral"
         }
       ];
 }
 
-function positiveStateLabelFor(
-  source: ArticleRankExplanationSourceRow,
-  stateScore: number,
-  interestScore: number
-): string {
+function positiveStateLabelFor(source: ArticleRankExplanationSourceRow): string {
   const labels: string[] = [];
 
   if (source.state.favorited) {
@@ -220,12 +354,10 @@ function positiveStateLabelFor(
   if (source.state.readingProgress > 0) {
     labels.push("Reading progress");
   }
-  if (labels.length === 0 && stateScore > MIN_REASON_SCORE) {
-    labels.push("Article state");
-  }
-  if (interestScore > MIN_REASON_SCORE) {
-    labels.push("Recent behavior");
-  }
 
   return labels.length > 0 ? labels.join(", ") : "Article state increased the score";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }

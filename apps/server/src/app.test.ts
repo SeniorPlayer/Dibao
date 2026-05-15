@@ -5,14 +5,23 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   openDatabase,
   SqliteArticleRepository,
+  SqliteEmbeddingRepository,
   SqliteFeedFolderRepository,
   SqliteJobRepository,
   SqliteFeedRepository,
+  SqliteProfileRepository,
+  SqliteRankingRepository,
   type DibaoDatabase
 } from "@dibao/db";
 import { parseOpml } from "@dibao/rss";
 import { buildServer as buildRealServer } from "./app.js";
 import type { FeedFetcher } from "./feed-refresh-service.js";
+import { JobRunner } from "./job-runner.js";
+import {
+  RankingRecalculateJobService,
+  RANKING_RECALCULATE_JOB_TYPE
+} from "./ranking-job-service.js";
+import { RecommendationRankingService } from "./ranking-service.js";
 
 const tempDirs: string[] = [];
 
@@ -1807,12 +1816,12 @@ describe("server API vertical slice", () => {
           reasons: [
             {
               type: "state",
-              label: "Article state, Recent behavior",
+              label: "Article state increased the score",
               impact: "positive"
             },
             {
-              type: "penalty",
-              label: "Negative state penalty",
+              type: "negative",
+              label: "Negative interest match",
               impact: "negative"
             },
             {
@@ -1823,6 +1832,11 @@ describe("server API vertical slice", () => {
             {
               type: "source",
               label: "Design Notes",
+              impact: "positive"
+            },
+            {
+              type: "interest",
+              label: "Interest match",
               impact: "positive"
             }
           ]
@@ -1852,7 +1866,7 @@ describe("server API vertical slice", () => {
           reasons: [
             {
               type: "fallback",
-              label: "Basic ranking has not been calculated yet",
+              label: "Ranking has not been calculated yet",
               impact: "neutral"
             }
           ]
@@ -1883,6 +1897,8 @@ describe("server API vertical slice", () => {
       expect(progress.statusCode, progress.body).toBe(200);
       expect(readLater.statusCode, readLater.body).toBe(200);
       expect(favorite.statusCode, favorite.body).toBe(200);
+
+      await drainRankingJobs(db, 10_000);
 
       expect(getRankScore(db, "article_rank_favorite")).toBeGreaterThan(
         getRankScore(db, "article_rank_later")
@@ -1917,6 +1933,7 @@ describe("server API vertical slice", () => {
 
       expect(notInterested.statusCode, notInterested.body).toBe(200);
       expect(hide.statusCode, hide.body).toBe(200);
+      await drainRankingJobs(db, 10_000);
       expect(getRankScore(db, "article_rank_favorite")).toBeLessThan(
         getRankScore(db, "article_rank_progress")
       );
@@ -2532,6 +2549,33 @@ function getRankScore(db: DibaoDatabase, articleId: string): number {
   }
 
   return row.score;
+}
+
+async function drainRankingJobs(db: DibaoDatabase, now: number): Promise<void> {
+  const jobs = new SqliteJobRepository(db);
+  const embeddings = new SqliteEmbeddingRepository(db);
+  const profiles = new SqliteProfileRepository(db);
+  const rankings = new SqliteRankingRepository(db);
+  const ranking = new RecommendationRankingService({
+    embeddings,
+    profiles,
+    rankings,
+    now: () => now
+  });
+  const rankingJobs = new RankingRecalculateJobService({
+    jobs,
+    ranking,
+    now: () => now
+  });
+  const runner = new JobRunner({
+    jobs,
+    handlers: {
+      [RANKING_RECALCULATE_JOB_TYPE]: (job) => rankingJobs.handleRankingRecalculateJob(job)
+    },
+    now: () => now
+  });
+
+  await runner.drainDue();
 }
 
 function tempDatabasePath(): string {

@@ -87,6 +87,7 @@ export type ArticleActionResponse = {
 };
 
 export type RankExplanationReasonType =
+  | "interest"
   | "source"
   | "freshness"
   | "state"
