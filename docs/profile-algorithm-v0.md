@@ -67,7 +67,7 @@ unread preferred
 
 ```text
 impression: 0.05
-open: 0.8
+open: 0.0
 read_progress_25: 1.2
 read_progress_50: 2.0
 read_progress_75: 3.0
@@ -75,7 +75,7 @@ read_complete: 4.0
 favorite: 6.0
 read_later: 3.0
 mark_read: 1.0
-quick_bounce: -1.2
+quick_bounce: 0.0
 hide: -3.5
 not_interested: -6.0
 unfavorite: -1.5
@@ -86,6 +86,7 @@ mark_unread: -0.5
 说明：
 
 - `impression` 是极弱信号，只用于曝光统计，不单独创建负向兴趣。
+- `open` 是极弱 stats-only 信号，不创建兴趣簇，不成为强来源偏好。
 - `quick_bounce` 指打开后很快关闭且阅读进度很低。
 - `not_interested` 是强负反馈。
 - `favorite` 是最强正反馈。
@@ -131,7 +132,8 @@ stats_only:
 progress >= 0.25 -> read_progress_25
 progress >= 0.50 -> read_progress_50
 progress >= 0.75 -> read_progress_75
-progress >= 0.90 或用户停留足够长 -> read_complete
+progress >= 0.90 -> read_complete
+progress >= 0.75 且 activeDurationMs >= min(90s, estimated_read_time * 0.5) -> read_complete
 ```
 
 同一文章的 progress 事件按最高档计入画像，不重复叠加所有档位。
@@ -139,10 +141,16 @@ progress >= 0.90 或用户停留足够长 -> read_complete
 ### Long Read
 
 ```text
-duration >= min(90s, estimated_read_time * 0.5)
+activeDurationMs >= min(90s, estimated_read_time * 0.5)
 ```
 
-可视为中度正向阅读信号。
+可派生为 `read_complete`。后端从 `read_progress.metadata.activeDurationMs` 消费该字段；前端未采集时不影响普通 progress 档位。
+
+`estimated_read_time` 由后端按 `title + summary + content_text` 估算：
+
+```text
+estimated_read_time = clamp(reading_units / 500 per minute, 30s, 15min)
+```
 
 ### Quick Bounce
 
@@ -244,23 +252,37 @@ last_matched_at = now
 ```text
 daily_decay_rate: 0.985
 inactive_decay_rate: 0.96
+negative_daily_decay_rate: 0.99
+negative_inactive_decay_rate: 0.98
 inactive_after_days: 21
 ```
 
 公式：
 
 ```text
-if days_since_last_matched <= inactive_after_days:
-  weight *= daily_decay_rate
+elapsed_days = floor((now - app_settings.profile.decayLastRunAt) / 1d)
+
+if elapsed_days <= 0:
+  skip decay
+else if polarity == negative and days_since_last_matched <= inactive_after_days:
+  weight *= negative_daily_decay_rate ^ elapsed_days
+else if polarity == negative:
+  weight *= negative_inactive_decay_rate ^ elapsed_days
+else if days_since_last_matched <= inactive_after_days:
+  weight *= daily_decay_rate ^ elapsed_days
 else:
-  weight *= inactive_decay_rate
+  weight *= inactive_decay_rate ^ elapsed_days
 ```
+
+说明：同一天重复运行 `profile_decay` 不再次指数衰减；跨天衰减按距离上次 decay 的 elapsed days 计算。负向簇更保守，避免用户明确不喜欢的主题过快消失。
 
 ### 清理规则
 
 ```text
 delete_if_weight_below: 0.5
 delete_if_sample_count_is_1_and_inactive_days_over: 30
+negative_delete_if_weight_below: 0.5
+negative_delete_if_sample_count_is_1_and_inactive_days_over: 60
 ```
 
 ### 数量上限处理
@@ -268,8 +290,8 @@ delete_if_sample_count_is_1_and_inactive_days_over: 30
 当簇数量超过上限：
 
 ```text
-1. 删除低权重且长期未命中的簇。
-2. 若仍超限，合并同极性中 similarity >= 0.86 的簇。
+1. 先合并同极性中 similarity >= 0.86 的簇。
+2. 若仍超限，删除低权重且长期未命中的簇。
 3. 若仍超限，删除权重最低的簇。
 ```
 
@@ -279,13 +301,13 @@ delete_if_sample_count_is_1_and_inactive_days_over: 30
 
 ```text
 feed_positive_event_weight:
-  open: 0.3
+  open: 0.02
   read_complete: 1.0
   favorite: 2.0
   read_later: 1.0
 
 feed_negative_event_weight:
-  quick_bounce: 0.5
+  quick_bounce: 0.2
   hide: 1.5
   not_interested: 2.5
 ```
@@ -293,8 +315,11 @@ feed_negative_event_weight:
 来源分计算：
 
 ```text
+clear_signal_count = count(read_complete, favorite, read_later, quick_bounce, hide, not_interested)
+confidence = clamp(clear_signal_count / 10, 0, 1)
+open_only_confidence = 0.1
 raw_feed_score = positive_score - negative_score
-source_score = tanh(raw_feed_score / 20) * source_score_max
+source_score = tanh(raw_feed_score / 20) * source_score_max * confidence
 source_score_max = 0.18
 ```
 
@@ -302,6 +327,8 @@ source_score_max = 0.18
 
 - 来源权重有上限，不能压倒兴趣匹配。
 - 用户手动设置的 `source_weight` 可作为额外加权。
+- `open` 不计入 clear signals；只有 open 时使用极低 open-only confidence，避免来源偏好完全归零但也不能过拟合。
+- 10+ 个明确信号后，来源偏好才明显生效。
 
 ## 推荐排序参数
 
@@ -453,21 +480,37 @@ final_score =
 ```text
 freshness_score_max: 0.35
 source_weight_max_score: 0.18
-feed_stat_max_score: 0.12
+feed_stat_max_score: 0.10
 favorite: +0.50
 read_later: +0.24
 reading_progress: progress * 0.22
 read: -0.06
-behavior_event_score: clamp(sum(event_weight), -3, 3) * 0.08
+behavior_projection_score: event_type projection, clamp -0.12..0.16
 hidden: -3.00
 not_interested: -4.00
+```
+
+Base ranking 不直接信任历史 `behavior_events.event_weight`。当前投影：
+
+```text
+open: +0.005
+read_progress_25: +0.01
+read_progress_50: +0.04
+read_progress_75: +0.06
+read_complete: +0.10
+favorite: +0.12
+read_later: +0.08
+quick_bounce: -0.04
+other: 0
 ```
 
 `latest` 仍按发布时间/发现时间排序；`recommended` 使用 `article_rank_scores(base)` 排序，并继续排除 hidden 与 not_interested 文章。
 
 ### 有 provider 但文章未 embedding
 
-使用基础排序，并排入 embedding job。
+使用基础排序风格的 pending score，并排入 embedding job。
+
+pending score 使用 freshness/source/state/base projection，不做语义正负匹配。若文章 age <= 72h，freshness 至少保留 `0.035` 的 floor，避免 provider 慢时新文章完全被旧文章淹没。
 
 解释中显示：
 

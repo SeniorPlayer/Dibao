@@ -600,7 +600,7 @@ describe("db package", () => {
         state: {
           favorited: true
         },
-        behaviorEventWeightSum: 1,
+        behaviorProjectionScore: 0.12,
         behaviorEventCount: 1
       });
 

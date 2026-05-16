@@ -10,9 +10,22 @@ export const profileAlgorithmDefaults = {
   negativePenaltyThreshold: 0.62,
   dailyDecayRate: 0.985,
   inactiveDecayRate: 0.96,
+  negativeDailyDecayRate: 0.99,
+  negativeInactiveDecayRate: 0.98,
   inactiveAfterDays: 21,
   deleteWeightBelow: 0.5,
   deleteSingleSampleInactiveDays: 30,
+  negativeDeleteWeightBelow: 0.5,
+  negativeDeleteSingleSampleInactiveDays: 60,
+  clusterCompactionSimilarityThreshold: 0.86,
+  readCompleteProgressThreshold: 0.9,
+  readCompleteActiveProgressThreshold: 0.75,
+  readCompleteActiveDurationMs: 90_000,
+  estimatedReadingUnitsPerMinute: 500,
+  minEstimatedReadTimeMs: 30_000,
+  maxEstimatedReadTimeMs: 900_000,
+  quickBounceDurationMs: 8_000,
+  quickBounceProgressThreshold: 0.1,
   freshnessHalfLifeHours: 36
 } as const;
 
@@ -21,13 +34,13 @@ export const BASE_RANK_CONTEXT = "base";
 export const baselineRankingDefaults = {
   freshnessMaxScore: 0.35,
   sourceWeightMaxScore: 0.18,
-  feedStatMaxScore: 0.12,
+  feedStatMaxScore: 0.1,
   favoriteScore: 0.5,
   readLaterScore: 0.24,
   readProgressMaxScore: 0.22,
   readPenalty: -0.06,
-  behaviorWeightScore: 0.08,
-  behaviorCountScore: 0.002,
+  behaviorProjectionMinScore: -0.12,
+  behaviorProjectionMaxScore: 0.16,
   hiddenPenalty: -3,
   notInterestedPenalty: -4,
   scoreMin: -10,
@@ -50,7 +63,7 @@ export type BaselineRankInput = {
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
-  behaviorEventWeightSum: number;
+  behaviorProjectionScore: number;
   behaviorEventCount: number;
 };
 
@@ -96,6 +109,7 @@ export type RecommendationRankInput = {
   readLater: boolean;
   hidden: boolean;
   notInterested: boolean;
+  embeddingStatus?: "ready" | "pending" | "none";
   positiveInterestMatch: number;
   negativeInterestMatch: number;
   negativeSimilarity: number;
@@ -155,13 +169,17 @@ export function calculateRecommendationRankScore(
     recommendationRankingDefaults.freshnessScoreMax,
     profileAlgorithmDefaults.freshnessHalfLifeHours
   );
+  const freshnessWithFloor =
+    input.embeddingStatus === "pending" && ageHours <= 72
+      ? Math.max(freshness, 0.035)
+      : freshness;
   const source = calculateRecommendationSourceScore(input);
   const state = calculateRecommendationStateScore(input);
   const interest =
     Math.max(0, input.positiveInterestMatch) *
     recommendationRankingDefaults.interestScoreMax;
   const penalty = calculateRecommendationPenaltyScore(input);
-  const score = freshness + source + state + interest + penalty;
+  const score = freshnessWithFloor + source + state + interest + penalty;
 
   return {
     score: roundScore(
@@ -173,7 +191,7 @@ export function calculateRecommendationRankScore(
     ),
     interestScore: roundScore(interest),
     sourceScore: roundScore(source),
-    freshnessScore: roundScore(freshness),
+    freshnessScore: roundScore(freshnessWithFloor),
     stateScore: roundScore(state),
     diversityScore: 0,
     penaltyScore: roundScore(penalty),
@@ -188,8 +206,8 @@ function calculateSourceScore(input: BaselineRankInput): number {
     clamp(input.feedPositiveScore - input.feedNegativeScore, -5, 5) *
     (baselineRankingDefaults.feedStatMaxScore / 5);
   const feedRateScore =
-    clamp(input.feedFavoriteRate - input.feedNotInterestedRate, -1, 1) * 0.06 +
-    clamp(input.feedOpenRate, 0, 1) * 0.03;
+    clamp(input.feedFavoriteRate - input.feedNotInterestedRate, -1, 1) * 0.04 +
+    clamp(input.feedOpenRate, 0, 1) * 0.003;
 
   return explicitSourceWeight + feedScore + feedRateScore;
 }
@@ -204,10 +222,10 @@ function calculateStateScore(input: BaselineRankInput): number {
 }
 
 function calculateBehaviorInterestScore(input: BaselineRankInput): number {
-  return (
-    clamp(input.behaviorEventWeightSum, -3, 3) *
-      baselineRankingDefaults.behaviorWeightScore +
-    clamp(input.behaviorEventCount, 0, 20) * baselineRankingDefaults.behaviorCountScore
+  return clamp(
+    input.behaviorProjectionScore,
+    baselineRankingDefaults.behaviorProjectionMinScore,
+    baselineRankingDefaults.behaviorProjectionMaxScore
   );
 }
 
@@ -227,7 +245,7 @@ function calculateRecommendationSourceScore(input: RecommendationRankInput): num
   const feedRateScore =
     clamp(input.feedFavoriteRate - input.feedNotInterestedRate, -1, 1) *
       recommendationRankingDefaults.feedRateMaxScore +
-    clamp(input.feedOpenRate, 0, 1) * 0.01;
+    clamp(input.feedOpenRate, 0, 1) * 0.002;
 
   return clamp(
     explicitSourceWeight + feedScore + feedRateScore,

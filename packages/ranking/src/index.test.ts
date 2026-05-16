@@ -43,6 +43,20 @@ describe("ranking package", () => {
     ).toBeGreaterThan(baseScore);
   });
 
+  it("keeps open behavior projection weaker than saved states", () => {
+    const base = baselineInput();
+    const baseScore = calculateBaselineRankScore(base).score;
+    const openScore = calculateBaselineRankScore({
+      ...base,
+      behaviorProjectionScore: 0.025,
+      behaviorEventCount: 5
+    }).score;
+    const readLaterScore = calculateBaselineRankScore({ ...base, readLater: true }).score;
+
+    expect(openScore).toBeGreaterThan(baseScore);
+    expect(openScore).toBeLessThan(readLaterScore);
+  });
+
   it("penalizes hidden and not interested articles", () => {
     const base = baselineInput();
     const baseScore = calculateBaselineRankScore(base).score;
@@ -76,6 +90,25 @@ describe("ranking package", () => {
     expect(score.penaltyScore).toBeLessThan(0);
   });
 
+  it("gives pending embedding articles a small freshness floor", () => {
+    const input = recommendationInput();
+    const pending = calculateRecommendationRankScore({
+      ...input,
+      publishedAt: input.now - 70 * 3_600_000,
+      discoveredAt: input.now - 70 * 3_600_000,
+      embeddingStatus: "pending"
+    });
+    const ready = calculateRecommendationRankScore({
+      ...input,
+      publishedAt: input.now - 70 * 3_600_000,
+      discoveredAt: input.now - 70 * 3_600_000,
+      embeddingStatus: "ready"
+    });
+
+    expect(pending.freshnessScore).toBeGreaterThanOrEqual(0.035);
+    expect(pending.freshnessScore).toBeGreaterThan(ready.freshnessScore);
+  });
+
   it("centralizes vector similarity and centroid merge helpers", () => {
     expect(cosineSimilarity([1, 0], [1, 0])).toBe(1);
     expect(cosineSimilarity([1, 0], [-1, 0])).toBe(-1);
@@ -100,7 +133,7 @@ function baselineInput(): BaselineRankInput {
     hidden: false,
     notInterested: false,
     readingProgress: 0,
-    behaviorEventWeightSum: 0,
+    behaviorProjectionScore: 0,
     behaviorEventCount: 0
   };
 }

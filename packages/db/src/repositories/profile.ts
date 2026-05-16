@@ -19,6 +19,9 @@ type ProfileBehaviorEventDbRow = {
   articleUpdatedAt: number;
   readingProgress: number;
   contentHash: string;
+  title: string;
+  summary: string | null;
+  contentText: string | null;
   embeddingIndexId: string | null;
   embeddingContentHash: string | null;
   vectorBlob: Buffer | null;
@@ -271,10 +274,14 @@ export class SqliteProfileRepository implements ProfileRepository {
           select
             be.event_type as eventType,
             be.metadata_json as metadataJson,
-            coalesce(s.reading_progress, 0) as readingProgress
+            coalesce(s.reading_progress, 0) as readingProgress,
+            a.title,
+            a.summary,
+            ac.content_text as contentText
           from behavior_events be
           join articles a on a.id = be.article_id
           left join article_states s on s.article_id = a.id
+          left join article_contents ac on ac.article_id = a.id
           where a.feed_id = ?
           order by be.created_at, be.id
         `
@@ -343,6 +350,9 @@ function profileEventSelect(): string {
       a.updated_at as articleUpdatedAt,
       coalesce(s.reading_progress, 0) as readingProgress,
       coalesce(a.content_hash, a.id || ':' || a.updated_at) as contentHash,
+      a.title,
+      a.summary,
+      ac.content_text as contentText,
       ae.embedding_index_id as embeddingIndexId,
       ae.content_hash as embeddingContentHash,
       ae.vector_blob as vectorBlob
@@ -350,6 +360,7 @@ function profileEventSelect(): string {
     join articles a on a.id = be.article_id
     join feeds f on f.id = a.feed_id
     left join article_states s on s.article_id = a.id
+    left join article_contents ac on ac.article_id = a.id
     left join article_embeddings ae
       on ae.article_id = a.id
      and ae.embedding_index_id = ?

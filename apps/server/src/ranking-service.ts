@@ -40,6 +40,7 @@ export type RankExplanationReason = {
 
 export type RankExplanationResult = {
   articleId: string;
+  status: ArticleRankExplanationSourceRow["rankingStatus"];
   reasons: RankExplanationReason[];
   generatedAt: number;
 };
@@ -95,6 +96,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
 
     return {
       articleId,
+      status: source.rankingStatus,
       reasons: rankReasonsFor(source),
       generatedAt: source.rank?.calculatedAt ?? this.now()
     };
@@ -126,7 +128,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         hidden: candidate.state.hidden,
         notInterested: candidate.state.notInterested,
         readingProgress: candidate.state.readingProgress,
-        behaviorEventWeightSum: candidate.behaviorEventWeightSum,
+        behaviorProjectionScore: candidate.behaviorProjectionScore,
         behaviorEventCount: candidate.behaviorEventCount
       });
 
@@ -152,6 +154,12 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
           readLater: candidate.state.readLater,
           hidden: candidate.state.hidden,
           notInterested: candidate.state.notInterested,
+          embeddingStatus:
+            candidate.embeddingStatus === "embedding_pending"
+              ? "pending"
+              : candidate.embeddingStatus === "ready"
+                ? "ready"
+                : "none",
           positiveInterestMatch: matches.positiveInterestMatch,
           negativeInterestMatch: matches.negativeInterestMatch,
           negativeSimilarity: matches.negativeSimilarity
@@ -336,10 +344,23 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
     : [
         {
           type: "fallback",
-          label: "Profile is still learning or embedding is pending",
+          label: fallbackLabelFor(source),
           impact: "neutral"
         }
       ];
+}
+
+function fallbackLabelFor(source: ArticleRankExplanationSourceRow): string {
+  if (source.rankingStatus === "no_provider") {
+    return "Using baseline ranking because embedding is not configured";
+  }
+  if (source.rankingStatus === "embedding_pending") {
+    return "Using baseline signals while embedding is pending";
+  }
+  if (source.rankingStatus === "learning") {
+    return "Profile is still learning";
+  }
+  return "Ranking has not been calculated yet";
 }
 
 function positiveStateLabelFor(source: ArticleRankExplanationSourceRow): string {

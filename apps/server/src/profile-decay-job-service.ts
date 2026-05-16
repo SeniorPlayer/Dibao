@@ -59,8 +59,15 @@ export class ProfileDecayJobService {
       throw new PermanentJobFailure("Invalid profile_decay job payload");
     }
 
-    this.options.profile.decayClusters();
-    this.options.settings.setJson(PROFILE_DECAY_LAST_RUN_SETTING, this.now(), this.now());
+    const now = this.now();
+    const lastRunAt = this.options.settings.getJson<number>(PROFILE_DECAY_LAST_RUN_SETTING);
+    const elapsedDays =
+      typeof lastRunAt === "number"
+        ? Math.max(0, Math.floor((now - lastRunAt) / DEFAULT_PROFILE_DECAY_INTERVAL_MS))
+        : 1;
+
+    this.options.profile.decayClusters({ elapsedDays });
+    this.options.settings.setJson(PROFILE_DECAY_LAST_RUN_SETTING, now, now);
     this.options.rankingJobs.enqueueAll();
   }
 }

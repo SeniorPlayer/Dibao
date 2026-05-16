@@ -204,6 +204,8 @@ export type ArticleStateSnapshot = {
   readingProgress: number;
 };
 
+export type ArticleRankingEmbeddingStatus = "ready" | "embedding_pending" | "no_provider";
+
 export type ArticleActionType =
   | "open"
   | "mark_read"
@@ -249,10 +251,11 @@ export type ArticleRankingCandidateRow = {
   feedFavoriteRate: number;
   feedNotInterestedRate: number;
   state: ArticleStateSnapshot;
-  behaviorEventWeightSum: number;
+  behaviorProjectionScore: number;
   behaviorEventCount: number;
   vectorBlob: Buffer | null;
   embeddingContentHash: string | null;
+  embeddingStatus: ArticleRankingEmbeddingStatus;
 };
 
 export type UpsertArticleRankScoreInput = {
@@ -287,6 +290,7 @@ export type ArticleRankExplanationSourceRow = {
   discoveredAt: number;
   state: ArticleStateSnapshot;
   rank: ArticleRankScoreComponentsRow | null;
+  rankingStatus: ArticleRankingEmbeddingStatus | "learning";
 };
 
 export type InterestClusterPolarity = "positive" | "negative";
@@ -335,6 +339,9 @@ export type ProfileBehaviorEventRow = {
   articleUpdatedAt: number;
   readingProgress: number;
   contentHash: string;
+  title: string;
+  summary: string | null;
+  contentText: string | null;
   embeddingIndexId: string | null;
   embeddingContentHash: string | null;
   vectorBlob: Buffer | null;
@@ -344,6 +351,9 @@ export type FeedBehaviorEventRow = {
   eventType: BehaviorEventType;
   metadataJson: string | null;
   readingProgress: number;
+  title: string;
+  summary: string | null;
+  contentText: string | null;
 };
 
 export type FeedStatsInput = {

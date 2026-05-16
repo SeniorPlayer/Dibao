@@ -2,6 +2,7 @@ import type {
   ArticleRankExplanationSourceRow,
   ArticleRankingCandidateRow,
   DibaoDatabase,
+  RankedArticleCountsRow,
   UpsertArticleRankScoreInput
 } from "../types.js";
 
@@ -24,10 +25,11 @@ type ArticleRankingCandidateDbRow = {
   hidden: 0 | 1;
   notInterested: 0 | 1;
   readingProgress: number;
-  behaviorEventWeightSum: number;
+  behaviorProjectionScore: number;
   behaviorEventCount: number;
   vectorBlob: Buffer | null;
   embeddingContentHash: string | null;
+  embeddingStatus: ArticleRankingCandidateRow["embeddingStatus"];
 };
 
 type ArticleRankExplanationSourceDbRow = {
@@ -49,14 +51,17 @@ type ArticleRankExplanationSourceDbRow = {
   diversityScore: number | null;
   penaltyScore: number | null;
   calculatedAt: number | null;
+  rankingStatus: ArticleRankExplanationSourceRow["rankingStatus"];
 };
 
 export interface RankingRepository {
+  countRankedArticles(input: { activeRankContext: string }): RankedArticleCountsRow;
   findExplanationSource(input: {
     articleId: string;
     rankContext?: string;
   }): ArticleRankExplanationSourceRow | null;
   findBaseExplanationSource(articleId: string): ArticleRankExplanationSourceRow | null;
+  getLastRankingUpdate(input: { activeRankContext: string }): number | null;
   listCandidates(input?: {
     articleIds?: string[];
     embeddingIndexId?: string | null;
@@ -69,11 +74,46 @@ export interface RankingRepository {
 export class SqliteRankingRepository implements RankingRepository {
   constructor(private readonly db: DibaoDatabase) {}
 
+  countRankedArticles(input: { activeRankContext: string }): RankedArticleCountsRow {
+    const row = this.db
+      .prepare(
+        `
+          select
+            sum(case when rank_context = ? then 1 else 0 end) as base,
+            sum(case when rank_context = ? then 1 else 0 end) as active
+          from article_rank_scores
+        `
+      )
+      .get(BASE_RANK_CONTEXT, input.activeRankContext) as RankedArticleCountsRow | undefined;
+
+    return {
+      base: row?.base ?? 0,
+      active: input.activeRankContext === BASE_RANK_CONTEXT ? 0 : row?.active ?? 0
+    };
+  }
+
+  getLastRankingUpdate(input: { activeRankContext: string }): number | null {
+    const row = this.db
+      .prepare(
+        `
+          select max(calculated_at) as calculatedAt
+          from article_rank_scores
+          where rank_context in (?, ?)
+        `
+      )
+      .get(BASE_RANK_CONTEXT, input.activeRankContext) as
+      | { calculatedAt: number | null }
+      | undefined;
+
+    return row?.calculatedAt ?? null;
+  }
+
   findExplanationSource(input: {
     articleId: string;
     rankContext?: string;
   }): ArticleRankExplanationSourceRow | null {
     const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
+    const activeEmbeddingIndexId = rankContext === BASE_RANK_CONTEXT ? null : rankContext;
     const row = this.db
       .prepare(
         `
@@ -95,10 +135,19 @@ export class SqliteRankingRepository implements RankingRepository {
             coalesce(rs.state_score, base_rs.state_score) as stateScore,
             coalesce(rs.diversity_score, base_rs.diversity_score) as diversityScore,
             coalesce(rs.penalty_score, base_rs.penalty_score) as penaltyScore,
-            coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt
+            coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt,
+            case
+              when ? is null then 'no_provider'
+              when ae.vector_blob is null then 'embedding_pending'
+              when coalesce(rs.score, base_rs.score) is null then 'learning'
+              else 'ready'
+            end as rankingStatus
           from articles a
           join feeds f on f.id = a.feed_id
           left join article_states s on s.article_id = a.id
+          left join article_embeddings ae
+            on ae.article_id = a.id
+            and ae.embedding_index_id = ?
           left join article_rank_scores rs
             on rs.article_id = a.id
             and rs.rank_context = ?
@@ -111,7 +160,7 @@ export class SqliteRankingRepository implements RankingRepository {
             and f.deleted_at is null
         `
       )
-      .get(rankContext, BASE_RANK_CONTEXT, input.articleId) as
+      .get(activeEmbeddingIndexId, activeEmbeddingIndexId ?? "", rankContext, BASE_RANK_CONTEXT, input.articleId) as
       | ArticleRankExplanationSourceDbRow
       | undefined;
 
@@ -144,7 +193,24 @@ export class SqliteRankingRepository implements RankingRepository {
             with event_stats as (
               select
                 article_id,
-                coalesce(sum(event_weight), 0) as behaviorEventWeightSum,
+                coalesce(sum(
+                  case
+                    when event_type = 'open' then 0.005
+                    when event_type = 'read_progress' then
+                      case
+                        when coalesce(json_extract(metadata_json, '$.progress'), 0) >= 0.9 then 0.10
+                        when coalesce(json_extract(metadata_json, '$.progress'), 0) >= 0.75 then 0.06
+                        when coalesce(json_extract(metadata_json, '$.progress'), 0) >= 0.5 then 0.04
+                        when coalesce(json_extract(metadata_json, '$.progress'), 0) >= 0.25 then 0.01
+                        else 0
+                      end
+                    when event_type = 'read_complete' then 0.10
+                    when event_type = 'favorite' then 0.12
+                    when event_type = 'read_later' then 0.08
+                    when event_type = 'quick_bounce' then -0.04
+                    else 0
+                  end
+                ), 0) as behaviorProjectionScore,
                 count(*) as behaviorEventCount
               from behavior_events
               group by article_id
@@ -166,10 +232,15 @@ export class SqliteRankingRepository implements RankingRepository {
               case when s.hidden_at is not null then 1 else 0 end as hidden,
               case when s.not_interested_at is not null then 1 else 0 end as notInterested,
               coalesce(s.reading_progress, 0) as readingProgress,
-              coalesce(es.behaviorEventWeightSum, 0) as behaviorEventWeightSum,
+              coalesce(es.behaviorProjectionScore, 0) as behaviorProjectionScore,
               coalesce(es.behaviorEventCount, 0) as behaviorEventCount,
               ae.vector_blob as vectorBlob,
-              ae.content_hash as embeddingContentHash
+              ae.content_hash as embeddingContentHash,
+              case
+                when ? = '' then 'no_provider'
+                when ae.vector_blob is null then 'embedding_pending'
+                else 'ready'
+              end as embeddingStatus
             from articles a
             join feeds f on f.id = a.feed_id
             left join article_states s on s.article_id = a.id
@@ -186,7 +257,7 @@ export class SqliteRankingRepository implements RankingRepository {
             order by a.id
           `
         )
-        .all(...params) as ArticleRankingCandidateDbRow[]
+        .all(input.embeddingIndexId ?? "", ...params) as ArticleRankingCandidateDbRow[]
     ).map(mapCandidate);
   }
 
@@ -266,6 +337,7 @@ function mapExplanationSource(
     publishedAt: row.publishedAt,
     discoveredAt: row.discoveredAt,
     state,
+    rankingStatus: row.rankingStatus,
     rank:
       row.score === null ||
       row.interestScore === null ||
@@ -309,9 +381,10 @@ function mapCandidate(row: ArticleRankingCandidateDbRow): ArticleRankingCandidat
       notInterested: row.notInterested === 1,
       readingProgress: row.readingProgress
     },
-    behaviorEventWeightSum: row.behaviorEventWeightSum,
+    behaviorProjectionScore: row.behaviorProjectionScore,
     behaviorEventCount: row.behaviorEventCount,
     vectorBlob: row.vectorBlob,
-    embeddingContentHash: row.embeddingContentHash
+    embeddingContentHash: row.embeddingContentHash,
+    embeddingStatus: row.embeddingStatus
   };
 }
