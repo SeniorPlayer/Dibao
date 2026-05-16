@@ -236,6 +236,13 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--color-surface);
+}
+
+.managementTopSection {
+  grid-column: 1 / -1;
+  border-bottom: var(--border-default);
   background: var(--color-surface);
 }
 
@@ -485,6 +492,16 @@
   line-height: 1.6;
 }
 
+.textLink {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: var(--space-2);
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
 .settingsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -629,6 +646,25 @@
   width: 16px;
   height: 16px;
   margin: 0;
+}
+
+.articleSortControl {
+  min-height: var(--target-min);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.articleSortControl select {
+  height: var(--input-height-md);
+  border: var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-background);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
 }
 
 .addFeedForm {

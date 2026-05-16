@@ -42,6 +42,7 @@ export type ArticleInteractionStatus = "unseen" | "ignored" | "opened" | "readin
 export type ArticleState = {
   read: boolean;
   favorited: boolean;
+  liked: boolean;
   readLater: boolean;
   hidden: boolean;
   notInterested: boolean;
@@ -78,7 +79,7 @@ export type ArticleActionRequest =
       metadata?: Record<string, unknown>;
     }
   | {
-      type: "favorite" | "read_later" | "mark_read";
+      type: "favorite" | "like" | "read_later" | "mark_read";
       value: boolean;
       metadata?: Record<string, unknown>;
     }
@@ -113,7 +114,13 @@ export type RankExplanation = {
   generatedAt: string;
 };
 
-export type ArticleView = "latest" | "recommended";
+export type ArticleView = "latest" | "recommended" | "favorites" | "read_later";
+
+export type FavoriteArticleSort =
+  | "favorited_desc"
+  | "favorited_asc"
+  | "published_desc"
+  | "published_asc";
 
 export type ArticleListResponse = {
   data: ArticleListItem[];
@@ -660,6 +667,7 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
         limit?: number;
         cursor?: string | null;
         unreadOnly?: boolean;
+        sort?: FavoriteArticleSort;
       } = {}
     ): Promise<ArticleListResponse> {
       const params = new URLSearchParams({
@@ -676,8 +684,12 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       if (input.cursor) {
         params.set("cursor", input.cursor);
       }
-      if (input.unreadOnly) {
+      const view = input.view ?? "latest";
+      if (input.unreadOnly && (view === "latest" || view === "recommended")) {
         params.set("unreadOnly", "true");
+      }
+      if (input.sort && view === "favorites") {
+        params.set("sort", input.sort);
       }
 
       const response = await request<ArticleListItem[]>(`/api/articles?${params.toString()}`);

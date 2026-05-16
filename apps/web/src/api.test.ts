@@ -626,10 +626,21 @@ describe("web API client", () => {
       view: "latest",
       unreadOnly: true
     });
+    await api.listArticles({
+      view: "favorites",
+      sort: "favorited_asc",
+      unreadOnly: true
+    });
+    await api.listArticles({
+      view: "read_later",
+      unreadOnly: true
+    });
 
     expect(calls).toEqual([
       "/api/articles?view=recommended&limit=20&folderId=folder_design&cursor=cursor_1&unreadOnly=true",
-      "/api/articles?view=latest&limit=50&unreadOnly=true"
+      "/api/articles?view=latest&limit=50&unreadOnly=true",
+      "/api/articles?view=favorites&limit=50&sort=favorited_asc",
+      "/api/articles?view=read_later&limit=50"
     ]);
     expect(first.meta.unreadCount).toBe(17);
   });
@@ -759,6 +770,7 @@ describe("web API client", () => {
             state: {
               read: false,
               favorited: false,
+              liked: false,
               readLater: false,
               hidden: false,
               notInterested: false,
@@ -778,6 +790,10 @@ describe("web API client", () => {
     await api.postArticleAction("article/one", {
       type: "favorite",
       value: false
+    });
+    await api.postArticleAction("article/one", {
+      type: "like",
+      value: true
     });
     await api.postArticleAction("article/one", {
       type: "read_progress",
@@ -805,6 +821,14 @@ describe("web API client", () => {
         body: {
           type: "favorite",
           value: false
+        }
+      },
+      {
+        path: "/api/articles/article%2Fone/actions",
+        method: "POST",
+        body: {
+          type: "like",
+          value: true
         }
       },
       {

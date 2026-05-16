@@ -2,10 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   App,
+  AlgorithmTransparencyPage,
   ArticleActionControls,
   ArticleListPanel,
   AuthGatePanel,
   FeedPanel,
+  pageForNavigationItem,
   RankExplanationPanel,
   SettingsWorkspace,
   SetupProviderPlaceholderPanel,
@@ -114,6 +116,11 @@ describe("web i18n", () => {
         [{ id: "folder_design" }]
       )
     ).toEqual({ type: "feed", feedId: "feed_design" });
+  });
+
+  it("maps favorites and read-later navigation to article views", () => {
+    expect(pageForNavigationItem("favorites")).toEqual({ type: "reader", view: "favorites" });
+    expect(pageForNavigationItem("read_later")).toEqual({ type: "reader", view: "read_later" });
   });
 
   it("keeps unread-only initial loads strict while preserving the current queue after state updates", () => {
@@ -256,17 +263,10 @@ describe("web i18n", () => {
             }
           ]}
           isOpen={false}
-          isExportingOpml={false}
           isFeedsLoading={false}
-          isImportingOpml={false}
-          isRefreshingAllFeeds={false}
-          onExportOpml={() => undefined}
-          onImportOpml={() => undefined}
-          onRefreshAllFeeds={() => undefined}
           onRefreshFeed={() => undefined}
           onCloseSources={() => undefined}
           onSelectSource={() => undefined}
-          opmlSummary={null}
           refreshingFeedId={null}
           sourceSelection={{ type: "all" }}
         />
@@ -278,6 +278,7 @@ describe("web i18n", () => {
           articleError={null}
           articleView="latest"
           articles={[]}
+          favoriteSort="favorited_desc"
           feedCount={1}
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
@@ -285,6 +286,7 @@ describe("web i18n", () => {
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor="cursor_1"
+          onFavoriteSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -300,15 +302,16 @@ describe("web i18n", () => {
             sortOrder: 0
           }}
           showRecommendationStatus={false}
+          showUnreadOnlyFilter={true}
           unreadCount={12}
           unreadOnly={false}
         />
       </DibaoI18nProvider>
     );
 
-    expect(feedPanel).toContain("导入 OPML");
-    expect(feedPanel).toContain("导出 OPML");
-    expect(feedPanel).toContain("刷新全部");
+    expect(feedPanel).not.toContain("导入 OPML");
+    expect(feedPanel).not.toContain("导出 OPML");
+    expect(feedPanel).not.toContain("刷新全部");
     expect(feedPanel).toContain("下次抓取");
     expect(feedPanel).toContain("分组");
     expect(articlePanel).toContain("只看未读");
@@ -323,6 +326,7 @@ describe("web i18n", () => {
           articleError={null}
           articleView="recommended"
           articles={[]}
+          favoriteSort="favorited_desc"
           feedCount={1}
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
@@ -330,6 +334,7 @@ describe("web i18n", () => {
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
+          onFavoriteSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -370,6 +375,7 @@ describe("web i18n", () => {
           selectedFeed={null}
           selectedFolder={null}
           showRecommendationStatus
+          showUnreadOnlyFilter={true}
           unreadCount={3}
           unreadOnly={true}
         />
@@ -381,6 +387,149 @@ describe("web i18n", () => {
     expect(html).toContain("行为 3");
     expect(html).toContain("Coverage 50%");
     expect(html).toContain("兴趣簇 +1 / -0");
+  });
+
+  it("renders favorites sorting and read-later without unread-only controls", () => {
+    const likedArticle = articleListItem("liked_article", "unseen");
+    const favoriteHtml = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <ArticleListPanel
+          articleError={null}
+          articleView="favorites"
+          articles={[{ ...likedArticle, state: { ...likedArticle.state, liked: true } }]}
+          favoriteSort="favorited_desc"
+          feedCount={1}
+          isIgnoreTelemetryEnabled={false}
+          isArticlesLoading={false}
+          isLoadingMore={false}
+          isRecommendationStatusLoading={false}
+          loadMoreError={null}
+          nextCursor={null}
+          onFavoriteSortChange={() => undefined}
+          onIgnoreArticle={() => undefined}
+          onLoadMore={() => undefined}
+          onOpenSources={() => undefined}
+          onSelectArticle={() => undefined}
+          onUnreadOnlyChange={() => undefined}
+          recommendationStatus={null}
+          recommendationStatusError={null}
+          selectedArticleId={null}
+          selectedFeed={null}
+          selectedFolder={null}
+          showRecommendationStatus={false}
+          showUnreadOnlyFilter={false}
+          unreadCount={1}
+          unreadOnly={true}
+        />
+      </DibaoI18nProvider>
+    );
+    const readLaterHtml = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <ArticleListPanel
+          articleError={null}
+          articleView="read_later"
+          articles={[]}
+          favoriteSort="favorited_desc"
+          feedCount={1}
+          isIgnoreTelemetryEnabled={false}
+          isArticlesLoading={false}
+          isLoadingMore={false}
+          isRecommendationStatusLoading={false}
+          loadMoreError={null}
+          nextCursor={null}
+          onFavoriteSortChange={() => undefined}
+          onIgnoreArticle={() => undefined}
+          onLoadMore={() => undefined}
+          onOpenSources={() => undefined}
+          onSelectArticle={() => undefined}
+          onUnreadOnlyChange={() => undefined}
+          recommendationStatus={null}
+          recommendationStatusError={null}
+          selectedArticleId={null}
+          selectedFeed={null}
+          selectedFolder={null}
+          showRecommendationStatus={false}
+          showUnreadOnlyFilter={false}
+          unreadCount={0}
+          unreadOnly={true}
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(favoriteHtml).toContain("排序");
+    expect(favoriteHtml).toContain("最近收藏");
+    expect(favoriteHtml).toContain("已点赞");
+    expect(favoriteHtml).not.toContain("只看未读");
+    expect(readLaterHtml).toContain("稍后读");
+    expect(readLaterHtml).not.toContain("排序");
+    expect(readLaterHtml).not.toContain("只看未读");
+  });
+
+  it("renders algorithm transparency diagnostics and standing explanation", () => {
+    const html = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <AlgorithmTransparencyPage
+          error={null}
+          isLoading={false}
+          onBack={() => undefined}
+          status={{
+            mode: "personalized",
+            activeProvider: {
+              id: "provider_1",
+              type: "ollama",
+              name: "Ollama",
+              model: "bge-m3",
+              dimension: 1024,
+              lastTestStatus: "success",
+              lastTestAt: "2026-05-14T08:00:00.000Z"
+            },
+            activeIndex: {
+              id: "index_1",
+              status: "active",
+              model: "bge-m3",
+              dimension: 1024
+            },
+            activeRankContext: "profile",
+            coverage: {
+              candidateCount: 10,
+              embeddingCount: 8,
+              coverageRatio: 0.8,
+              pendingJobs: 0,
+              failedJobs: 0,
+              lastFailedAt: null,
+              lastError: null
+            },
+            behaviorCounts: {
+              like: 2,
+              favorite: 1
+            },
+            clusters: {
+              positive: 2,
+              negative: 1
+            },
+            rankedArticles: {
+              base: 10,
+              active: 8
+            },
+            lastProfileUpdate: "2026-05-14T08:09:00.000Z",
+            lastRankingUpdate: "2026-05-14T08:11:00.000Z",
+            warnings: [
+              {
+                code: "LOW_COVERAGE",
+                message: "Coverage is still warming up"
+              }
+            ]
+          }}
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(html).toContain("算法透明说明");
+    expect(html).toContain("个性化推荐中");
+    expect(html).toContain("8 / 10 · 80%");
+    expect(html).toContain("like: 2");
+    expect(html).toContain("LOW_COVERAGE");
+    expect(html).toContain("fallback 到基础排序");
   });
 
   it("renders feed management fields without provider configuration copy", () => {
@@ -415,19 +564,29 @@ describe("web i18n", () => {
             }
           ]}
           isAddingFeed={false}
+          isExportingOpml={false}
+          isImportingOpml={false}
           isLoading={false}
+          isRefreshingAllFeeds={false}
           onAddFeed={() => Promise.resolve()}
           onCreateFolder={() => Promise.resolve()}
           onDeleteFeed={() => Promise.resolve()}
           onDeleteFolder={() => Promise.resolve()}
+          onExportOpml={() => undefined}
+          onImportOpml={() => undefined}
+          onRefreshAllFeeds={() => undefined}
           onUpdateFeed={() => Promise.resolve()}
           onUpdateFeedUrl={() => undefined}
           onUpdateFolder={() => Promise.resolve()}
+          opmlSummary={null}
         />
       </DibaoI18nProvider>
     );
 
     expect(html).toContain("新建分组");
+    expect(html).toContain("导入 OPML");
+    expect(html).toContain("导出 OPML");
+    expect(html).toContain("刷新全部");
     expect(html).toContain("添加订阅源");
     expect(html).toContain("RSS / Atom URL");
     expect(html).toContain("重命名");
@@ -461,6 +620,7 @@ describe("web i18n", () => {
           rebuildingIndexId={null}
           testingProviderId={null}
           onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
           onSaveEmbeddingProvider={() => Promise.resolve()}
@@ -540,6 +700,7 @@ describe("web i18n", () => {
           rebuildingIndexId={null}
           testingProviderId={null}
           onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
           onSaveEmbeddingProvider={() => Promise.resolve()}
@@ -589,6 +750,7 @@ describe("web i18n", () => {
             state: {
               read: false,
               favorited: false,
+              liked: false,
               readLater: false,
               hidden: false,
               notInterested: false,
@@ -602,6 +764,7 @@ describe("web i18n", () => {
     );
 
     expect(html).toContain("收藏");
+    expect(html).toContain("点赞");
     expect(html).toContain("稍后读");
     expect(html).toContain("不感兴趣");
     expect(html).not.toContain("标记已读");
@@ -669,6 +832,7 @@ function articleListItem(
     state: {
       read: false,
       favorited: false,
+      liked: false,
       readLater: false,
       hidden: false,
       notInterested: false,

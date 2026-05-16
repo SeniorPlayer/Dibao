@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   userMessageForError,
   type Feed,
   type FeedFolder,
+  type OpmlImportResponse,
   type UpdateFeedInput,
   type UpdateFeedFolderInput
 } from "./api.js";
@@ -31,18 +32,26 @@ export type FeedManagementWorkspaceProps = {
   feedFolders: FeedFolder[];
   feeds: Feed[];
   isAddingFeed: boolean;
+  isExportingOpml: boolean;
+  isImportingOpml: boolean;
   isLoading: boolean;
+  isRefreshingAllFeeds: boolean;
   onAddFeed: (event: FormEvent<HTMLFormElement>) => void;
   onCreateFolder: (title: string) => Promise<void>;
   onDeleteFeed: (feedId: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
+  onExportOpml: () => void;
+  onImportOpml: (event: ChangeEvent<HTMLInputElement>) => void;
+  onRefreshAllFeeds: () => void;
   onUpdateFeed: (feedId: string, input: UpdateFeedInput) => Promise<void>;
   onUpdateFeedUrl: (value: string) => void;
   onUpdateFolder: (folderId: string, input: UpdateFeedFolderInput) => Promise<void>;
+  opmlSummary: OpmlImportResponse | null;
 };
 
 export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
   const { t, formatDate } = useI18n();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFeedId, setSelectedFeedId] = useState<string | null>(
     props.feeds[0]?.id ?? null
   );
@@ -191,6 +200,71 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
 
   return (
     <div className={styles.managementWorkspace}>
+      <section className={styles.managementTopSection} aria-labelledby="feed-operations-title">
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.kicker}>{t.feedManagement.operations.kicker}</p>
+            <h2 id="feed-operations-title">{t.feedManagement.operations.title}</h2>
+          </div>
+        </div>
+
+        <div className={styles.opmlActions}>
+          <input
+            accept=".opml,.xml,text/xml,application/xml"
+            className={styles.fileInput}
+            onChange={props.onImportOpml}
+            ref={fileInputRef}
+            type="file"
+          />
+          <button
+            className={styles.secondaryButton}
+            disabled={props.isImportingOpml}
+            onClick={() => fileInputRef.current?.click()}
+            type="button"
+          >
+            {props.isImportingOpml ? t.opml.importing : t.opml.import}
+          </button>
+          <button
+            className={styles.secondaryButton}
+            disabled={props.isExportingOpml}
+            onClick={props.onExportOpml}
+            type="button"
+          >
+            {props.isExportingOpml ? t.opml.exporting : t.opml.export}
+          </button>
+          <button
+            className={styles.secondaryButton}
+            disabled={props.isRefreshingAllFeeds || !props.feeds.some((feed) => feed.enabled)}
+            onClick={props.onRefreshAllFeeds}
+            type="button"
+          >
+            {props.isRefreshingAllFeeds ? t.feeds.refreshingAll : t.feeds.refreshAll}
+          </button>
+        </div>
+
+        {props.opmlSummary ? (
+          <div className={styles.opmlSummary}>
+            <p>
+              {t.opml.importSummary(
+                props.opmlSummary.feedsCreated,
+                props.opmlSummary.feedsSkipped,
+                props.opmlSummary.foldersCreated
+              )}
+            </p>
+            {props.opmlSummary.errors.length > 0 ? (
+              <>
+                <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
+                <ul>
+                  {props.opmlSummary.errors.map((summaryError, index) => (
+                    <li key={`${summaryError}-${index}`}>{summaryError}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
       <section className={styles.managementSection} aria-labelledby="folder-management-title">
         <div className={styles.managementHeader}>
           <div>

@@ -18,8 +18,8 @@ export const zhCN = {
     items: {
       latest: "最新",
       recommended: "推荐",
-      saved: "收藏",
-      readLater: "稍后读",
+      favorites: "收藏",
+      read_later: "稍后读",
       search: "搜索",
       feeds: "订阅源",
       settings: "设置"
@@ -30,13 +30,17 @@ export const zhCN = {
     pageTitle: "最新文章",
     pageTitles: {
       latest: "最新文章",
-      recommended: "推荐文章"
+      recommended: "推荐文章",
+      favorites: "收藏文章",
+      read_later: "稍后读"
     },
     loadingArticles: "正在加载文章",
     latestView: "最新视图",
     viewStatus: {
       latest: "最新视图",
-      recommended: "推荐视图"
+      recommended: "推荐视图",
+      favorites: "收藏视图",
+      read_later: "稍后读视图"
     }
   },
   auth: {
@@ -124,6 +128,10 @@ export const zhCN = {
       confirmDelete: "确认删除",
       deleteHint: "删除分组不会删除订阅源，订阅源会移动到未分组。"
     },
+    operations: {
+      kicker: "Operations",
+      title: "导入、导出与刷新"
+    },
     feeds: {
       kicker: "Feeds",
       title: "订阅源",
@@ -180,6 +188,7 @@ export const zhCN = {
       behavior: {
         title: "行为记录",
         body: "控制列表浏览时如何记录轻量行为。该设置只影响最新和推荐列表。",
+        algorithmTransparencyLink: "查看算法透明说明",
         markScrolledArticlesIgnored: "滚过未打开文章后，将其标记为已忽略并移出未读"
       },
       reader: {
@@ -307,7 +316,16 @@ export const zhCN = {
     title: "Latest",
     views: {
       latest: "最新",
-      recommended: "推荐"
+      recommended: "推荐",
+      favorites: "收藏",
+      read_later: "稍后读"
+    },
+    sort: {
+      label: "排序",
+      favorited_desc: "最近收藏",
+      favorited_asc: "最早收藏",
+      published_desc: "最新发布",
+      published_asc: "最早发布"
     },
     loadMore: "加载更多",
     loadingMore: "加载中",
@@ -327,7 +345,33 @@ export const zhCN = {
       read: "读完",
       unread: "未读",
       favorited: "已收藏",
+      liked: "已点赞",
       readLater: "稍后读"
+    }
+  },
+  algorithmTransparency: {
+    pageTitle: "算法透明说明",
+    status: "算法说明已就绪",
+    backToSettings: "返回设置",
+    noWarnings: "暂无警告",
+    sections: {
+      currentStatus: "当前推荐状态",
+      howItWorks: "固定说明"
+    },
+    fields: {
+      provider: "Provider",
+      index: "Index",
+      coverage: "Coverage",
+      behaviorCounts: "行为计数",
+      clusters: "兴趣簇",
+      lastUpdates: "最近更新",
+      warnings: "Warnings"
+    },
+    copy: {
+      behavior: "打开、阅读进度、收藏、点赞、稍后读会作为正向信号；忽略、隐藏、不感兴趣和读完会降低相似内容的优先级。",
+      channelRanking: "频道排序会结合来源权重、新鲜度、多样性和个人行为信号；当信号不足时优先保持时间排序和来源均衡。",
+      localData: "本地保存文章状态、阅读进度、轻量行为计数、来源权重、embedding provider 配置和索引状态。",
+      fallback: "当 provider 未配置、索引 coverage 不足、请求失败或诊断状态不可用时，会 fallback 到基础排序。"
     }
   },
   recommendationStatus: {
@@ -387,6 +431,8 @@ export const zhCN = {
   actions: {
     favorite: "收藏",
     unfavorite: "取消收藏",
+    like: "点赞",
+    unlike: "取消点赞",
     readLater: "稍后读",
     removeReadLater: "移出稍后读",
     markRead: "标记已读",
@@ -397,6 +443,8 @@ export const zhCN = {
     aria: {
       favorite: "收藏这篇文章",
       unfavorite: "取消收藏这篇文章",
+      like: "点赞这篇文章",
+      unlike: "取消点赞这篇文章",
       readLater: "稍后读这篇文章",
       removeReadLater: "移出稍后读",
       markRead: "标记这篇文章为已读",
@@ -406,6 +454,7 @@ export const zhCN = {
     },
     errors: {
       favorite: "收藏失败。",
+      like: "点赞更新失败。",
       readLater: "稍后读更新失败。",
       readStatus: "已读状态更新失败。",
       notInterested: "不感兴趣操作失败。",
@@ -453,8 +502,8 @@ export const enUS = {
     items: {
       latest: "Latest",
       recommended: "Recommended",
-      saved: "Saved",
-      readLater: "Read Later",
+      favorites: "Favorites",
+      read_later: "Read Later",
       search: "Search",
       feeds: "Feeds",
       settings: "Settings"
@@ -465,13 +514,17 @@ export const enUS = {
     pageTitle: "Latest Articles",
     pageTitles: {
       latest: "Latest Articles",
-      recommended: "Recommended Articles"
+      recommended: "Recommended Articles",
+      favorites: "Favorite Articles",
+      read_later: "Read Later"
     },
     loadingArticles: "Loading articles",
     latestView: "Latest view",
     viewStatus: {
       latest: "Latest view",
-      recommended: "Recommended view"
+      recommended: "Recommended view",
+      favorites: "Favorites view",
+      read_later: "Read-later view"
     }
   },
   auth: {
@@ -559,6 +612,10 @@ export const enUS = {
       confirmDelete: "Confirm delete",
       deleteHint: "Deleting a folder does not delete feeds. Its feeds move to Ungrouped."
     },
+    operations: {
+      kicker: "Operations",
+      title: "Import, export, and refresh"
+    },
     feeds: {
       kicker: "Feeds",
       title: "Feeds",
@@ -615,6 +672,7 @@ export const enUS = {
       behavior: {
         title: "Behavior tracking",
         body: "Control lightweight behavior capture while browsing lists. This only applies to Latest and Recommended.",
+        algorithmTransparencyLink: "View algorithm transparency",
         markScrolledArticlesIgnored: "Mark unopened scrolled-past articles as ignored and remove them from unread"
       },
       reader: {
@@ -742,7 +800,16 @@ export const enUS = {
     title: "Latest",
     views: {
       latest: "Latest",
-      recommended: "Recommended"
+      recommended: "Recommended",
+      favorites: "Favorites",
+      read_later: "Read Later"
+    },
+    sort: {
+      label: "Sort",
+      favorited_desc: "Recently favorited",
+      favorited_asc: "Oldest favorited",
+      published_desc: "Newest published",
+      published_asc: "Oldest published"
     },
     loadMore: "Load more",
     loadingMore: "Loading",
@@ -762,7 +829,33 @@ export const enUS = {
       read: "Finished",
       unread: "Unread",
       favorited: "Favorited",
+      liked: "Liked",
       readLater: "Read later"
+    }
+  },
+  algorithmTransparency: {
+    pageTitle: "Algorithm Transparency",
+    status: "Algorithm notes ready",
+    backToSettings: "Back to settings",
+    noWarnings: "No warnings",
+    sections: {
+      currentStatus: "Current recommendation status",
+      howItWorks: "Standing notes"
+    },
+    fields: {
+      provider: "Provider",
+      index: "Index",
+      coverage: "Coverage",
+      behaviorCounts: "Behavior counts",
+      clusters: "Clusters",
+      lastUpdates: "Last updates",
+      warnings: "Warnings"
+    },
+    copy: {
+      behavior: "Opens, reading progress, favorites, likes, and read-later saves act as positive signals; ignored, hidden, not-interested, and finished states lower similar content priority.",
+      channelRanking: "Channel ranking blends source weight, freshness, diversity, and personal behavior signals; when signals are sparse it keeps time order and source balance first.",
+      localData: "Dibao stores article state, reading progress, lightweight behavior counts, source weights, embedding provider configuration, and index status locally.",
+      fallback: "Dibao falls back to baseline ranking when a provider is not configured, index coverage is low, requests fail, or diagnostics are unavailable."
     }
   },
   recommendationStatus: {
@@ -822,6 +915,8 @@ export const enUS = {
   actions: {
     favorite: "Favorite",
     unfavorite: "Unfavorite",
+    like: "Like",
+    unlike: "Unlike",
     readLater: "Read later",
     removeReadLater: "Remove later",
     markRead: "Mark read",
@@ -832,6 +927,8 @@ export const enUS = {
     aria: {
       favorite: "Favorite this article",
       unfavorite: "Unfavorite this article",
+      like: "Like this article",
+      unlike: "Unlike this article",
       readLater: "Save this article for later",
       removeReadLater: "Remove this article from read later",
       markRead: "Mark this article as read",
@@ -841,6 +938,7 @@ export const enUS = {
     },
     errors: {
       favorite: "Favorite failed.",
+      like: "Like update failed.",
       readLater: "Read later update failed.",
       readStatus: "Read status update failed.",
       notInterested: "Not interested action failed.",

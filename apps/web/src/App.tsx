@@ -16,6 +16,7 @@ import {
   type EmbeddingIndex,
   type EmbeddingProvider,
   type EmbeddingProviderType,
+  type FavoriteArticleSort,
   type Feed,
   type FeedFolder,
   type OpmlImportResponse,
@@ -42,12 +43,14 @@ import { defaultLocale, useI18n, type Dictionary, type NavigationItemKey } from 
 const navigationItems: NavigationItemKey[] = [
   "latest",
   "recommended",
-  "saved",
-  "readLater",
+  "favorites",
+  "read_later",
   "search",
   "feeds",
   "settings"
 ];
+
+const defaultFavoriteArticleSort: FavoriteArticleSort = "favorited_desc";
 
 type Notice =
   | { type: "feedAddedAndRefreshed"; feedTitle: string }
@@ -71,7 +74,8 @@ type AuthMode = "setup" | "login";
 export type AppPage =
   | { type: "reader"; view: ArticleView }
   | { type: "feed-management" }
-  | { type: "settings" };
+  | { type: "settings" }
+  | { type: "algorithm-transparency" };
 
 export type AppStage =
   | { type: "auth-loading" }
@@ -83,7 +87,7 @@ export type AppStage =
   | { type: "setup-provider-placeholder" }
   | { type: "reader" };
 
-export type ArticleActionIntent = "favorite" | "readLater" | "notInterested";
+export type ArticleActionIntent = "favorite" | "like" | "readLater" | "notInterested";
 
 type PendingArticleAction = {
   articleId: string;
@@ -162,6 +166,9 @@ export function App() {
   const [sourceSelection, setSourceSelection] = useState<SourceSelection>({ type: "all" });
   const [appPage, setAppPage] = useState<AppPage>({ type: "reader", view: "latest" });
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [favoriteSort, setFavoriteSort] = useState<FavoriteArticleSort>(
+    defaultFavoriteArticleSort
+  );
   const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
@@ -199,6 +206,8 @@ export function App() {
   const articleStateById = useRef(new Map<string, ArticleState>());
   const articleRequestVersion = useRef(0);
   const hasLoadedSettingsForSession = useRef(false);
+  const mobileArticleHistoryDepth = useRef(0);
+  const selectedArticleIdRef = useRef<string | null>(null);
 
   const selectedFeed = useMemo(
     () =>
@@ -239,20 +248,24 @@ export function App() {
     );
   }
 
+  function clearSelectedArticle() {
+    setSelectedArticleId(null);
+    setArticleDetail(null);
+    setRankExplanation(null);
+    setDetailError(null);
+    setExplanationError(null);
+  }
+
   function resetArticleListForPendingQuery() {
     articleRequestVersion.current += 1;
     setArticles([]);
     setUnreadCount(0);
     articleStateById.current.clear();
     setNextArticleCursor(null);
-    setSelectedArticleId(null);
-    setArticleDetail(null);
-    setRankExplanation(null);
+    clearSelectedArticle();
     setArticleError(null);
     setLoadMoreError(null);
     setIsLoadingMoreArticles(false);
-    setDetailError(null);
-    setExplanationError(null);
   }
 
   function handleSelectSource(source: SourceSelection) {
@@ -268,6 +281,13 @@ export function App() {
       resetArticleListForPendingQuery();
     }
     setAppPage({ type: "reader", view });
+  }
+
+  function handleFavoriteSortChange(nextSort: FavoriteArticleSort) {
+    if (favoriteSort !== nextSort) {
+      resetArticleListForPendingQuery();
+    }
+    setFavoriteSort(nextSort);
   }
 
   function handleUnreadOnlyChange(nextUnreadOnly: boolean) {
@@ -286,6 +306,7 @@ export function App() {
     setSourceSelection({ type: "all" });
     setAppPage({ type: "reader", view: "latest" });
     setUnreadOnly(false);
+    setFavoriteSort(defaultFavoriteArticleSort);
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
@@ -537,7 +558,8 @@ export function App() {
   const loadArticles = useCallback(async (
     selection: SourceSelection,
     view: ArticleView,
-    onlyUnread: boolean
+    onlyUnread: boolean,
+    sort: FavoriteArticleSort = defaultFavoriteArticleSort
   ) => {
     const requestVersion = articleRequestVersion.current + 1;
     articleRequestVersion.current = requestVersion;
@@ -549,7 +571,7 @@ export function App() {
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
-    if (view !== "recommended") {
+    if (view !== "recommended" && appPage.type !== "algorithm-transparency") {
       setRecommendationStatus(null);
       setIsRecommendationStatusLoading(false);
       setRecommendationStatusError(null);
@@ -562,13 +584,16 @@ export function App() {
         ...articleQueryFor(selection),
         view,
         limit: 50,
-        unreadOnly: onlyUnread
+        unreadOnly: supportsUnreadOnly(view) ? onlyUnread : false,
+        sort: view === "favorites" ? sort : undefined
       });
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
       rememberArticleStates(response.data, articleStateById.current);
-      setArticles(articlesVisibleForUnreadFilter(response.data, onlyUnread));
+      setArticles(
+        articlesVisibleForUnreadFilter(response.data, supportsUnreadOnly(view) && onlyUnread)
+      );
       setUnreadCount(response.meta.unreadCount);
       setNextArticleCursor(response.page.nextCursor);
       setSelectedArticleId(null);
@@ -587,7 +612,7 @@ export function App() {
         setIsArticlesLoading(false);
       }
     }
-  }, [t.errors.api]);
+  }, [appPage.type, t.errors.api]);
 
   useEffect(() => {
     if (appStage.type !== "reader") {
@@ -602,11 +627,15 @@ export function App() {
       return;
     }
 
-    void loadArticles(sourceSelection, appPage.view, unreadOnly);
-  }, [appPage, appStage.type, loadArticles, sourceSelection, unreadOnly]);
+    void loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort);
+  }, [appPage, appStage.type, favoriteSort, loadArticles, sourceSelection, unreadOnly]);
 
   useEffect(() => {
-    if (appStage.type !== "reader" || appPage.type !== "reader" || appPage.view !== "recommended") {
+    if (
+      appStage.type !== "reader" ||
+      (appPage.type !== "reader" && appPage.type !== "algorithm-transparency") ||
+      (appPage.type === "reader" && appPage.view !== "recommended")
+    ) {
       setRecommendationStatus(null);
       setRecommendationStatusError(null);
       setIsRecommendationStatusLoading(false);
@@ -615,6 +644,28 @@ export function App() {
 
     void loadRecommendationStatus();
   }, [appPage, appStage.type, loadRecommendationStatus]);
+
+  useEffect(() => {
+    selectedArticleIdRef.current = selectedArticleId;
+  }, [selectedArticleId]);
+
+  useEffect(() => {
+    function handlePopState() {
+      if (mobileArticleHistoryDepth.current <= 0) {
+        return;
+      }
+
+      mobileArticleHistoryDepth.current -= 1;
+      if (selectedArticleIdRef.current) {
+        clearSelectedArticle();
+      }
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -821,7 +872,7 @@ export function App() {
       await Promise.all([
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -868,7 +919,7 @@ export function App() {
         loadFeedFolders(),
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -918,7 +969,7 @@ export function App() {
     }
 
     if (appPage.type === "reader") {
-      await loadArticles(nextSourceSelection, appPage.view, unreadOnly);
+      await loadArticles(nextSourceSelection, appPage.view, unreadOnly, favoriteSort);
     }
   }
 
@@ -1055,14 +1106,21 @@ export function App() {
         view: currentArticleView,
         limit: 50,
         cursor: nextArticleCursor,
-        unreadOnly
+        unreadOnly: supportsUnreadOnly(currentArticleView) ? unreadOnly : false,
+        sort: currentArticleView === "favorites" ? favoriteSort : undefined
       });
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
       rememberArticleStates(response.data, articleStateById.current);
       setArticles((current) =>
-        appendUniqueArticles(current, articlesVisibleForUnreadFilter(response.data, unreadOnly))
+        appendUniqueArticles(
+          current,
+          articlesVisibleForUnreadFilter(
+            response.data,
+            supportsUnreadOnly(currentArticleView) && unreadOnly
+          )
+        )
       );
       setUnreadCount(response.meta.unreadCount);
       setNextArticleCursor(response.page.nextCursor);
@@ -1155,16 +1213,21 @@ export function App() {
   }
 
   function handleSelectArticle(articleId: string) {
+    if (isMobileArticleHistoryEnabled() && selectedArticleId !== articleId) {
+      window.history.pushState({ dibaoArticleId: articleId }, "", window.location.href);
+      mobileArticleHistoryDepth.current += 1;
+    }
     setSelectedArticleId(articleId);
     setIsSourceDrawerOpen(false);
   }
 
   function handleBackToArticleList() {
-    setSelectedArticleId(null);
-    setArticleDetail(null);
-    setRankExplanation(null);
-    setDetailError(null);
-    setExplanationError(null);
+    if (isMobileArticleHistoryEnabled() && mobileArticleHistoryDepth.current > 0) {
+      window.history.back();
+      return;
+    }
+
+    clearSelectedArticle();
   }
 
   function handleNavigationClick(event: MouseEvent<HTMLAnchorElement>, item: NavigationItemKey) {
@@ -1188,7 +1251,9 @@ export function App() {
       ? t.feedManagement.pageTitle
       : appPage.type === "settings"
         ? t.settings.pageTitle
-      : t.shell.pageTitles[currentArticleView];
+        : appPage.type === "algorithm-transparency"
+          ? t.algorithmTransparency.pageTitle
+          : t.shell.pageTitles[currentArticleView];
   const topbarStatus =
     appPage.type === "feed-management"
       ? isFeedsLoading
@@ -1199,8 +1264,13 @@ export function App() {
           embeddingError ??
           noticeText ??
           (isSettingsLoading || isEmbeddingLoading ? t.settings.loading : t.settings.status)
-      : noticeText ??
-        (isArticlesLoading ? t.shell.loadingArticles : t.shell.viewStatus[currentArticleView]);
+        : appPage.type === "algorithm-transparency"
+          ? recommendationStatusError ??
+            (isRecommendationStatusLoading
+              ? t.recommendationStatus.loading
+              : t.algorithmTransparency.status)
+          : noticeText ??
+            (isArticlesLoading ? t.shell.loadingArticles : t.shell.viewStatus[currentArticleView]);
 
   if (appStage.type === "auth-loading" || appStage.type === "setup-status-loading") {
     return (
@@ -1310,14 +1380,21 @@ export function App() {
             feedFolders={feedFolders}
             feeds={feeds}
             isAddingFeed={isAddingFeed}
+            isExportingOpml={isExportingOpml}
+            isImportingOpml={isImportingOpml}
             isLoading={isFeedsLoading}
+            isRefreshingAllFeeds={isRefreshingAllFeeds}
             onAddFeed={handleAddFeed}
             onCreateFolder={handleCreateManagedFolder}
             onDeleteFeed={handleDeleteManagedFeed}
             onDeleteFolder={handleDeleteManagedFolder}
+            onExportOpml={handleExportOpml}
+            onImportOpml={handleImportOpml}
+            onRefreshAllFeeds={handleRefreshAllFeeds}
             onUpdateFeedUrl={setFeedUrl}
             onUpdateFeed={handleUpdateManagedFeed}
             onUpdateFolder={handleUpdateManagedFolder}
+            opmlSummary={opmlSummary}
           />
         ) : appPage.type === "settings" ? (
           <SettingsWorkspace
@@ -1335,10 +1412,18 @@ export function App() {
             onDeleteEmbeddingProvider={handleDeleteEmbeddingProvider}
             onPreviewSettings={handlePreviewSettings}
             onRebuildEmbeddingIndex={handleRebuildEmbeddingIndex}
+            onOpenAlgorithmTransparency={() => setAppPage({ type: "algorithm-transparency" })}
             onSaveSettings={handleSaveSettings}
             onSaveEmbeddingProvider={handleSaveEmbeddingProvider}
             onTestEmbeddingProvider={handleTestEmbeddingProvider}
             settings={appSettings}
+          />
+        ) : appPage.type === "algorithm-transparency" ? (
+          <AlgorithmTransparencyPage
+            error={recommendationStatusError}
+            isLoading={isRecommendationStatusLoading}
+            onBack={() => setAppPage({ type: "settings" })}
+            status={recommendationStatus}
           />
         ) : (
           <div
@@ -1360,16 +1445,9 @@ export function App() {
               feeds={feeds}
               isOpen={isSourceDrawerOpen}
               isFeedsLoading={isFeedsLoading}
-              isExportingOpml={isExportingOpml}
-              isImportingOpml={isImportingOpml}
-              isRefreshingAllFeeds={isRefreshingAllFeeds}
-              onExportOpml={handleExportOpml}
-              onImportOpml={handleImportOpml}
-              onRefreshAllFeeds={handleRefreshAllFeeds}
               onRefreshFeed={handleRefreshFeed}
               onCloseSources={() => setIsSourceDrawerOpen(false)}
               onSelectSource={handleSelectSource}
-              opmlSummary={opmlSummary}
               refreshingFeedId={refreshingFeedId}
               sourceSelection={sourceSelection}
             />
@@ -1391,7 +1469,9 @@ export function App() {
               onLoadMore={handleLoadMoreArticles}
               onOpenSources={() => setIsSourceDrawerOpen(true)}
               onSelectArticle={handleSelectArticle}
+              onFavoriteSortChange={handleFavoriteSortChange}
               onUnreadOnlyChange={handleUnreadOnlyChange}
+              favoriteSort={favoriteSort}
               recommendationStatus={
                 currentArticleView === "recommended" ? recommendationStatus : null
               }
@@ -1402,6 +1482,7 @@ export function App() {
               selectedFeed={selectedFeed}
               selectedFolder={selectedFolder}
               showRecommendationStatus={currentArticleView === "recommended"}
+              showUnreadOnlyFilter={supportsUnreadOnly(currentArticleView)}
               isRecommendationStatusLoading={isRecommendationStatusLoading}
               unreadCount={unreadCount}
               unreadOnly={unreadOnly}
@@ -1690,6 +1771,7 @@ export function SettingsWorkspace(props: {
   rebuildingIndexId: string | null;
   testingProviderId: string | null;
   onDeleteEmbeddingProvider: (providerId: string) => Promise<void>;
+  onOpenAlgorithmTransparency: () => void;
   onPreviewSettings: (settings: AppSettings) => void;
   onRebuildEmbeddingIndex: (indexId: string) => Promise<void>;
   onSaveSettings: (input: UpdateSettingsInput) => Promise<void>;
@@ -1819,6 +1901,16 @@ export function SettingsWorkspace(props: {
           <div>
             <h3 id="settings-behavior-title">{t.settings.sections.behavior.title}</h3>
             <p>{t.settings.sections.behavior.body}</p>
+            <a
+              className={styles.textLink}
+              href="#"
+              onClick={(event) => {
+                event.preventDefault();
+                props.onOpenAlgorithmTransparency();
+              }}
+            >
+              {t.settings.sections.behavior.algorithmTransparencyLink}
+            </a>
           </div>
           <label className={styles.managementCheckbox} htmlFor="settings-ignore-scrolled">
             <input
@@ -2211,6 +2303,131 @@ export function SettingsWorkspace(props: {
   );
 }
 
+export function AlgorithmTransparencyPage(props: {
+  error: string | null;
+  isLoading: boolean;
+  onBack: () => void;
+  status: RecommendationStatus | null;
+}) {
+  const { t, formatDate } = useI18n();
+  const statusText = props.error
+    ? t.recommendationStatus.fallback
+    : props.status
+      ? t.recommendationStatus.modes[props.status.mode]
+      : props.isLoading
+        ? t.recommendationStatus.loading
+        : t.recommendationStatus.fallback;
+  const behaviorEntries = props.status ? Object.entries(props.status.behaviorCounts) : [];
+
+  return (
+    <section className={styles.settingsWorkspace} aria-labelledby="algorithm-transparency-title">
+      <div className={styles.settingsHeader}>
+        <div>
+          <p className={styles.kicker}>{t.settings.pageTitle}</p>
+          <h2 id="algorithm-transparency-title">{t.algorithmTransparency.pageTitle}</h2>
+        </div>
+        <button className={styles.secondaryButton} onClick={props.onBack} type="button">
+          {t.algorithmTransparency.backToSettings}
+        </button>
+      </div>
+
+      <div className={styles.settingsContent}>
+        {props.isLoading ? (
+          <p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>
+        ) : null}
+        {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
+
+        <section className={styles.settingsSection}>
+          <div>
+            <h3>{t.algorithmTransparency.sections.currentStatus}</h3>
+            <p>{statusText}</p>
+          </div>
+          {props.status ? (
+            <dl className={styles.managementStatusRows}>
+              <div>
+                <dt>{t.algorithmTransparency.fields.provider}</dt>
+                <dd>
+                  {props.status.activeProvider
+                    ? `${props.status.activeProvider.name} · ${props.status.activeProvider.model}`
+                    : t.settings.sections.provider.disabled}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.index}</dt>
+                <dd>
+                  {props.status.activeIndex
+                    ? `${props.status.activeIndex.model} · ${props.status.activeIndex.status}`
+                    : t.settings.sections.provider.coverageUnavailable}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.coverage}</dt>
+                <dd>
+                  {t.settings.sections.provider.coverage(
+                    props.status.coverage.embeddingCount,
+                    props.status.coverage.candidateCount,
+                    formatPercent(props.status.coverage.coverageRatio)
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.behaviorCounts}</dt>
+                <dd>
+                  {behaviorEntries.length > 0
+                    ? behaviorEntries.map(([name, count]) => `${name}: ${count}`).join(" · ")
+                    : t.recommendationStatus.metrics.unknown}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.clusters}</dt>
+                <dd>
+                  {t.recommendationStatus.metrics.clusters(
+                    props.status.clusters.positive,
+                    props.status.clusters.negative
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.lastUpdates}</dt>
+                <dd>
+                  {t.recommendationStatus.metrics.lastUpdate(
+                    props.status.lastRankingUpdate
+                      ? formatDate(props.status.lastRankingUpdate)
+                      : t.recommendationStatus.metrics.unknown,
+                    props.status.lastProfileUpdate
+                      ? formatDate(props.status.lastProfileUpdate)
+                      : t.recommendationStatus.metrics.unknown
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.algorithmTransparency.fields.warnings}</dt>
+                <dd>
+                  {props.status.warnings.length > 0
+                    ? props.status.warnings
+                        .map((warning) => `${warning.code}: ${warning.message}`)
+                        .join(" · ")
+                    : t.algorithmTransparency.noWarnings}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
+        </section>
+
+        <section className={styles.settingsSection}>
+          <div>
+            <h3>{t.algorithmTransparency.sections.howItWorks}</h3>
+            <p>{t.algorithmTransparency.copy.behavior}</p>
+          </div>
+          <p>{t.algorithmTransparency.copy.channelRanking}</p>
+          <p>{t.algorithmTransparency.copy.localData}</p>
+          <p>{t.algorithmTransparency.copy.fallback}</p>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function NumberSettingField(props: {
   id: string;
   label: string;
@@ -2246,21 +2463,13 @@ export function FeedPanel(props: {
   feeds: Feed[];
   isOpen: boolean;
   isFeedsLoading: boolean;
-  isExportingOpml: boolean;
-  isImportingOpml: boolean;
-  isRefreshingAllFeeds: boolean;
-  onExportOpml: () => void;
-  onImportOpml: (event: ChangeEvent<HTMLInputElement>) => void;
-  onRefreshAllFeeds: () => void;
   onRefreshFeed: (feed: Feed) => void;
   onCloseSources: () => void;
   onSelectSource: (source: SourceSelection) => void;
-  opmlSummary: OpmlImportResponse | null;
   refreshingFeedId: string | null;
   sourceSelection: SourceSelection;
 }) {
   const { t, formatDate } = useI18n();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const feedCountByFolder = useMemo(() => countFeedsByFolder(props.feeds), [props.feeds]);
 
   return (
@@ -2285,62 +2494,6 @@ export function FeedPanel(props: {
           <span className={styles.count}>{props.feeds.length}</span>
         </div>
       </div>
-
-      <div className={styles.opmlActions}>
-        <input
-          accept=".opml,.xml,text/xml,application/xml"
-          className={styles.fileInput}
-          onChange={props.onImportOpml}
-          ref={fileInputRef}
-          type="file"
-        />
-        <button
-          className={styles.secondaryButton}
-          disabled={props.isImportingOpml}
-          onClick={() => fileInputRef.current?.click()}
-          type="button"
-        >
-          {props.isImportingOpml ? t.opml.importing : t.opml.import}
-        </button>
-        <button
-          className={styles.secondaryButton}
-          disabled={props.isExportingOpml}
-          onClick={props.onExportOpml}
-          type="button"
-        >
-          {props.isExportingOpml ? t.opml.exporting : t.opml.export}
-        </button>
-        <button
-          className={styles.secondaryButton}
-          disabled={props.isRefreshingAllFeeds || !props.feeds.some((feed) => feed.enabled)}
-          onClick={props.onRefreshAllFeeds}
-          type="button"
-        >
-          {props.isRefreshingAllFeeds ? t.feeds.refreshingAll : t.feeds.refreshAll}
-        </button>
-      </div>
-
-      {props.opmlSummary ? (
-        <div className={styles.opmlSummary}>
-          <p>
-            {t.opml.importSummary(
-              props.opmlSummary.feedsCreated,
-              props.opmlSummary.feedsSkipped,
-              props.opmlSummary.foldersCreated
-            )}
-          </p>
-          {props.opmlSummary.errors.length > 0 ? (
-            <>
-              <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
-              <ul>
-                {props.opmlSummary.errors.map((error, index) => (
-                  <li key={`${error}-${index}`}>{error}</li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </div>
-      ) : null}
 
       {props.feedError ? <p className={styles.errorText}>{props.feedError}</p> : null}
 
@@ -2425,6 +2578,7 @@ export function ArticleListPanel(props: {
   articleError: string | null;
   articleView: ArticleView;
   articles: ArticleListItem[];
+  favoriteSort: FavoriteArticleSort;
   feedCount: number;
   isIgnoreTelemetryEnabled: boolean;
   isArticlesLoading: boolean;
@@ -2432,6 +2586,7 @@ export function ArticleListPanel(props: {
   isRecommendationStatusLoading: boolean;
   loadMoreError: string | null;
   nextCursor: string | null;
+  onFavoriteSortChange: (sort: FavoriteArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
   onLoadMore: () => void;
   onOpenSources: () => void;
@@ -2443,6 +2598,7 @@ export function ArticleListPanel(props: {
   selectedFeed: Feed | null;
   selectedFolder: FeedFolder | null;
   showRecommendationStatus: boolean;
+  showUnreadOnlyFilter: boolean;
   unreadCount: number;
   unreadOnly: boolean;
 }) {
@@ -2480,15 +2636,34 @@ export function ArticleListPanel(props: {
           >
             {t.feeds.openSources}
           </button>
-          <label className={styles.unreadOnlyToggle} htmlFor="article-unread-only">
-            <input
-              checked={props.unreadOnly}
-              id="article-unread-only"
-              onChange={(event) => props.onUnreadOnlyChange(event.target.checked)}
-              type="checkbox"
-            />
-            <span>{t.articles.unreadOnly}</span>
-          </label>
+          {props.articleView === "favorites" ? (
+            <label className={styles.articleSortControl} htmlFor="favorite-article-sort">
+              <span>{t.articles.sort.label}</span>
+              <select
+                id="favorite-article-sort"
+                onChange={(event) =>
+                  props.onFavoriteSortChange(event.target.value as FavoriteArticleSort)
+                }
+                value={props.favoriteSort}
+              >
+                <option value="favorited_desc">{t.articles.sort.favorited_desc}</option>
+                <option value="favorited_asc">{t.articles.sort.favorited_asc}</option>
+                <option value="published_desc">{t.articles.sort.published_desc}</option>
+                <option value="published_asc">{t.articles.sort.published_asc}</option>
+              </select>
+            </label>
+          ) : null}
+          {props.showUnreadOnlyFilter ? (
+            <label className={styles.unreadOnlyToggle} htmlFor="article-unread-only">
+              <input
+                checked={props.unreadOnly}
+                id="article-unread-only"
+                onChange={(event) => props.onUnreadOnlyChange(event.target.checked)}
+                type="checkbox"
+              />
+              <span>{t.articles.unreadOnly}</span>
+            </label>
+          ) : null}
           <span className={styles.count}>{props.unreadCount}</span>
         </div>
       </div>
@@ -2511,14 +2686,14 @@ export function ArticleListPanel(props: {
             title={
               props.feedCount === 0
                 ? t.articles.emptyNoFeedsTitle
-                : props.unreadOnly
+                : props.showUnreadOnlyFilter && props.unreadOnly
                   ? t.articles.emptyNoUnreadTitle
                 : t.articles.emptyNoArticlesTitle
             }
             body={
               props.feedCount === 0
                 ? t.articles.emptyNoFeedsBody
-                : props.unreadOnly
+                : props.showUnreadOnlyFilter && props.unreadOnly
                   ? t.articles.emptyNoUnreadBody
                 : t.articles.emptyNoArticlesBody
             }
@@ -2824,6 +2999,9 @@ function ArticleStateBadges(props: { state: ArticleState }) {
       {props.state.favorited ? (
         <span className={styles.articleBadgeAccent}>{t.articles.state.favorited}</span>
       ) : null}
+      {props.state.liked ? (
+        <span className={styles.articleBadgeAccent}>{t.articles.state.liked}</span>
+      ) : null}
       {props.state.readLater ? (
         <span className={styles.articleBadgeAccent}>{t.articles.state.readLater}</span>
       ) : null}
@@ -2851,6 +3029,14 @@ export function ArticleActionControls(props: {
           label={state.favorited ? t.actions.unfavorite : t.actions.favorite}
           onClick={() => props.onAction("favorite")}
           selected={state.favorited}
+        />
+        <ActionButton
+          ariaLabel={state.liked ? t.actions.aria.unlike : t.actions.aria.like}
+          busy={props.pendingAction === "like"}
+          disabled={isBusy}
+          label={state.liked ? t.actions.unlike : t.actions.like}
+          onClick={() => props.onAction("like")}
+          selected={state.liked}
         />
         <ActionButton
           ariaLabel={
@@ -3520,6 +3706,18 @@ function articleQueryFor(source: SourceSelection): { feedId?: string; folderId?:
   return {};
 }
 
+function supportsUnreadOnly(view: ArticleView): boolean {
+  return view === "latest" || view === "recommended";
+}
+
+function isMobileArticleHistoryEnabled(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 767px)").matches
+  );
+}
+
 function classNames(...values: Array<string | null | undefined | false>): string {
   return values.filter(Boolean).join(" ");
 }
@@ -3578,8 +3776,13 @@ function countFeedsByFolder(feeds: Feed[]): Map<string, number> {
   return counts;
 }
 
-function pageForNavigationItem(item: NavigationItemKey): AppPage | null {
-  if (item === "latest" || item === "recommended") {
+export function pageForNavigationItem(item: NavigationItemKey): AppPage | null {
+  if (
+    item === "latest" ||
+    item === "recommended" ||
+    item === "favorites" ||
+    item === "read_later"
+  ) {
     return { type: "reader", view: item };
   }
 
@@ -3601,6 +3804,10 @@ function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean
 
   if (page.type === "feed-management") {
     return item === "feeds";
+  }
+
+  if (page.type === "algorithm-transparency") {
+    return item === "settings";
   }
 
   return item === "settings";
@@ -3700,6 +3907,11 @@ function requestForArticleAction(
         type: "favorite",
         value: !state.favorited
       };
+    case "like":
+      return {
+        type: "like",
+        value: !state.liked
+      };
     case "readLater":
       return {
         type: "read_later",
@@ -3717,6 +3929,8 @@ function actionErrorMessageFor(intent: ArticleActionIntent, t: Dictionary) {
   switch (intent) {
     case "favorite":
       return t.actions.errors.favorite;
+    case "like":
+      return t.actions.errors.like;
     case "readLater":
       return t.actions.errors.readLater;
     case "notInterested":
