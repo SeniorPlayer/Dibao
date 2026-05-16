@@ -15,9 +15,8 @@
 
 覆盖动作：
 
+- 列表滚过未点进：`impression`
 - 打开文章：`open`
-- 标记已读：`mark_read`
-- 标记未读：`mark_unread`
 - 收藏 / 取消收藏：`favorite`
 - 稍后读 / 移出稍后读：`read_later`
 - 隐藏：`hide`
@@ -29,6 +28,7 @@
 - 多用户、团队、共享、评论、社交动作。
 - 标签系统、文件夹式文章整理、复杂归档系统。
 - 批量动作。
+- 手动“标记已读 / 标记未读”按钮。`mark_read` / `mark_unread` 只作为 API 兼容项保留，不是当前 Web 的主交互。
 - Undo 恢复机制。
 - 隐藏文章管理页或不感兴趣管理页。
 - 复杂推荐设置页。
@@ -70,6 +70,9 @@ state: {
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
+  interactionStatus: "unseen" | "ignored" | "opened" | "reading" | "read";
+  openedAt: number | null;
+  ignoredAt: number | null;
 }
 ```
 
@@ -79,9 +82,8 @@ state: {
 
 | 动作 | API type | value | 信号类型 | 推荐意义 | 当前列表影响 |
 | --- | --- | --- | --- | --- | --- |
-| 打开文章 | `open` | 可省略或 `true` | 隐式行为 | 轻度正信号，只记录打开 | 不移除 |
-| 标记已读 | `mark_read` | `true` | 显式意图 | stats only，表示处理完成 | 未读筛选中移除 |
-| 标记未读 | `mark_unread` | `true` | 显式意图 | stats only，弱负或纠正信号 | 未读筛选中出现 |
+| 列表滚过未点进 | `impression` | 可省略或 `true` | 隐式行为 | 轻度负信号，只表示被忽略 | 不移除，视觉弱化 |
+| 打开文章 | `open` | 可省略或 `true` | 隐式行为 | 轻度正信号，只记录点进 | 不移除 |
 | 收藏 | `favorite` | `true` | 显式意图 | 强正反馈，增强正向兴趣 | 收藏列表中出现 |
 | 取消收藏 | `favorite` | `false` | 显式意图 | stats only，弱负纠正 | 收藏列表中移除 |
 | 稍后读 | `read_later` | `true` | 显式意图 | 中度正反馈 | 稍后读列表中出现 |
@@ -95,6 +97,8 @@ state: {
 - “普通列表”指推荐、最新、搜索结果等以文章发现和阅读为主的列表。
 - 收藏列表和稍后读列表中的移除动作只影响当前对应列表，不代表删除文章。
 - `hidden` 与 `notInterested` 默认不在普通列表显示。
+- `unseen` 表示新文章尚未发生任何操作；`ignored` 表示在任意列表中被滚过但未点进；`opened` 表示已点进但尚未形成足够阅读深度；`reading/read` 由 `read_progress` 派生。
+- `open` 与 `impression` 互斥：一篇文章被忽略后，之后再次点进会回到 `opened`，并开始继续记录阅读深度。
 
 ## 触发位置
 
@@ -212,6 +216,8 @@ API：
 
 ### 标记已读
 
+> Legacy / API compatibility：当前 Web 不提供“标记已读”按钮。真实阅读完成由 `read_progress` 和阅读时长派生；本节仅保留给旧客户端或未来批量管理能力参考。
+
 触发位置：
 
 - 文章列表更多菜单。
@@ -249,6 +255,8 @@ API：
 - 不创建正向或负向兴趣簇。
 
 ### 标记未读
+
+> Legacy / API compatibility：当前 Web 不提供“标记未读”按钮。文章交互状态主要由 `impression`、`open` 和 `read_progress` 派生。
 
 触发位置：
 

@@ -66,7 +66,7 @@ unread preferred
 行为权重用于更新用户画像和来源统计。
 
 ```text
-impression: 0.05
+impression: 0.0
 open: 0.0
 read_progress_25: 1.2
 read_progress_50: 2.0
@@ -85,8 +85,9 @@ mark_unread: -0.5
 
 说明：
 
-- `impression` 是极弱信号，只用于曝光统计，不单独创建负向兴趣。
-- `open` 是极弱 stats-only 信号，不创建兴趣簇，不成为强来源偏好。
+- `impression` 表示列表中滚过但未点进，是 stats-only 信号，不单独创建负向兴趣簇；它会通过短期排序投影和文章状态产生轻度扣分。
+- `open` 表示点进文章，是极弱 stats-only 正信号，不创建兴趣簇，不成为强来源偏好。
+- `open` 与 `impression` 在文章交互状态上互斥：被忽略文章再次点进后状态回到 `opened`，后续通过 `read_progress` 判断真实阅读深度。
 - `quick_bounce` 指打开后很快关闭且阅读进度很低。
 - `not_interested` 是强负反馈。
 - `favorite` 是最强正反馈。
@@ -307,6 +308,7 @@ feed_positive_event_weight:
   read_later: 1.0
 
 feed_negative_event_weight:
+  impression: 0.05
   quick_bounce: 0.2
   hide: 1.5
   not_interested: 2.5
@@ -327,7 +329,7 @@ source_score_max = 0.18
 
 - 来源权重有上限，不能压倒兴趣匹配。
 - 用户手动设置的 `source_weight` 可作为额外加权。
-- `open` 不计入 clear signals；只有 open 时使用极低 open-only confidence，避免来源偏好完全归零但也不能过拟合。
+- `open` 和 `impression` 不计入 clear signals；只有 open 时使用极低 open-only confidence，避免来源偏好完全归零但也不能过拟合。
 - 10+ 个明确信号后，来源偏好才明显生效。
 
 ## 推荐排序参数
@@ -493,6 +495,7 @@ not_interested: -4.00
 Base ranking 不直接信任历史 `behavior_events.event_weight`。当前投影：
 
 ```text
+impression: -0.025
 open: +0.005
 read_progress_25: +0.01
 read_progress_50: +0.04

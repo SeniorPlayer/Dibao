@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   ArticleActionType,
+  ArticleInteractionStatus,
   ArticleStateSnapshot,
   DibaoDatabase,
   RecordArticleActionInput,
@@ -8,6 +9,7 @@ import type {
 } from "../types.js";
 
 export const ARTICLE_ACTION_EVENT_WEIGHTS = {
+  impression: -0.15,
   open: 0.2,
   mark_read: 0.7,
   mark_unread: -0.1,
@@ -27,6 +29,8 @@ type ArticleStateDbRow = {
   hidden: 0 | 1;
   notInterested: 0 | 1;
   readingProgress: number;
+  lastOpenedAt: number | null;
+  lastIgnoredAt: number | null;
 };
 
 export interface ArticleActionRepository {
@@ -143,6 +147,11 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
       Pick<RecordArticleActionInput, "progress" | "metadata">
   ): { sql: string; params: unknown[] } {
     switch (input.type) {
+      case "impression":
+        return {
+          sql: "update article_states set updated_at = ? where article_id = ?",
+          params: [input.now, input.articleId]
+        };
       case "open":
         return {
           sql: "update article_states set last_opened_at = ?, updated_at = ? where article_id = ?",
@@ -199,6 +208,7 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
             update article_states
             set
               reading_progress = max(reading_progress, ?),
+              last_opened_at = coalesce(last_opened_at, ?),
               read_at = case
                 when ? >= 1 and read_at is null then ?
                 else read_at
@@ -206,7 +216,14 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
               updated_at = ?
             where article_id = ?
           `,
-          params: [input.progress, input.progress, input.now, input.now, input.articleId]
+          params: [
+            input.progress,
+            input.now,
+            input.progress,
+            input.now,
+            input.now,
+            input.articleId
+          ]
         };
     }
   }
@@ -221,7 +238,14 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
             case when read_later_at is not null then 1 else 0 end as readLater,
             case when hidden_at is not null then 1 else 0 end as hidden,
             case when not_interested_at is not null then 1 else 0 end as notInterested,
-            reading_progress as readingProgress
+            reading_progress as readingProgress,
+            last_opened_at as lastOpenedAt,
+            (
+              select max(be.created_at)
+              from behavior_events be
+              where be.article_id = article_states.article_id
+                and be.event_type = 'impression'
+            ) as lastIgnoredAt
           from article_states
           where article_id = ?
         `
@@ -238,9 +262,32 @@ export class SqliteArticleActionRepository implements ArticleActionRepository {
       readLater: row.readLater === 1,
       hidden: row.hidden === 1,
       notInterested: row.notInterested === 1,
-      readingProgress: row.readingProgress
+      readingProgress: row.readingProgress,
+      interactionStatus: interactionStatusForState(row),
+      openedAt: row.lastOpenedAt,
+      ignoredAt:
+        row.lastIgnoredAt !== null &&
+        (row.lastOpenedAt === null || row.lastIgnoredAt > row.lastOpenedAt)
+          ? row.lastIgnoredAt
+          : null
     };
   }
+}
+
+function interactionStatusForState(row: ArticleStateDbRow): ArticleInteractionStatus {
+  if (row.read === 1 || row.readingProgress >= 0.9) {
+    return "read";
+  }
+  if (row.readingProgress >= 0.25) {
+    return "reading";
+  }
+  if (row.lastOpenedAt !== null && (row.lastIgnoredAt === null || row.lastOpenedAt >= row.lastIgnoredAt)) {
+    return "opened";
+  }
+  if (row.lastIgnoredAt !== null) {
+    return "ignored";
+  }
+  return "unseen";
 }
 
 function serializeMetadata(input: RecordArticleActionInput): string | null {

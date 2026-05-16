@@ -38,6 +38,8 @@ export const baselineRankingDefaults = {
   favoriteScore: 0.5,
   readLaterScore: 0.24,
   readProgressMaxScore: 0.22,
+  openedScore: 0.02,
+  ignoredPenalty: -0.08,
   readPenalty: -0.06,
   behaviorProjectionMinScore: -0.12,
   behaviorProjectionMaxScore: 0.16,
@@ -60,6 +62,8 @@ export type BaselineRankInput = {
   read: boolean;
   favorited: boolean;
   readLater: boolean;
+  opened?: boolean;
+  ignored?: boolean;
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
@@ -88,6 +92,8 @@ export const recommendationRankingDefaults = {
   unreadScore: 0.06,
   readLaterScore: 0.08,
   favoriteScore: 0.04,
+  openedScore: 0.015,
+  ignoredPenalty: -0.04,
   readPenalty: -0.08,
   negativeInterestPenaltyMax: 0.45,
   scoreMin: 0,
@@ -107,6 +113,8 @@ export type RecommendationRankInput = {
   read: boolean;
   favorited: boolean;
   readLater: boolean;
+  opened?: boolean;
+  ignored?: boolean;
   hidden: boolean;
   notInterested: boolean;
   embeddingStatus?: "ready" | "pending" | "none";
@@ -216,6 +224,10 @@ function calculateStateScore(input: BaselineRankInput): number {
   return (
     (input.favorited ? baselineRankingDefaults.favoriteScore : 0) +
     (input.readLater ? baselineRankingDefaults.readLaterScore : 0) +
+    (input.opened && !input.read && input.readingProgress <= 0
+      ? baselineRankingDefaults.openedScore
+      : 0) +
+    (input.ignored ? baselineRankingDefaults.ignoredPenalty : 0) +
     clamp(input.readingProgress, 0, 1) * baselineRankingDefaults.readProgressMaxScore +
     (input.read ? baselineRankingDefaults.readPenalty : 0)
   );
@@ -259,6 +271,8 @@ function calculateRecommendationStateScore(input: RecommendationRankInput): numb
     (!input.read ? recommendationRankingDefaults.unreadScore : 0) +
     (input.readLater ? recommendationRankingDefaults.readLaterScore : 0) +
     (input.favorited ? recommendationRankingDefaults.favoriteScore : 0) +
+    (input.opened && !input.read ? recommendationRankingDefaults.openedScore : 0) +
+    (input.ignored ? recommendationRankingDefaults.ignoredPenalty : 0) +
     (input.read ? recommendationRankingDefaults.readPenalty : 0)
   );
 }

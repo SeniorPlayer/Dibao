@@ -135,6 +135,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
     const clusters = activeIndexId ? this.clusterVectorsFor(activeIndexId) : [];
 
     for (const candidate of candidates) {
+      const isRead = candidate.state.read || candidate.state.interactionStatus === "read";
       const baseScore = calculateBaselineRankScore({
         now,
         publishedAt: candidate.publishedAt,
@@ -145,9 +146,11 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         feedOpenRate: candidate.feedOpenRate,
         feedFavoriteRate: candidate.feedFavoriteRate,
         feedNotInterestedRate: candidate.feedNotInterestedRate,
-        read: candidate.state.read,
+        read: isRead,
         favorited: candidate.state.favorited,
         readLater: candidate.state.readLater,
+        opened: candidate.state.interactionStatus === "opened",
+        ignored: candidate.state.interactionStatus === "ignored",
         hidden: candidate.state.hidden,
         notInterested: candidate.state.notInterested,
         readingProgress: candidate.state.readingProgress,
@@ -172,9 +175,11 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
           feedOpenRate: candidate.feedOpenRate,
           feedFavoriteRate: candidate.feedFavoriteRate,
           feedNotInterestedRate: candidate.feedNotInterestedRate,
-          read: candidate.state.read,
+          read: isRead,
           favorited: candidate.state.favorited,
           readLater: candidate.state.readLater,
+          opened: candidate.state.interactionStatus === "opened",
+          ignored: candidate.state.interactionStatus === "ignored",
           hidden: candidate.state.hidden,
           notInterested: candidate.state.notInterested,
           embeddingStatus:
@@ -342,7 +347,9 @@ function rankReasonsFor(source: ArticleRankExplanationSourceRow): RankExplanatio
   } else if (rank.stateScore < -MIN_REASON_SCORE) {
     candidates.push({
       type: "state",
-      label: "Read state lowers priority",
+      label: source.state.interactionStatus === "ignored"
+        ? "Ignored in the list"
+        : "Read state lowers priority",
       impact: "negative",
       magnitude: Math.abs(rank.stateScore),
       priority: 4
@@ -403,6 +410,9 @@ function positiveStateLabelFor(source: ArticleRankExplanationSourceRow): string 
   }
   if (source.state.readingProgress > 0) {
     labels.push("Reading progress");
+  }
+  if (source.state.interactionStatus === "opened") {
+    labels.push("Opened article");
   }
 
   return labels.length > 0 ? labels.join(", ") : "Article state increased the score";

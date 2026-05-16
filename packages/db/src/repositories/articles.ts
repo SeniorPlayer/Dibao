@@ -2,6 +2,7 @@ import { SqliteArticleFtsIndex } from "../fts/article-fts.js";
 import type {
   ArticleDetailRow,
   ArticleEmbeddingCandidateRow,
+  ArticleInteractionStatus,
   ArticleListInput,
   ArticleListItemRow,
   ArticleListResult,
@@ -41,6 +42,8 @@ type ArticleReadDbRow = ArticleDbRow & {
   hidden: 0 | 1;
   notInterested: 0 | 1;
   readingProgress: number;
+  lastOpenedAt: number | null;
+  lastIgnoredAt: number | null;
   rankScore: number | null;
   rankCalculatedAt: number | null;
 };
@@ -262,9 +265,28 @@ export class SqliteArticleRepository implements ArticleRepository {
     }
 
     if (input.status === "read") {
-      conditions.push("s.read_at is not null");
+      conditions.push("(s.read_at is not null or coalesce(s.reading_progress, 0) >= 0.9)");
     } else if (input.status === "unread") {
       conditions.push("s.read_at is null");
+      conditions.push("coalesce(s.reading_progress, 0) = 0");
+      conditions.push("s.last_opened_at is null");
+      conditions.push(`
+        not exists (
+          select 1
+          from behavior_events unread_be
+          where unread_be.article_id = a.id
+            and unread_be.event_type in (
+              'impression',
+              'open',
+              'read_progress',
+              'favorite',
+              'read_later',
+              'hide',
+              'not_interested',
+              'mark_read'
+            )
+        )
+      `);
     }
 
     if (input.view === "favorites") {
@@ -484,6 +506,13 @@ function baseArticleReadSelect(): string {
       case when s.hidden_at is not null then 1 else 0 end as hidden,
       case when s.not_interested_at is not null then 1 else 0 end as notInterested,
       coalesce(s.reading_progress, 0) as readingProgress,
+      s.last_opened_at as lastOpenedAt,
+      (
+        select max(be.created_at)
+        from behavior_events be
+        where be.article_id = a.id
+          and be.event_type = 'impression'
+      ) as lastIgnoredAt,
       coalesce(rs.score, base_rs.score) as rankScore,
       coalesce(rs.calculated_at, base_rs.calculated_at) as rankCalculatedAt
   `;
@@ -560,7 +589,14 @@ function mapArticleListItem(row: ArticleReadDbRow): ArticleListItemRow {
       readLater: row.readLater === 1,
       hidden: row.hidden === 1,
       notInterested: row.notInterested === 1,
-      readingProgress: row.readingProgress
+      readingProgress: row.readingProgress,
+      interactionStatus: interactionStatusForArticle(row),
+      openedAt: row.lastOpenedAt,
+      ignoredAt:
+        row.lastIgnoredAt !== null &&
+        (row.lastOpenedAt === null || row.lastIgnoredAt > row.lastOpenedAt)
+          ? row.lastIgnoredAt
+          : null
     },
     rank:
       row.rankScore === null || row.rankCalculatedAt === null
@@ -580,6 +616,22 @@ function mapArticleDetail(row: ArticleDetailDbRow): ArticleDetailRow {
     extractionStatus: row.extractionStatus,
     extractionError: row.extractionError
   };
+}
+
+function interactionStatusForArticle(row: ArticleReadDbRow): ArticleInteractionStatus {
+  if (row.read === 1 || row.readingProgress >= 0.9) {
+    return "read";
+  }
+  if (row.readingProgress >= 0.25) {
+    return "reading";
+  }
+  if (row.lastOpenedAt !== null && (row.lastIgnoredAt === null || row.lastOpenedAt >= row.lastIgnoredAt)) {
+    return "opened";
+  }
+  if (row.lastIgnoredAt !== null) {
+    return "ignored";
+  }
+  return "unseen";
 }
 
 function normalizeLimit(limit: number | undefined): number {

@@ -1624,7 +1624,7 @@ function parseArticleActionBody(body: ArticleActionBody | undefined):
     return {
       ok: false,
       message:
-        "type must be open, mark_read, mark_unread, favorite, unfavorite, read_later, remove_read_later, hide, not_interested, or read_progress"
+        "type must be impression, open, mark_read, mark_unread, favorite, unfavorite, read_later, remove_read_later, hide, not_interested, or read_progress"
     };
   }
 

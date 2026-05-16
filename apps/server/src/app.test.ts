@@ -2902,6 +2902,45 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("records scrolled-past impressions as ignored until the article is opened", async () => {
+    const db = createFixtureDatabase();
+    let now = 5400;
+    const app = buildServer({ db, logger: false, now: () => now });
+
+    try {
+      const impression = await postJson(app, "/api/articles/article_recommended/actions", {
+        type: "impression",
+        metadata: {
+          reason: "scrolled_past_unopened"
+        }
+      });
+      now = 5500;
+      const open = await postJson(app, "/api/articles/article_recommended/actions", {
+        type: "open"
+      });
+
+      expect(impression.statusCode, impression.body).toBe(200);
+      expect(impression.json().data.state).toMatchObject({
+        interactionStatus: "ignored",
+        ignoredAt: 5400,
+        openedAt: null
+      });
+      expect(open.statusCode, open.body).toBe(200);
+      expect(open.json().data.state).toMatchObject({
+        interactionStatus: "opened",
+        ignoredAt: null,
+        openedAt: 5500
+      });
+      expect(listBehaviorEventTypes(db, "article_recommended")).toEqual([
+        "impression",
+        "open"
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("records read progress article actions", async () => {
     const db = createFixtureDatabase();
     const app = buildServer({ db, logger: false, now: () => 5300 });
@@ -3141,7 +3180,7 @@ describe("server API vertical slice", () => {
         error: {
           code: "VALIDATION_ERROR",
           message:
-            "type must be open, mark_read, mark_unread, favorite, unfavorite, read_later, remove_read_later, hide, not_interested, or read_progress"
+            "type must be impression, open, mark_read, mark_unread, favorite, unfavorite, read_later, remove_read_later, hide, not_interested, or read_progress"
         }
       });
     } finally {

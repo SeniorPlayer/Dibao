@@ -725,7 +725,10 @@ cursor
       "readLater": false,
       "hidden": false,
       "notInterested": false,
-      "readingProgress": 0.35
+      "readingProgress": 0.35,
+      "interactionStatus": "reading",
+      "openedAt": 1790000000000,
+      "ignoredAt": null
     }
   }
 }
@@ -748,6 +751,7 @@ cursor
 `type` 可选值：
 
 ```text
+impression
 open
 mark_read
 mark_unread
@@ -762,8 +766,12 @@ read_progress
 
 说明：
 
+- `impression` 表示文章在列表中被滚过但未点进，是轻度负向的被动行为；当前 Web 仅对 `interactionStatus="unseen"` 的文章自动发送。
+- `open` 表示用户点进文章，是轻度正向行为。`open` 与 `impression` 互斥：若一篇已忽略文章之后被点进，服务端会把 `interactionStatus` 派生回 `opened`。
+- `read_progress` 是判断真实阅读深度的主要信号；前端不再提供“标记已读”按钮。
 - `favorite`、`read_later`、`mark_read` 支持 `value: false`，服务端会分别规范化为 `unfavorite`、`remove_read_later`、`mark_unread`。
 - 也可以直接发送 `unfavorite`、`remove_read_later`、`mark_unread`。
+- `mark_read` / `mark_unread` 仅作为兼容旧客户端或未来批量管理的 API 保留，不是当前 Web 的主行为入口。
 - `read_complete` 不作为 MVP 显式 API action；后续可由阅读进度或阅读时长派生。
 
 `read_progress` 示例，`progress` 与 `value` 都可用，推荐新代码使用 `progress`：
@@ -789,7 +797,10 @@ read_progress
       "readLater": false,
       "hidden": false,
       "notInterested": false,
-      "readingProgress": 1
+      "readingProgress": 1,
+      "interactionStatus": "read",
+      "openedAt": 1790000000000,
+      "ignoredAt": null
     }
   }
 }

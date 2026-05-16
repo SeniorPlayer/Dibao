@@ -7,6 +7,7 @@ import {
   userMessageForError,
   type ArticleActionRequest,
   type ArticleDetail,
+  type ArticleInteractionStatus,
   type ArticleListItem,
   type ArticleState,
   type ArticleView,
@@ -77,7 +78,7 @@ export type AppStage =
   | { type: "setup-provider-placeholder" }
   | { type: "reader" };
 
-export type ArticleActionIntent = "favorite" | "readLater" | "readStatus" | "notInterested";
+export type ArticleActionIntent = "favorite" | "readLater" | "notInterested";
 
 type PendingArticleAction = {
   articleId: string;
@@ -186,6 +187,7 @@ export function App() {
   );
   const [notice, setNotice] = useState<Notice | null>(null);
   const openedArticleIds = useRef(new Set<string>());
+  const ignoredArticleIds = useRef(new Set<string>());
   const articleRequestVersion = useRef(0);
   const hasLoadedSettingsForSession = useRef(false);
 
@@ -301,6 +303,7 @@ export function App() {
     setNotice(null);
     hasLoadedSettingsForSession.current = false;
     openedArticleIds.current.clear();
+    ignoredArticleIds.current.clear();
     articleRequestVersion.current += 1;
   }, [setLocale]);
 
@@ -533,7 +536,7 @@ export function App() {
       }
       setArticles(response.data);
       setNextArticleCursor(response.page.nextCursor);
-      setSelectedArticleId(response.data[0]?.id ?? null);
+      setSelectedArticleId(null);
     } catch (error) {
       if (requestVersion !== articleRequestVersion.current) {
         return;
@@ -1052,6 +1055,37 @@ export function App() {
     }
   }
 
+  async function handleIgnoreArticle(articleId: string) {
+    const article = articles.find((candidate) => candidate.id === articleId);
+    const interactionStatus = article ? articleInteractionStatusForState(article.state) : "unseen";
+
+    if (
+      !article ||
+      selectedArticleId === articleId ||
+      openedArticleIds.current.has(articleId) ||
+      ignoredArticleIds.current.has(articleId) ||
+      interactionStatus !== "unseen"
+    ) {
+      return;
+    }
+
+    ignoredArticleIds.current.add(articleId);
+
+    try {
+      const result = await dibaoApi.postArticleAction(articleId, {
+        type: "impression",
+        metadata: {
+          reason: "scrolled_past_unopened",
+          view: currentArticleView
+        }
+      });
+      applyArticleState(articleId, result.state);
+    } catch {
+      ignoredArticleIds.current.delete(articleId);
+      // Passive list telemetry should not interrupt browsing.
+    }
+  }
+
   async function handleReadProgress(
     articleId: string,
     progress: number,
@@ -1277,6 +1311,7 @@ export function App() {
               isLoadingMore={isLoadingMoreArticles}
               loadMoreError={loadMoreError}
               nextCursor={nextArticleCursor}
+              onIgnoreArticle={handleIgnoreArticle}
               onLoadMore={handleLoadMoreArticles}
               onSelectArticle={setSelectedArticleId}
               recommendationStatus={
@@ -2298,6 +2333,7 @@ export function ArticleListPanel(props: {
   isRecommendationStatusLoading: boolean;
   loadMoreError: string | null;
   nextCursor: string | null;
+  onIgnoreArticle: (articleId: string) => void;
   onLoadMore: () => void;
   onSelectArticle: (articleId: string) => void;
   recommendationStatus: RecommendationStatus | null;
@@ -2308,8 +2344,16 @@ export function ArticleListPanel(props: {
   showRecommendationStatus: boolean;
 }) {
   const { t, formatDate } = useI18n();
+  const listRef = useRef<HTMLDivElement>(null);
   const sourceTitle =
     props.selectedFeed?.title ?? props.selectedFolder?.title ?? t.articles.allSources;
+
+  useArticleListIgnoreTelemetry({
+    articles: props.articles,
+    onIgnoreArticle: props.onIgnoreArticle,
+    rootRef: listRef,
+    selectedArticleId: props.selectedArticleId
+  });
 
   return (
     <section
@@ -2335,7 +2379,7 @@ export function ArticleListPanel(props: {
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
 
-      <div className={styles.list} aria-live="polite">
+      <div className={styles.list} aria-live="polite" ref={listRef}>
         {props.isArticlesLoading ? <SkeletonRows count={10} /> : null}
 
         {!props.isArticlesLoading && props.articles.length === 0 ? (
@@ -2356,13 +2400,8 @@ export function ArticleListPanel(props: {
         {!props.isArticlesLoading &&
           props.articles.map((article) => (
             <button
-              className={
-                props.selectedArticleId === article.id
-                  ? styles.articleItemActive
-                  : article.state.read
-                    ? styles.articleItemRead
-                    : styles.articleItem
-              }
+              className={articleItemClassName(article, props.selectedArticleId)}
+              data-article-id={article.id}
               key={article.id}
               onClick={() => props.onSelectArticle(article.id)}
               type="button"
@@ -2432,6 +2471,107 @@ function RecommendationStatusBar(props: {
       ) : null}
     </section>
   );
+}
+
+function useArticleListIgnoreTelemetry(props: {
+  articles: ArticleListItem[];
+  onIgnoreArticle: (articleId: string) => void;
+  rootRef: RefObject<HTMLDivElement | null>;
+  selectedArticleId: string | null;
+}) {
+  const onIgnoreArticleRef = useRef(props.onIgnoreArticle);
+  const selectedArticleIdRef = useRef(props.selectedArticleId);
+  const seenVisibleIds = useRef(new Set<string>());
+  const sentIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    onIgnoreArticleRef.current = props.onIgnoreArticle;
+  }, [props.onIgnoreArticle]);
+
+  useEffect(() => {
+    selectedArticleIdRef.current = props.selectedArticleId;
+  }, [props.selectedArticleId]);
+
+  useEffect(() => {
+    const root = props.rootRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const visibleCandidates = props.articles.filter(
+      (article) => articleInteractionStatusForState(article.state) === "unseen"
+    );
+    const candidateIds = new Set(visibleCandidates.map((article) => article.id));
+
+    for (const id of Array.from(seenVisibleIds.current)) {
+      if (!candidateIds.has(id)) {
+        seenVisibleIds.current.delete(id);
+      }
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement;
+          const articleId = target.dataset.articleId;
+          if (
+            !articleId ||
+            !candidateIds.has(articleId) ||
+            sentIds.current.has(articleId) ||
+            selectedArticleIdRef.current === articleId
+          ) {
+            continue;
+          }
+
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+            seenVisibleIds.current.add(articleId);
+            continue;
+          }
+
+          const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
+          const hasScrolledPast = entry.boundingClientRect.bottom <= rootTop;
+          if (seenVisibleIds.current.has(articleId) && hasScrolledPast) {
+            sentIds.current.add(articleId);
+            onIgnoreArticleRef.current(articleId);
+          }
+        }
+      },
+      {
+        root,
+        threshold: [0, 0.6]
+      }
+    );
+
+    for (const article of visibleCandidates) {
+      const element = root.querySelector<HTMLElement>(
+        `[data-article-id="${cssEscape(article.id)}"]`
+      );
+      if (element) {
+        observer.observe(element);
+      }
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [props.articles, props.rootRef]);
+}
+
+function cssEscape(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+
+  return value.replace(/["\\]/g, "\\$&");
+}
+
+function articleItemClassName(article: ArticleListItem, selectedArticleId: string | null): string {
+  if (selectedArticleId === article.id) {
+    return styles.articleItemActive;
+  }
+
+  const status = articleInteractionStatusForState(article.state);
+  return status === "read" || status === "ignored" ? styles.articleItemRead : styles.articleItem;
 }
 
 function ArticleDetailPanel(props: {
@@ -2531,11 +2671,18 @@ function ArticleDetailPanel(props: {
 
 function ArticleStateBadges(props: { state: ArticleState }) {
   const { t } = useI18n();
+  const interactionStatus = articleInteractionStatusForState(props.state);
 
   return (
     <span className={styles.articleBadges}>
-      <span className={props.state.read ? styles.articleBadgeMuted : styles.articleBadge}>
-        {props.state.read ? t.articles.state.read : t.articles.state.unread}
+      <span
+        className={
+          interactionStatus === "unseen" || interactionStatus === "opened"
+            ? styles.articleBadge
+            : styles.articleBadgeMuted
+        }
+      >
+        {t.articles.state[interactionStatus]}
       </span>
       {props.state.favorited ? (
         <span className={styles.articleBadgeAccent}>{t.articles.state.favorited}</span>
@@ -2577,14 +2724,6 @@ export function ArticleActionControls(props: {
           label={state.readLater ? t.actions.removeReadLater : t.actions.readLater}
           onClick={() => props.onAction("readLater")}
           selected={state.readLater}
-        />
-        <ActionButton
-          ariaLabel={state.read ? t.actions.aria.markUnread : t.actions.aria.markRead}
-          busy={props.pendingAction === "readStatus"}
-          disabled={isBusy}
-          label={state.read ? t.actions.markUnread : t.actions.markRead}
-          onClick={() => props.onAction("readStatus")}
-          selected={state.read}
         />
         <ActionButton
           ariaLabel={
@@ -3393,6 +3532,19 @@ function downloadTextFile(filename: string, content: string, type: string): void
   URL.revokeObjectURL(url);
 }
 
+function articleInteractionStatusForState(state: ArticleState): ArticleInteractionStatus {
+  if (state.interactionStatus) {
+    return state.interactionStatus;
+  }
+  if (state.read || state.readingProgress >= 0.9) {
+    return "read";
+  }
+  if (state.readingProgress >= 0.25) {
+    return "reading";
+  }
+  return "unseen";
+}
+
 function requestForArticleAction(
   intent: ArticleActionIntent,
   state: ArticleState
@@ -3408,11 +3560,6 @@ function requestForArticleAction(
         type: "read_later",
         value: !state.readLater
       };
-    case "readStatus":
-      return {
-        type: "mark_read",
-        value: !state.read
-      };
     case "notInterested":
       return {
         type: "not_interested",
@@ -3427,8 +3574,6 @@ function actionErrorMessageFor(intent: ArticleActionIntent, t: Dictionary) {
       return t.actions.errors.favorite;
     case "readLater":
       return t.actions.errors.readLater;
-    case "readStatus":
-      return t.actions.errors.readStatus;
     case "notInterested":
       return t.actions.errors.notInterested;
   }

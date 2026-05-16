@@ -234,6 +234,7 @@ describe("web i18n", () => {
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor="cursor_1"
+          onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onSelectArticle={() => undefined}
           recommendationStatus={null}
@@ -271,6 +272,7 @@ describe("web i18n", () => {
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
+          onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onSelectArticle={() => undefined}
           recommendationStatus={{
@@ -529,8 +531,8 @@ describe("web i18n", () => {
 
     expect(html).toContain("收藏");
     expect(html).toContain("稍后读");
-    expect(html).toContain("标记已读");
     expect(html).toContain("不感兴趣");
+    expect(html).not.toContain("标记已读");
   });
 
   it("renders rank explanation copy from the dictionary", () => {

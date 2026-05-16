@@ -191,6 +191,8 @@ export type ArticleListView = "recommended" | "latest" | "favorites" | "read_lat
 
 export type ArticleReadStatus = "unread" | "read" | "all";
 
+export type ArticleInteractionStatus = "unseen" | "ignored" | "opened" | "reading" | "read";
+
 export type ArticleListInput = {
   view?: ArticleListView;
   feedId?: string;
@@ -208,11 +210,15 @@ export type ArticleStateSnapshot = {
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
+  interactionStatus: ArticleInteractionStatus;
+  openedAt: number | null;
+  ignoredAt: number | null;
 };
 
 export type ArticleRankingEmbeddingStatus = "ready" | "embedding_pending" | "no_provider";
 
 export type ArticleActionType =
+  | "impression"
   | "open"
   | "mark_read"
   | "mark_unread"
@@ -224,7 +230,7 @@ export type ArticleActionType =
   | "not_interested"
   | "read_progress";
 
-export type BehaviorEventType = ArticleActionType | "impression" | "read_complete" | "quick_bounce";
+export type BehaviorEventType = ArticleActionType | "read_complete" | "quick_bounce";
 
 export type RecordArticleActionInput = {
   articleId: string;

@@ -12,6 +12,8 @@ export type ApiError = {
   };
 };
 
+export type ArticleInteractionStatus = "unseen" | "ignored" | "opened" | "reading" | "read";
+
 export type ArticleState = {
   read: boolean;
   favorited: boolean;
@@ -19,6 +21,9 @@ export type ArticleState = {
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
+  interactionStatus: ArticleInteractionStatus;
+  openedAt: number | null;
+  ignoredAt: number | null;
 };
 
 export type RankReasonImpact = "positive" | "negative" | "neutral";

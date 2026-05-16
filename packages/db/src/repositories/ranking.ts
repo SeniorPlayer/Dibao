@@ -1,4 +1,5 @@
 import type {
+  ArticleInteractionStatus,
   ArticleRankExplanationSourceRow,
   ArticleRankingCandidateRow,
   DibaoDatabase,
@@ -25,6 +26,8 @@ type ArticleRankingCandidateDbRow = {
   hidden: 0 | 1;
   notInterested: 0 | 1;
   readingProgress: number;
+  lastOpenedAt: number | null;
+  lastIgnoredAt: number | null;
   behaviorProjectionScore: number;
   behaviorEventCount: number;
   vectorBlob: Buffer | null;
@@ -43,6 +46,8 @@ type ArticleRankExplanationSourceDbRow = {
   hidden: 0 | 1;
   notInterested: 0 | 1;
   readingProgress: number;
+  lastOpenedAt: number | null;
+  lastIgnoredAt: number | null;
   score: number | null;
   interestScore: number | null;
   sourceScore: number | null;
@@ -130,6 +135,13 @@ export class SqliteRankingRepository implements RankingRepository {
             case when s.hidden_at is not null then 1 else 0 end as hidden,
             case when s.not_interested_at is not null then 1 else 0 end as notInterested,
             coalesce(s.reading_progress, 0) as readingProgress,
+            s.last_opened_at as lastOpenedAt,
+            (
+              select max(be.created_at)
+              from behavior_events be
+              where be.article_id = a.id
+                and be.event_type = 'impression'
+            ) as lastIgnoredAt,
             coalesce(rs.score, base_rs.score) as score,
             coalesce(rs.interest_score, base_rs.interest_score) as interestScore,
             coalesce(rs.source_score, base_rs.source_score) as sourceScore,
@@ -211,6 +223,7 @@ export class SqliteRankingRepository implements RankingRepository {
                 article_id,
                 coalesce(sum(
                   case
+                    when event_type = 'impression' then -0.025
                     when event_type = 'open' then 0.005
                     when event_type = 'read_progress' then
                       case
@@ -248,6 +261,13 @@ export class SqliteRankingRepository implements RankingRepository {
               case when s.hidden_at is not null then 1 else 0 end as hidden,
               case when s.not_interested_at is not null then 1 else 0 end as notInterested,
               coalesce(s.reading_progress, 0) as readingProgress,
+              s.last_opened_at as lastOpenedAt,
+              (
+                select max(be.created_at)
+                from behavior_events be
+                where be.article_id = a.id
+                  and be.event_type = 'impression'
+              ) as lastIgnoredAt,
               coalesce(es.behaviorProjectionScore, 0) as behaviorProjectionScore,
               coalesce(es.behaviorEventCount, 0) as behaviorEventCount,
               ae.vector_blob as vectorBlob,
@@ -355,7 +375,14 @@ function mapExplanationSource(
     readLater: row.readLater === 1,
     hidden: row.hidden === 1,
     notInterested: row.notInterested === 1,
-    readingProgress: row.readingProgress
+    readingProgress: row.readingProgress,
+    interactionStatus: interactionStatusForRankingState(row),
+    openedAt: row.lastOpenedAt,
+    ignoredAt:
+      row.lastIgnoredAt !== null &&
+      (row.lastOpenedAt === null || row.lastIgnoredAt > row.lastOpenedAt)
+        ? row.lastIgnoredAt
+        : null
   };
 
   return {
@@ -406,7 +433,14 @@ function mapCandidate(row: ArticleRankingCandidateDbRow): ArticleRankingCandidat
       readLater: row.readLater === 1,
       hidden: row.hidden === 1,
       notInterested: row.notInterested === 1,
-      readingProgress: row.readingProgress
+      readingProgress: row.readingProgress,
+      interactionStatus: interactionStatusForRankingState(row),
+      openedAt: row.lastOpenedAt,
+      ignoredAt:
+        row.lastIgnoredAt !== null &&
+        (row.lastOpenedAt === null || row.lastIgnoredAt > row.lastOpenedAt)
+          ? row.lastIgnoredAt
+          : null
     },
     behaviorProjectionScore: row.behaviorProjectionScore,
     behaviorEventCount: row.behaviorEventCount,
@@ -414,4 +448,25 @@ function mapCandidate(row: ArticleRankingCandidateDbRow): ArticleRankingCandidat
     embeddingContentHash: row.embeddingContentHash,
     embeddingStatus: row.embeddingStatus
   };
+}
+
+function interactionStatusForRankingState(row: {
+  read: 0 | 1;
+  readingProgress: number;
+  lastOpenedAt: number | null;
+  lastIgnoredAt: number | null;
+}): ArticleInteractionStatus {
+  if (row.read === 1 || row.readingProgress >= 0.9) {
+    return "read";
+  }
+  if (row.readingProgress >= 0.25) {
+    return "reading";
+  }
+  if (row.lastOpenedAt !== null && (row.lastIgnoredAt === null || row.lastOpenedAt >= row.lastIgnoredAt)) {
+    return "opened";
+  }
+  if (row.lastIgnoredAt !== null) {
+    return "ignored";
+  }
+  return "unseen";
 }

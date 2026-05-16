@@ -36,6 +36,8 @@ export type UpdateFeedFolderInput = {
   sortOrder?: number;
 };
 
+export type ArticleInteractionStatus = "unseen" | "ignored" | "opened" | "reading" | "read";
+
 export type ArticleState = {
   read: boolean;
   favorited: boolean;
@@ -43,6 +45,9 @@ export type ArticleState = {
   hidden: boolean;
   notInterested: boolean;
   readingProgress: number;
+  interactionStatus?: ArticleInteractionStatus;
+  openedAt?: number | null;
+  ignoredAt?: number | null;
 };
 
 export type ArticleListItem = {
@@ -67,7 +72,7 @@ export type ArticleDetail = ArticleListItem & {
 
 export type ArticleActionRequest =
   | {
-      type: "open" | "hide" | "not_interested";
+      type: "impression" | "open" | "hide" | "not_interested";
       value?: true;
       metadata?: Record<string, unknown>;
     }

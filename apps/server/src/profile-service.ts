@@ -69,7 +69,7 @@ const READ_PROGRESS_TIER_ORDER: Record<ReadProgressTier, number> = {
 };
 
 const PROFILE_EVENT_WEIGHTS = {
-  impression: 0.05,
+  impression: 0,
   open: 0,
   read_progress_25: 1.2,
   read_progress_50: 2,
@@ -86,7 +86,20 @@ const PROFILE_EVENT_WEIGHTS = {
   mark_unread: -0.5
 } as const;
 
-const SOURCE_EVENT_WEIGHTS = {
+type SourceEventKey =
+  | "impression"
+  | "open"
+  | "read_complete"
+  | "favorite"
+  | "read_later"
+  | "quick_bounce"
+  | "hide"
+  | "not_interested";
+
+type SourceEventWeight = { positive: number; negative: number; clear?: boolean };
+
+const SOURCE_EVENT_WEIGHTS: Record<SourceEventKey, SourceEventWeight> = {
+  impression: { positive: 0, negative: 0.05, clear: false },
   open: { positive: 0.02, negative: 0, clear: false },
   read_complete: { positive: 1, negative: 0 },
   favorite: { positive: 2, negative: 0 },
@@ -94,7 +107,7 @@ const SOURCE_EVENT_WEIGHTS = {
   quick_bounce: { positive: 0, negative: 0.2 },
   hide: { positive: 0, negative: 1.5 },
   not_interested: { positive: 0, negative: 2.5 }
-} as const;
+};
 
 const FEED_STATS_CLEAR_SIGNAL_TARGET = 10;
 const FEED_STATS_OPEN_ONLY_CONFIDENCE = 0.1;
@@ -466,7 +479,7 @@ export class ProfileService {
       const weights = SOURCE_EVENT_WEIGHTS[key];
       positiveScore += weights.positive;
       negativeScore += weights.negative;
-      if (key !== "open") {
+      if (weights.clear !== false && key !== "open") {
         clearSignalCount += 1;
       }
       if (key === "open") {
@@ -534,7 +547,7 @@ function sourceEventKeyFor(
     ProfileBehaviorEventRow,
     "eventType" | "metadataJson" | "readingProgress" | "title" | "summary" | "contentText"
   >
-): keyof typeof SOURCE_EVENT_WEIGHTS | null {
+): SourceEventKey | null {
   if (event.eventType === "read_progress") {
     if (isQuickBounce(event)) {
       return "quick_bounce";
@@ -543,7 +556,7 @@ function sourceEventKeyFor(
   }
 
   return event.eventType in SOURCE_EVENT_WEIGHTS
-    ? (event.eventType as keyof typeof SOURCE_EVENT_WEIGHTS)
+    ? (event.eventType as SourceEventKey)
     : null;
 }
 
