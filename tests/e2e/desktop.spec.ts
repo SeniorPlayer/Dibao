@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
+import Database from "better-sqlite3";
+import { resolve } from "node:path";
 import { startFixtureServer } from "./fixtures.js";
 
 const accessPassword = "correct horse battery";
+const e2eDatabasePath = resolve(".tmp/e2e/dibao.sqlite");
 
 test.beforeEach(async ({ page }) => {
   await blockExternalBrowserRequests(page);
@@ -38,6 +41,49 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "E2E Article Beta" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
 
+    const scrollMetrics = await page.evaluate(() => {
+      function panelMetrics(testId: string) {
+        const element = document.querySelector(`[data-testid="${testId}"]`);
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`Missing ${testId}`);
+        }
+        const style = window.getComputedStyle(element);
+        return {
+          clientHeight: element.clientHeight,
+          overflowY: style.overflowY,
+          scrollHeight: element.scrollHeight
+        };
+      }
+
+      return {
+        documentClientHeight: document.documentElement.clientHeight,
+        documentScrollHeight: document.documentElement.scrollHeight,
+        feed: panelMetrics("feed-scroll-container"),
+        list: panelMetrics("article-list-scroll-container"),
+        reader: panelMetrics("reader-scroll-container")
+      };
+    });
+    expect(scrollMetrics.documentScrollHeight).toBeLessThanOrEqual(
+      scrollMetrics.documentClientHeight + 4
+    );
+    expect(scrollMetrics.feed.overflowY).toBe("auto");
+    expect(scrollMetrics.list.overflowY).toBe("auto");
+    expect(scrollMetrics.reader.overflowY).toBe("auto");
+    expect(scrollMetrics.list.scrollHeight).toBeGreaterThan(scrollMetrics.list.clientHeight);
+    expect(scrollMetrics.reader.scrollHeight).toBeGreaterThan(scrollMetrics.reader.clientHeight);
+
+    await page.getByTestId("reader-scroll-container").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    await expect
+      .poll(() => latestReadProgressEvent("E2E Article Beta")?.metadata.scrollSource)
+      .toBe("reader");
+    const readProgress = latestReadProgressEvent("E2E Article Beta");
+    expect(readProgress?.metadata.durationMs).toBeGreaterThanOrEqual(0);
+    expect(readProgress?.metadata.activeDurationMs).toBeGreaterThanOrEqual(0);
+    expect(readProgress?.metadata.progress).toBeGreaterThanOrEqual(0.25);
+
     await page.getByRole("button", { name: "收藏" }).click();
     await expect(page.getByRole("button", { name: "取消收藏" })).toBeVisible();
     await page.getByRole("button", { name: "稍后读" }).click();
@@ -47,6 +93,10 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
 
     await page.getByRole("link", { name: "推荐" }).click();
     await expect(page.getByRole("heading", { name: "推荐文章" })).toBeVisible();
+    await expect(page.getByText("学习状态")).toBeVisible();
+    await expect(page.getByText("基础排序中")).toBeVisible();
+    await expect(page.getByText(/行为 \d+/)).toBeVisible();
+    await expect(page.getByText(/Coverage \d+%/)).toBeVisible();
     await expect(page.getByRole("button", { name: /E2E Article Alpha/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
 
@@ -62,12 +112,61 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByLabel("启用 provider").check();
     await page.getByRole("button", { name: "保存 provider" }).click();
     await expect(page.getByText("Embedding provider 已保存。")).toBeVisible();
+    await expect(page.getByText(/0 \/ \d+ · 0%/)).toBeVisible();
+    await expect(page.getByText(/待处理 \d+/)).toBeVisible();
+    await expect(page.getByText("失败 0")).toBeVisible();
+    await expect(page.getByRole("button", { name: "重建向量索引" })).toBeVisible();
     await page.getByRole("button", { name: "测试连接" }).click();
     await expect(page.getByText("连接测试成功。")).toBeVisible();
   } finally {
     await fixture.close();
   }
 });
+
+function latestReadProgressEvent(articleTitle: string):
+  | {
+      metadata: {
+        activeDurationMs: number;
+        durationMs: number;
+        progress: number;
+        scrollSource: string;
+      };
+    }
+  | null {
+  const db = new Database(e2eDatabasePath, {
+    readonly: true
+  });
+  try {
+    const row = db
+      .prepare(
+        `
+          select be.metadata_json as metadataJson
+          from behavior_events be
+          join articles a on a.id = be.article_id
+          where a.title = ?
+            and be.event_type = 'read_progress'
+          order by be.created_at desc
+          limit 1
+        `
+      )
+      .get(articleTitle) as { metadataJson: string | null } | undefined;
+
+    if (!row?.metadataJson) {
+      return null;
+    }
+
+    return {
+      metadata: JSON.parse(row.metadataJson) as {
+        activeDurationMs: number;
+        durationMs: number;
+        progress: number;
+        scrollSource: string;
+      }
+    };
+  } finally {
+    db.close();
+  }
+}
 
 async function blockExternalBrowserRequests(page: import("@playwright/test").Page): Promise<void> {
   await page.route("**/*", async (route) => {

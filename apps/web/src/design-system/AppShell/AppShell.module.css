@@ -1,7 +1,9 @@
 .shell {
+  height: 100vh;
   min-height: 100vh;
   display: grid;
   grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
+  overflow: hidden;
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-ui);
@@ -159,8 +161,11 @@
 
 .content {
   min-width: 0;
+  min-height: 0;
+  height: 100vh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .topbar {
@@ -214,8 +219,10 @@
 
 .workspace {
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-columns: 280px minmax(340px, 430px) minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .managementWorkspace {
@@ -439,6 +446,7 @@
 
 .settingsContent {
   width: min(100%, var(--layout-settings-max));
+  min-height: 0;
   display: grid;
   gap: var(--space-4);
   align-content: start;
@@ -532,12 +540,41 @@
   height: auto;
 }
 
+.settingsIndexStatus {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  border: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.settingsIndexStatus strong {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+}
+
+.settingsIndexStatus p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
 .feedPanel,
 .articlePanel,
 .readerPanel {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .feedPanel,
@@ -803,6 +840,51 @@
   padding: var(--space-3) var(--space-4);
   color: var(--color-danger);
   font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.recommendationStatusBar {
+  display: grid;
+  gap: var(--space-2);
+  border-bottom: var(--border-subtle);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-subtle);
+}
+
+.recommendationStatusBar strong {
+  display: block;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.recommendationStatusLabel {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-faint);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+}
+
+.recommendationStatusMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.recommendationStatusMetrics div {
+  min-width: 0;
+}
+
+.recommendationStatusMetrics dd {
+  margin: 0;
+  border: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -1129,8 +1211,17 @@
 
 @media (max-width: 767px) {
   .shell {
+    height: auto;
     display: block;
+    overflow: visible;
     padding-bottom: var(--layout-bottom-nav-height);
+  }
+
+  .content {
+    height: auto;
+    min-height: 100vh;
+    display: block;
+    overflow: visible;
   }
 
   .sidebar {
@@ -1189,6 +1280,8 @@
 
   .workspace {
     display: block;
+    height: auto;
+    overflow: visible;
   }
 
   .managementWorkspace,
@@ -1227,8 +1320,13 @@
   .feedPanel,
   .articlePanel,
   .readerPanel {
+    overflow: visible;
     border-right: 0;
     border-bottom: var(--border-default);
+  }
+
+  .settingsIndexStatus {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .reader {

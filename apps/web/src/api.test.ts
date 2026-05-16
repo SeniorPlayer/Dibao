@@ -290,9 +290,13 @@ describe("web API client", () => {
                   dimension: 1536,
                   distanceMetric: "cosine",
                   status: "active",
+                  candidateCount: 4,
                   embeddingCount: 2,
+                  coverageRatio: 0.5,
                   pendingJobs: 1,
                   failedJobs: 0,
+                  lastFailedAt: null,
+                  lastError: null,
                   createdAt: "2026-05-14T08:00:00.000Z",
                   updatedAt: "2026-05-14T08:00:00.000Z"
                 }
@@ -378,6 +382,80 @@ describe("web API client", () => {
         body: null
       }
     ]);
+  });
+
+  it("fetches recommendation diagnostics status", async () => {
+    const calls: string[] = [];
+    const api = createDibaoApi(async (input) => {
+      calls.push(String(input));
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            mode: "embedding",
+            activeProvider: {
+              id: "provider/openai",
+              type: "openai_compatible",
+              name: "OpenAI Compatible",
+              model: "text-embedding-3-small",
+              dimension: 1536,
+              lastTestStatus: "success",
+              lastTestAt: "2026-05-14T08:00:00.000Z"
+            },
+            activeIndex: {
+              id: "index/openai",
+              status: "active",
+              model: "text-embedding-3-small",
+              dimension: 1536
+            },
+            activeRankContext: "index/openai",
+            coverage: {
+              candidateCount: 4,
+              embeddingCount: 2,
+              coverageRatio: 0.5,
+              pendingJobs: 1,
+              failedJobs: 0,
+              lastFailedAt: null,
+              lastError: null
+            },
+            behaviorCounts: {
+              open: 2,
+              read_progress: 1
+            },
+            clusters: {
+              positive: 1,
+              negative: 0
+            },
+            rankedArticles: {
+              base: 4,
+              active: 2
+            },
+            lastProfileUpdate: "2026-05-14T08:09:00.000Z",
+            lastRankingUpdate: "2026-05-14T08:11:00.000Z",
+            warnings: []
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await expect(api.getRecommendationStatus()).resolves.toMatchObject({
+      mode: "embedding",
+      coverage: {
+        candidateCount: 4,
+        coverageRatio: 0.5
+      },
+      clusters: {
+        positive: 1,
+        negative: 0
+      }
+    });
+    expect(calls).toEqual(["/api/recommendation/status"]);
   });
 
   it("calls feed and folder management endpoints", async () => {
@@ -691,7 +769,21 @@ describe("web API client", () => {
     });
     await api.postArticleAction("article/one", {
       type: "read_progress",
-      progress: 0.5
+      progress: 0.5,
+      metadata: {
+        durationMs: 6000,
+        activeDurationMs: 5000,
+        scrollSource: "reader"
+      }
+    });
+    api.postArticleActionKeepalive("article/one", {
+      type: "read_progress",
+      progress: 0.75,
+      metadata: {
+        durationMs: 12000,
+        activeDurationMs: 9000,
+        scrollSource: "reader"
+      }
     });
 
     expect(calls).toEqual([
@@ -708,7 +800,25 @@ describe("web API client", () => {
         method: "POST",
         body: {
           type: "read_progress",
-          progress: 0.5
+          progress: 0.5,
+          metadata: {
+            durationMs: 6000,
+            activeDurationMs: 5000,
+            scrollSource: "reader"
+          }
+        }
+      },
+      {
+        path: "/api/articles/article%2Fone/actions",
+        method: "POST",
+        body: {
+          type: "read_progress",
+          progress: 0.75,
+          metadata: {
+            durationMs: 12000,
+            activeDurationMs: 9000,
+            scrollSource: "reader"
+          }
         }
       }
     ]);

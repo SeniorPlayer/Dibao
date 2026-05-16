@@ -1,4 +1,4 @@
-import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dibaoVersion } from "@dibao/shared";
 import {
@@ -22,6 +22,7 @@ import {
   type RankExplanation,
   type RankExplanationReason,
   type ReaderSettings,
+  type RecommendationStatus,
   type SetupStatus,
   type UpdateFeedFolderInput,
   type UpdateFeedInput,
@@ -81,6 +82,16 @@ export type ArticleActionIntent = "favorite" | "readLater" | "readStatus" | "not
 type PendingArticleAction = {
   articleId: string;
   intent: ArticleActionIntent;
+};
+
+type ReadProgressMetadata = {
+  durationMs: number;
+  activeDurationMs: number;
+  scrollSource: "reader";
+};
+
+type ReadProgressPostOptions = {
+  keepalive?: boolean;
 };
 
 export function stageForAuthSession(session: AuthSession): AppStage {
@@ -146,6 +157,11 @@ export function App() {
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
   const [rankExplanation, setRankExplanation] = useState<RankExplanation | null>(null);
+  const [recommendationStatus, setRecommendationStatus] = useState<RecommendationStatus | null>(
+    null
+  );
+  const [isRecommendationStatusLoading, setIsRecommendationStatusLoading] = useState(false);
+  const [recommendationStatusError, setRecommendationStatusError] = useState<string | null>(null);
   const [feedUrl, setFeedUrl] = useState("");
   const [isFeedsLoading, setIsFeedsLoading] = useState(true);
   const [isArticlesLoading, setIsArticlesLoading] = useState(true);
@@ -245,6 +261,9 @@ export function App() {
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
+    setRecommendationStatus(null);
+    setIsRecommendationStatusLoading(false);
+    setRecommendationStatusError(null);
     setFeedUrl("");
     setIsFeedsLoading(false);
     setIsArticlesLoading(false);
@@ -437,6 +456,21 @@ export function App() {
     }
   }, [t.errors.api]);
 
+  const loadRecommendationStatus = useCallback(async () => {
+    setIsRecommendationStatusLoading(true);
+    setRecommendationStatusError(null);
+
+    try {
+      const status = await dibaoApi.getRecommendationStatus();
+      setRecommendationStatus(status);
+    } catch (error) {
+      setRecommendationStatus(null);
+      setRecommendationStatusError(userMessageForError(error, t.errors.api));
+    } finally {
+      setIsRecommendationStatusLoading(false);
+    }
+  }, [t.errors.api]);
+
   const loadFeeds = useCallback(async () => {
     setIsFeedsLoading(true);
     setFeedError(null);
@@ -482,6 +516,9 @@ export function App() {
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
+    setRecommendationStatus(null);
+    setIsRecommendationStatusLoading(false);
+    setRecommendationStatusError(null);
     setDetailError(null);
     setExplanationError(null);
 
@@ -527,6 +564,17 @@ export function App() {
 
     void loadArticles(sourceSelection, appPage.view);
   }, [appPage, appStage.type, loadArticles, sourceSelection]);
+
+  useEffect(() => {
+    if (appStage.type !== "reader" || appPage.type !== "reader" || appPage.view !== "recommended") {
+      setRecommendationStatus(null);
+      setRecommendationStatusError(null);
+      setIsRecommendationStatusLoading(false);
+      return;
+    }
+
+    void loadRecommendationStatus();
+  }, [appPage, appStage.type, loadRecommendationStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1004,6 +1052,31 @@ export function App() {
     }
   }
 
+  async function handleReadProgress(
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options: ReadProgressPostOptions = {}
+  ) {
+    const request: ArticleActionRequest = {
+      type: "read_progress",
+      progress,
+      metadata
+    };
+
+    if (options.keepalive) {
+      dibaoApi.postArticleActionKeepalive(articleId, request);
+      return;
+    }
+
+    try {
+      const result = await dibaoApi.postArticleAction(articleId, request);
+      applyArticleState(articleId, result.state);
+    } catch {
+      // Automatic reading telemetry should never interrupt the reader surface.
+    }
+  }
+
   function handleNavigationClick(event: MouseEvent<HTMLAnchorElement>, item: NavigationItemKey) {
     event.preventDefault();
     const page = pageForNavigationItem(item);
@@ -1206,9 +1279,17 @@ export function App() {
               nextCursor={nextArticleCursor}
               onLoadMore={handleLoadMoreArticles}
               onSelectArticle={setSelectedArticleId}
+              recommendationStatus={
+                currentArticleView === "recommended" ? recommendationStatus : null
+              }
+              recommendationStatusError={
+                currentArticleView === "recommended" ? recommendationStatusError : null
+              }
               selectedArticleId={selectedArticleId}
               selectedFeed={selectedFeed}
               selectedFolder={selectedFolder}
+              showRecommendationStatus={currentArticleView === "recommended"}
+              isRecommendationStatusLoading={isRecommendationStatusLoading}
             />
 
             <ArticleDetailPanel
@@ -1224,6 +1305,7 @@ export function App() {
               isDetailLoading={isDetailLoading}
               isExplanationLoading={isExplanationLoading}
               onArticleAction={handleArticleAction}
+              onReadProgress={handleReadProgress}
               pendingAction={
                 articleDetail && pendingArticleAction?.articleId === articleDetail.id
                   ? pendingArticleAction.intent
@@ -1501,10 +1583,14 @@ export function SettingsWorkspace(props: {
   onTestEmbeddingProvider: (providerId: string) => Promise<void>;
   settings: AppSettings;
 }) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
+  const initialProvider =
+    props.embeddingProviders.find((provider) => provider.enabled) ??
+    props.embeddingProviders[0] ??
+    null;
   const [draft, setDraft] = useState<SettingsDraft>(() => draftForSettings(props.settings));
   const [providerDraft, setProviderDraft] = useState<EmbeddingProviderDraft>(() =>
-    draftForEmbeddingProvider(null)
+    draftForEmbeddingProvider(initialProvider)
   );
   const [localError, setLocalError] = useState<string | null>(null);
   const [providerLocalError, setProviderLocalError] = useState<string | null>(null);
@@ -1851,6 +1937,8 @@ export function SettingsWorkspace(props: {
             </label>
           </div>
 
+          <p className={styles.managementHint}>{t.settings.sections.provider.modelHint}</p>
+
           <label className={styles.settingsInlineStatus} htmlFor="settings-provider-enabled">
             <span>{t.settings.sections.provider.enabledLabel}</span>
             <input
@@ -1865,12 +1953,12 @@ export function SettingsWorkspace(props: {
 
           {selectedProvider ? (
             <div className={styles.setupStatusBox}>
-              <strong>
+              <strong>{t.settings.sections.provider.connectionStatusTitle}</strong>
+              <p>
                 {selectedProvider.enabled
                   ? t.settings.sections.provider.enabledStatus
                   : t.settings.sections.provider.disabledStatus}
-              </strong>
-              <p>
+                {" · "}
                 {selectedProvider.lastTestStatus === "success"
                   ? t.settings.sections.provider.lastTestSuccess(
                       selectedProvider.lastTestAt ?? t.feedManagement.na
@@ -1936,14 +2024,35 @@ export function SettingsWorkspace(props: {
               </div>
             ) : (
               selectedProviderIndexes.map((index) => (
-                <div className={styles.settingsInlineStatus} key={index.id}>
-                  <span>
-                    {t.settings.sections.provider.indexStatus(
-                      index.model,
-                      index.status,
-                      index.embeddingCount
+                <div className={styles.settingsIndexStatus} key={index.id}>
+                  <div>
+                    <strong>
+                      {t.settings.sections.provider.indexStatus(
+                        index.model,
+                        index.status,
+                        index.embeddingCount
+                      )}
+                    </strong>
+                    <p>{embeddingCoverageText(index, t)}</p>
+                    <p>
+                      {t.settings.sections.provider.embeddingJobStatusTitle}:{" "}
+                      {t.settings.sections.provider.pendingJobs(index.pendingJobs)}
+                      {" · "}
+                      {t.settings.sections.provider.failedJobs(index.failedJobs)}
+                    </p>
+                    {index.lastFailedAt ? (
+                      <p>
+                        {t.settings.sections.provider.lastFailedAt(
+                          formatDate(index.lastFailedAt)
+                        )}
+                      </p>
+                    ) : null}
+                    {index.lastError ? (
+                      <p>{t.settings.sections.provider.lastError(index.lastError)}</p>
+                    ) : index.failedJobs > 0 ? null : (
+                      <p>{t.settings.sections.provider.noJobFailures}</p>
                     )}
-                  </span>
+                  </div>
                   <button
                     className={styles.secondaryButton}
                     disabled={props.rebuildingIndexId === index.id}
@@ -2019,7 +2128,11 @@ export function FeedPanel(props: {
   const feedCountByFolder = useMemo(() => countFeedsByFolder(props.feeds), [props.feeds]);
 
   return (
-    <section className={styles.feedPanel} aria-labelledby="feeds-title">
+    <section
+      className={styles.feedPanel}
+      data-testid="feed-scroll-container"
+      aria-labelledby="feeds-title"
+    >
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.kicker}>{t.feeds.kicker}</p>
@@ -2182,20 +2295,28 @@ export function ArticleListPanel(props: {
   feedCount: number;
   isArticlesLoading: boolean;
   isLoadingMore: boolean;
+  isRecommendationStatusLoading: boolean;
   loadMoreError: string | null;
   nextCursor: string | null;
   onLoadMore: () => void;
   onSelectArticle: (articleId: string) => void;
+  recommendationStatus: RecommendationStatus | null;
+  recommendationStatusError: string | null;
   selectedArticleId: string | null;
   selectedFeed: Feed | null;
   selectedFolder: FeedFolder | null;
+  showRecommendationStatus: boolean;
 }) {
   const { t, formatDate } = useI18n();
   const sourceTitle =
     props.selectedFeed?.title ?? props.selectedFolder?.title ?? t.articles.allSources;
 
   return (
-    <section className={styles.articlePanel} aria-labelledby="articles-title">
+    <section
+      className={styles.articlePanel}
+      data-testid="article-list-scroll-container"
+      aria-labelledby="articles-title"
+    >
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.kicker}>{sourceTitle}</p>
@@ -2203,6 +2324,14 @@ export function ArticleListPanel(props: {
         </div>
         <span className={styles.count}>{props.articles.length}</span>
       </div>
+
+      {props.showRecommendationStatus ? (
+        <RecommendationStatusBar
+          error={props.recommendationStatusError}
+          isLoading={props.isRecommendationStatusLoading}
+          status={props.recommendationStatus}
+        />
+      ) : null}
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
 
@@ -2271,6 +2400,40 @@ export function ArticleListPanel(props: {
   );
 }
 
+function RecommendationStatusBar(props: {
+  error: string | null;
+  isLoading: boolean;
+  status: RecommendationStatus | null;
+}) {
+  const { t, formatDate } = useI18n();
+  const statusText = props.error
+    ? t.recommendationStatus.fallback
+    : props.status
+      ? t.recommendationStatus.modes[props.status.mode]
+      : props.isLoading
+        ? t.recommendationStatus.loading
+        : t.recommendationStatus.fallback;
+  const metrics = props.status ? recommendationStatusMetrics(props.status, t, formatDate) : [];
+
+  return (
+    <section className={styles.recommendationStatusBar} aria-live="polite">
+      <div>
+        <span className={styles.recommendationStatusLabel}>{t.recommendationStatus.title}</span>
+        <strong>{statusText}</strong>
+      </div>
+      {metrics.length > 0 ? (
+        <dl className={styles.recommendationStatusMetrics}>
+          {metrics.map((metric) => (
+            <div key={metric}>
+              <dd>{metric}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
 function ArticleDetailPanel(props: {
   actionError: string | null;
   article: ArticleDetail | null;
@@ -2280,18 +2443,33 @@ function ArticleDetailPanel(props: {
   isDetailLoading: boolean;
   isExplanationLoading: boolean;
   onArticleAction: (article: ArticleDetail, intent: ArticleActionIntent) => void;
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void;
   pendingAction: ArticleActionIntent | null;
   readerSettings: ReaderSettings;
 }) {
   const { t, formatDate } = useI18n();
+  const readerPanelRef = useRef<HTMLElement>(null);
   const safeHtml = useMemo(
     () => (props.article?.contentHtml ? sanitizeArticleHtml(props.article.contentHtml) : null),
     [props.article?.contentHtml]
   );
 
+  useReaderReadProgress({
+    article: props.article,
+    onReadProgress: props.onReadProgress,
+    scrollContainerRef: readerPanelRef
+  });
+
   return (
     <section
       className={styles.readerPanel}
+      data-testid="reader-scroll-container"
+      ref={readerPanelRef}
       style={readerStyleFor(props.readerSettings)}
       aria-labelledby="reader-title"
     >
@@ -2530,6 +2708,285 @@ function ReaderSkeleton() {
   );
 }
 
+const readProgressThresholds = [0.25, 0.5, 0.75, 0.9] as const;
+const readProgressMinIntervalMs = 5_000;
+
+type ReadProgressThreshold = (typeof readProgressThresholds)[number];
+
+type ReadProgressSession = {
+  activeDurationMs: number;
+  activeSince: number | null;
+  articleId: string;
+  highestReached: ReadProgressThreshold | null;
+  lastSentAt: number | null;
+  pendingProgress: ReadProgressThreshold | null;
+  sentThresholds: Set<ReadProgressThreshold>;
+  startedAt: number;
+  throttleTimer: number | null;
+};
+
+function useReaderReadProgress(props: {
+  article: ArticleDetail | null;
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
+}) {
+  const onReadProgressRef = useRef(props.onReadProgress);
+
+  useEffect(() => {
+    onReadProgressRef.current = props.onReadProgress;
+  }, [props.onReadProgress]);
+
+  useEffect(() => {
+    const article = props.article;
+    const container = props.scrollContainerRef.current;
+    if (!article || !container) {
+      return;
+    }
+    const scrollContainer = container;
+
+    const now = Date.now();
+    const session: ReadProgressSession = {
+      activeDurationMs: 0,
+      activeSince: isReaderTimingActive() ? now : null,
+      articleId: article.id,
+      highestReached: thresholdForProgress(article.state.readingProgress),
+      lastSentAt: null,
+      pendingProgress: null,
+      sentThresholds: sentThresholdsForProgress(article.state.readingProgress),
+      startedAt: now,
+      throttleTimer: null
+    };
+
+    scrollContainer.scrollTop = 0;
+
+    function handleScroll() {
+      updateReadProgressActiveDuration(session);
+      const progress = progressForScrollContainer(scrollContainer);
+      const threshold = thresholdForProgress(progress);
+      if (threshold) {
+        session.highestReached = maxThreshold(session.highestReached, threshold);
+        queueReadProgress(session, threshold, false, onReadProgressRef.current);
+      }
+    }
+
+    function handleFocusChange() {
+      updateReadProgressActiveDuration(session);
+    }
+
+    function handleVisibilityChange() {
+      updateReadProgressActiveDuration(session);
+      if (document.visibilityState === "hidden") {
+        flushReadProgress(session, true, onReadProgressRef.current);
+      }
+    }
+
+    function handlePageHide() {
+      updateReadProgressActiveDuration(session);
+      flushReadProgress(session, true, onReadProgressRef.current);
+    }
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("focus", handleFocusChange);
+    window.addEventListener("blur", handleFocusChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("focus", handleFocusChange);
+      window.removeEventListener("blur", handleFocusChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+      updateReadProgressActiveDuration(session);
+      flushReadProgress(session, true, onReadProgressRef.current);
+      clearReadProgressTimer(session);
+    };
+  }, [props.article?.id, props.article?.state.readingProgress, props.scrollContainerRef]);
+}
+
+function progressForScrollContainer(container: HTMLElement): number {
+  if (container.scrollHeight <= container.clientHeight) {
+    return 1;
+  }
+
+  return clampNumber(
+    (container.scrollTop + container.clientHeight) / container.scrollHeight,
+    0,
+    1
+  );
+}
+
+function sentThresholdsForProgress(progress: number): Set<ReadProgressThreshold> {
+  return new Set(readProgressThresholds.filter((threshold) => progress >= threshold));
+}
+
+function thresholdForProgress(progress: number): ReadProgressThreshold | null {
+  let matched: ReadProgressThreshold | null = null;
+  for (const threshold of readProgressThresholds) {
+    if (progress >= threshold) {
+      matched = threshold;
+    }
+  }
+  return matched;
+}
+
+function maxThreshold(
+  left: ReadProgressThreshold | null,
+  right: ReadProgressThreshold
+): ReadProgressThreshold {
+  return left === null || right > left ? right : left;
+}
+
+function queueReadProgress(
+  session: ReadProgressSession,
+  progress: ReadProgressThreshold,
+  keepalive: boolean,
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void
+): void {
+  if (session.sentThresholds.has(progress)) {
+    return;
+  }
+
+  const now = Date.now();
+  if (
+    session.lastSentAt !== null &&
+    now - session.lastSentAt < readProgressMinIntervalMs &&
+    !keepalive
+  ) {
+    session.pendingProgress = maxThreshold(session.pendingProgress, progress);
+    schedulePendingReadProgress(session, onReadProgress);
+    return;
+  }
+
+  sendReadProgress(session, progress, keepalive, onReadProgress);
+}
+
+function schedulePendingReadProgress(
+  session: ReadProgressSession,
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void
+): void {
+  if (session.throttleTimer || session.lastSentAt === null) {
+    return;
+  }
+
+  const remaining = Math.max(0, readProgressMinIntervalMs - (Date.now() - session.lastSentAt));
+  session.throttleTimer = window.setTimeout(() => {
+    session.throttleTimer = null;
+    const pending = session.pendingProgress;
+    if (pending) {
+      sendReadProgress(session, pending, false, onReadProgress);
+    }
+  }, remaining);
+}
+
+function flushReadProgress(
+  session: ReadProgressSession,
+  keepalive: boolean,
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void
+): void {
+  const progress =
+    session.pendingProgress ??
+    session.highestReached ??
+    thresholdForProgress(session.sentThresholds.size > 0 ? Math.max(...session.sentThresholds) : 0);
+
+  if (progress && !session.sentThresholds.has(progress)) {
+    sendReadProgress(session, progress, keepalive, onReadProgress);
+  }
+}
+
+function sendReadProgress(
+  session: ReadProgressSession,
+  progress: ReadProgressThreshold,
+  keepalive: boolean,
+  onReadProgress: (
+    articleId: string,
+    progress: number,
+    metadata: ReadProgressMetadata,
+    options?: ReadProgressPostOptions
+  ) => void
+): void {
+  const now = Date.now();
+  updateReadProgressActiveDuration(session, now);
+  session.lastSentAt = now;
+  session.pendingProgress = null;
+  markSentThresholds(session, progress);
+  onReadProgress(session.articleId, progress, readProgressMetadata(session, now), {
+    keepalive
+  });
+}
+
+function markSentThresholds(session: ReadProgressSession, progress: ReadProgressThreshold): void {
+  for (const threshold of readProgressThresholds) {
+    if (threshold <= progress) {
+      session.sentThresholds.add(threshold);
+    }
+  }
+}
+
+function readProgressMetadata(session: ReadProgressSession, now: number): ReadProgressMetadata {
+  return {
+    durationMs: Math.max(0, now - session.startedAt),
+    activeDurationMs: Math.max(0, activeDurationFor(session, now)),
+    scrollSource: "reader"
+  };
+}
+
+function activeDurationFor(session: ReadProgressSession, now: number): number {
+  return session.activeDurationMs + (session.activeSince === null ? 0 : now - session.activeSince);
+}
+
+function updateReadProgressActiveDuration(
+  session: ReadProgressSession,
+  now = Date.now()
+): void {
+  const isActive = isReaderTimingActive();
+
+  if (session.activeSince !== null && !isActive) {
+    session.activeDurationMs += now - session.activeSince;
+    session.activeSince = null;
+    return;
+  }
+
+  if (session.activeSince === null && isActive) {
+    session.activeSince = now;
+  }
+}
+
+function isReaderTimingActive(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    document.visibilityState === "visible" &&
+    (typeof document.hasFocus !== "function" || document.hasFocus())
+  );
+}
+
+function clearReadProgressTimer(session: ReadProgressSession): void {
+  if (session.throttleTimer) {
+    window.clearTimeout(session.throttleTimer);
+    session.throttleTimer = null;
+  }
+}
+
 function draftForSettings(settings: AppSettings): SettingsDraft {
   return {
     locale: settings.ui.locale,
@@ -2747,6 +3204,10 @@ function parseNumberDraft(
   return parsed;
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 type ReaderStyle = CSSProperties & {
   "--reader-font-size": string;
   "--reader-line-height": string;
@@ -2875,6 +3336,50 @@ function noticeTextFor(notice: Notice, t: Dictionary): string {
     case "embeddingIndexRebuildQueued":
       return t.settings.sections.provider.notices.rebuildQueued;
   }
+}
+
+function recommendationStatusMetrics(
+  status: RecommendationStatus,
+  t: Dictionary,
+  formatDate: (value: string | Date) => string
+): string[] {
+  const behaviorCount = Object.values(status.behaviorCounts).reduce((sum, count) => sum + count, 0);
+  const coverageRatio =
+    typeof status.coverage.coverageRatio === "number"
+      ? formatPercent(status.coverage.coverageRatio)
+      : t.recommendationStatus.metrics.unknown;
+  const lastRanking = status.lastRankingUpdate
+    ? formatDate(status.lastRankingUpdate)
+    : t.recommendationStatus.metrics.unknown;
+  const lastProfile = status.lastProfileUpdate
+    ? formatDate(status.lastProfileUpdate)
+    : t.recommendationStatus.metrics.unknown;
+
+  return [
+    t.recommendationStatus.metrics.behaviorCount(behaviorCount),
+    t.recommendationStatus.metrics.coverage(coverageRatio),
+    t.recommendationStatus.metrics.clusters(status.clusters.positive, status.clusters.negative),
+    t.recommendationStatus.metrics.lastUpdate(lastRanking, lastProfile)
+  ];
+}
+
+function embeddingCoverageText(index: EmbeddingIndex, t: Dictionary): string {
+  if (
+    typeof index.candidateCount !== "number" ||
+    typeof index.coverageRatio !== "number"
+  ) {
+    return t.settings.sections.provider.coverageUnavailable;
+  }
+
+  return t.settings.sections.provider.coverage(
+    index.embeddingCount,
+    index.candidateCount,
+    formatPercent(index.coverageRatio)
+  );
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(clampNumber(value, 0, 1) * 100)}%`;
 }
 
 function downloadTextFile(filename: string, content: string, type: string): void {

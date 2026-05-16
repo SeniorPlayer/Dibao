@@ -231,10 +231,13 @@ describe("web i18n", () => {
           feedCount={1}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor="cursor_1"
           onLoadMore={() => undefined}
           onSelectArticle={() => undefined}
+          recommendationStatus={null}
+          recommendationStatusError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={{
@@ -242,6 +245,7 @@ describe("web i18n", () => {
             title: "设计",
             sortOrder: 0
           }}
+          showRecommendationStatus={false}
         />
       </DibaoI18nProvider>
     );
@@ -252,6 +256,67 @@ describe("web i18n", () => {
     expect(feedPanel).toContain("分组");
     expect(articlePanel).toContain("加载更多");
     expect(articlePanel).toContain("设计");
+  });
+
+  it("renders recommendation learning status with diagnostics metrics", () => {
+    const html = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <ArticleListPanel
+          articleError={null}
+          articleView="recommended"
+          articles={[]}
+          feedCount={1}
+          isArticlesLoading={false}
+          isLoadingMore={false}
+          isRecommendationStatusLoading={false}
+          loadMoreError={null}
+          nextCursor={null}
+          onLoadMore={() => undefined}
+          onSelectArticle={() => undefined}
+          recommendationStatus={{
+            mode: "embedding",
+            activeProvider: null,
+            activeIndex: null,
+            activeRankContext: "base",
+            coverage: {
+              candidateCount: 4,
+              embeddingCount: 2,
+              coverageRatio: 0.5,
+              pendingJobs: 1,
+              failedJobs: 0,
+              lastFailedAt: null,
+              lastError: null
+            },
+            behaviorCounts: {
+              open: 2,
+              read_progress: 1
+            },
+            clusters: {
+              positive: 1,
+              negative: 0
+            },
+            rankedArticles: {
+              base: 4,
+              active: 2
+            },
+            lastProfileUpdate: "2026-05-14T08:09:00.000Z",
+            lastRankingUpdate: "2026-05-14T08:11:00.000Z",
+            warnings: []
+          }}
+          recommendationStatusError={null}
+          selectedArticleId={null}
+          selectedFeed={null}
+          selectedFolder={null}
+          showRecommendationStatus
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(html).toContain("学习状态");
+    expect(html).toContain("Embedding 生成中");
+    expect(html).toContain("行为 3");
+    expect(html).toContain("Coverage 50%");
+    expect(html).toContain("兴趣簇 +1 / -0");
   });
 
   it("renders feed management fields without provider configuration copy", () => {
@@ -346,7 +411,81 @@ describe("web i18n", () => {
     expect(html).toContain("API Key");
     expect(html).toContain("Base URL");
     expect(html).toContain("模型");
+    expect(html).toContain("bge-m3 / 1024");
     expect(html).toContain("测试连接");
+  });
+
+  it("renders provider connection and embedding job status separately", () => {
+    const html = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <SettingsWorkspace
+          deletingProviderId={null}
+          embeddingError={null}
+          embeddingIndexes={[
+            {
+              id: "index_ollama",
+              providerId: "provider_ollama",
+              model: "bge-m3",
+              dimension: 1024,
+              distanceMetric: "cosine",
+              status: "active",
+              candidateCount: 10,
+              embeddingCount: 6,
+              coverageRatio: 0.6,
+              pendingJobs: 2,
+              failedJobs: 1,
+              lastFailedAt: "2026-05-14T08:10:00.000Z",
+              lastError: "Provider request failed",
+              createdAt: "2026-05-14T08:00:00.000Z",
+              updatedAt: "2026-05-14T08:00:00.000Z"
+            }
+          ]}
+          embeddingProviders={[
+            {
+              id: "provider_ollama",
+              type: "ollama",
+              name: "Ollama",
+              baseUrl: "http://127.0.0.1:11434",
+              model: "bge-m3",
+              dimension: 1024,
+              enabled: true,
+              qualityTier: "recommended",
+              hasApiKey: false,
+              lastTestStatus: "success",
+              lastTestError: null,
+              lastTestAt: "2026-05-14T08:00:00.000Z",
+              createdAt: "2026-05-14T08:00:00.000Z",
+              updatedAt: "2026-05-14T08:00:00.000Z"
+            }
+          ]}
+          error={null}
+          isEmbeddingLoading={false}
+          isLoading={false}
+          isSavingEmbeddingProvider={false}
+          isSaving={false}
+          rebuildingIndexId={null}
+          testingProviderId={null}
+          onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onPreviewSettings={() => undefined}
+          onRebuildEmbeddingIndex={() => Promise.resolve()}
+          onSaveEmbeddingProvider={() => Promise.resolve()}
+          onSaveSettings={() => Promise.resolve()}
+          onTestEmbeddingProvider={() => Promise.resolve()}
+          settings={defaultAppSettings}
+        />
+      </DibaoI18nProvider>
+    );
+
+    expect(html).toContain("连接测试状态");
+    expect(html).toContain("连接测试成功");
+    expect(html).toContain("Embedding job 状态");
+    expect(html).toContain("6 / 10 · 60%");
+    expect(html).toContain("待处理 2");
+    expect(html).toContain("失败 1");
+    expect(html).toContain("错误：Provider request failed");
+    expect(html).toContain("重建向量索引");
+    expect(html).toContain("bge-m3");
+    expect(html).toContain("1024");
   });
 
   it("builds reader CSS variables from persisted reader settings", () => {

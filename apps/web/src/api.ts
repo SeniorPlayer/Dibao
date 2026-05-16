@@ -232,15 +232,65 @@ export type EmbeddingIndex = {
   dimension: number;
   distanceMetric: "cosine";
   status: "active" | "building" | "disabled" | "failed" | "retired";
+  candidateCount?: number;
   embeddingCount: number;
+  coverageRatio?: number;
   pendingJobs: number;
   failedJobs: number;
+  lastFailedAt?: string | null;
+  lastError?: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type RebuildEmbeddingIndexResponse = {
   jobId: string;
+};
+
+export type RecommendationMode = "baseline" | "learning" | "embedding" | "degraded";
+
+export type RecommendationStatus = {
+  mode: RecommendationMode;
+  activeProvider: {
+    id: string;
+    type: EmbeddingProviderType;
+    name: string;
+    model: string;
+    dimension: number;
+    lastTestStatus: "success" | "failed" | null;
+    lastTestAt: string | null;
+  } | null;
+  activeIndex: {
+    id: string;
+    status: EmbeddingIndex["status"];
+    model: string;
+    dimension: number;
+  } | null;
+  activeRankContext: string;
+  coverage: {
+    candidateCount: number;
+    embeddingCount: number;
+    coverageRatio: number;
+    pendingJobs: number;
+    failedJobs: number;
+    lastFailedAt: string | null;
+    lastError: string | null;
+  };
+  behaviorCounts: Record<string, number>;
+  clusters: {
+    positive: number;
+    negative: number;
+  };
+  rankedArticles: {
+    base: number;
+    active: number;
+  };
+  lastProfileUpdate: string | null;
+  lastRankingUpdate: string | null;
+  warnings: Array<{
+    code: string;
+    message: string;
+  }>;
 };
 
 export type AuthOkResponse = {
@@ -484,6 +534,10 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (await request<EmbeddingIndex[]>("/api/embedding/indexes")).data;
     },
 
+    async getRecommendationStatus(): Promise<RecommendationStatus> {
+      return (await request<RecommendationStatus>("/api/recommendation/status")).data;
+    },
+
     async rebuildEmbeddingIndex(indexId: string): Promise<RebuildEmbeddingIndexResponse> {
       return (
         await request<RebuildEmbeddingIndexResponse>(
@@ -634,6 +688,20 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
           }
         )
       ).data;
+    },
+
+    postArticleActionKeepalive(articleId: string, input: ArticleActionRequest): void {
+      const headers = new Headers();
+      headers.set("accept", "application/json");
+      headers.set("content-type", "application/json");
+
+      void fetcher(`/api/articles/${encodeURIComponent(articleId)}/actions`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        credentials: "same-origin",
+        headers,
+        keepalive: true
+      });
     },
 
     async importOpml(file: File): Promise<OpmlImportResponse> {

@@ -115,6 +115,29 @@ function embeddingForText(text: string): number[] {
   return [1, (seed % 7) / 10, (seed % 11) / 10, (seed % 13) / 10];
 }
 
+const longArticleBody = Array.from({ length: 42 })
+  .map(
+    (_, index) =>
+      `<p>Beta long reader paragraph ${index + 1}. This local article gives the reader panel enough height for independent scroll telemetry.</p>`
+  )
+  .join("");
+
+const extraFixtureItems = Array.from({ length: 58 })
+  .map((_, index) => {
+    const number = String(index + 1).padStart(2, "0");
+    return `
+    <item>
+      <title>E2E Article Extra ${number}</title>
+      <link>http://127.0.0.1/articles/extra-${number}</link>
+      <guid>e2e-extra-${number}</guid>
+      <author>Dibao Test</author>
+      <pubDate>Wed, 13 May 2026 ${String(index % 24).padStart(2, "0")}:00:00 GMT</pubDate>
+      <description>Extra summary ${number} for scroll measurement.</description>
+      <content:encoded><![CDATA[<p>Extra article body ${number}.</p>]]></content:encoded>
+    </item>`;
+  })
+  .join("");
+
 const fixtureRss = `<?xml version="1.0"?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
@@ -137,7 +160,8 @@ const fixtureRss = `<?xml version="1.0"?>
       <author>Dibao Test</author>
       <pubDate>Thu, 14 May 2026 08:00:00 GMT</pubDate>
       <description>Beta summary for the smoke suite.</description>
-      <content:encoded><![CDATA[<p>Beta article body for recommended fallback and explanation checks.</p>]]></content:encoded>
+      <content:encoded><![CDATA[${longArticleBody}]]></content:encoded>
     </item>
+    ${extraFixtureItems}
   </channel>
 </rss>`;

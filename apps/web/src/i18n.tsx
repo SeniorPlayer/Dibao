@@ -210,6 +210,7 @@ export const zhCN = {
         apiKeyPlaceholder: "可选，按 endpoint 要求填写",
         apiKeyRetainPlaceholder: "留空则保留已保存密钥",
         ollamaApiKeyHint: "Ollama 本地 API 默认不需要 API key。",
+        modelHint: "可填写任意已配置的 embedding 模型；Ollama 用户请按本机模型填写模型名和维度，例如 bge-m3 / 1024。",
         qualityTierLabel: "质量档位",
         quality: {
           basic: "基础",
@@ -231,11 +232,21 @@ export const zhCN = {
         deleting: "删除中",
         deleteHint: "已有 embedding index 的 provider 不能删除；需要停用时请关闭启用状态。",
         indexesTitle: "Embedding indexes",
-        indexesBody: "当前 index 只记录状态和队列计数；具体错误会记录在后台 jobs 或 provider 最近测试错误中。",
+        connectionStatusTitle: "连接测试状态",
+        embeddingJobStatusTitle: "Embedding job 状态",
+        indexesBody: "Index 展示 coverage、队列和最近失败；连接测试与 embedding job 状态分开判断。",
         noIndexes: "保存并启用 provider 后会创建 active index。",
         indexStatus: (model: string, status: string, count: number) =>
           `${model} · ${status} · ${count} 条 embedding`,
-        rebuild: "重建",
+        coverage: (embeddingCount: number, candidateCount: number, ratio: string) =>
+          `${embeddingCount} / ${candidateCount} · ${ratio}`,
+        coverageUnavailable: "Coverage 暂不可用",
+        pendingJobs: (count: number) => `待处理 ${count}`,
+        failedJobs: (count: number) => `失败 ${count}`,
+        lastFailedAt: (value: string) => `最近失败：${value}`,
+        lastError: (value: string) => `错误：${value}`,
+        noJobFailures: "暂无 embedding job 失败。",
+        rebuild: "重建向量索引",
         rebuilding: "已加入",
         notices: {
           saved: "Embedding provider 已保存。",
@@ -299,6 +310,24 @@ export const zhCN = {
       unread: "未读",
       favorited: "已收藏",
       readLater: "稍后读"
+    }
+  },
+  recommendationStatus: {
+    title: "学习状态",
+    loading: "正在读取学习状态",
+    fallback: "推荐状态暂不可用，当前列表仍可阅读。",
+    modes: {
+      baseline: "基础排序中",
+      learning: "正在学习",
+      embedding: "Embedding 生成中",
+      degraded: "Provider 异常，已 fallback"
+    },
+    metrics: {
+      behaviorCount: (count: number) => `行为 ${count}`,
+      coverage: (ratio: string) => `Coverage ${ratio}`,
+      clusters: (positive: number, negative: number) => `兴趣簇 +${positive} / -${negative}`,
+      lastUpdate: (ranking: string, profile: string) => `排序 ${ranking} · 画像 ${profile}`,
+      unknown: "暂无"
     }
   },
   reader: {
@@ -597,6 +626,7 @@ export const enUS = {
         apiKeyPlaceholder: "Optional, depending on the endpoint",
         apiKeyRetainPlaceholder: "Leave blank to keep the saved key",
         ollamaApiKeyHint: "The local Ollama API does not require an API key by default.",
+        modelHint: "Use any configured embedding model. For Ollama, enter the local model name and dimension, for example bge-m3 / 1024.",
         qualityTierLabel: "Quality tier",
         quality: {
           basic: "Basic",
@@ -618,11 +648,21 @@ export const enUS = {
         deleting: "Deleting",
         deleteHint: "Providers with embedding indexes cannot be deleted. Disable the provider instead.",
         indexesTitle: "Embedding indexes",
-        indexesBody: "Indexes only store status and queue counts. Detailed errors live in jobs or the provider test state.",
+        connectionStatusTitle: "Connection test status",
+        embeddingJobStatusTitle: "Embedding job status",
+        indexesBody: "Indexes show coverage, queue state, and recent failures. Connection tests and embedding jobs are reported separately.",
         noIndexes: "Saving and enabling a provider creates an active index.",
         indexStatus: (model: string, status: string, count: number) =>
           `${model} · ${status} · ${count} ${count === 1 ? "embedding" : "embeddings"}`,
-        rebuild: "Rebuild",
+        coverage: (embeddingCount: number, candidateCount: number, ratio: string) =>
+          `${embeddingCount} / ${candidateCount} · ${ratio}`,
+        coverageUnavailable: "Coverage unavailable",
+        pendingJobs: (count: number) => `${count} pending`,
+        failedJobs: (count: number) => `${count} failed`,
+        lastFailedAt: (value: string) => `Last failed: ${value}`,
+        lastError: (value: string) => `Error: ${value}`,
+        noJobFailures: "No embedding job failures.",
+        rebuild: "Rebuild vector index",
         rebuilding: "Queued",
         notices: {
           saved: "Embedding provider saved.",
@@ -686,6 +726,24 @@ export const enUS = {
       unread: "Unread",
       favorited: "Favorited",
       readLater: "Read later"
+    }
+  },
+  recommendationStatus: {
+    title: "Learning status",
+    loading: "Loading learning status",
+    fallback: "Recommendation status is unavailable; the list is still readable.",
+    modes: {
+      baseline: "Baseline ranking",
+      learning: "Learning",
+      embedding: "Generating embeddings",
+      degraded: "Provider issue, fallback active"
+    },
+    metrics: {
+      behaviorCount: (count: number) => `${count} behaviors`,
+      coverage: (ratio: string) => `Coverage ${ratio}`,
+      clusters: (positive: number, negative: number) => `Clusters +${positive} / -${negative}`,
+      lastUpdate: (ranking: string, profile: string) => `Rank ${ranking} · Profile ${profile}`,
+      unknown: "Unavailable"
     }
   },
   reader: {
