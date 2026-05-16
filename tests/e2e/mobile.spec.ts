@@ -55,7 +55,7 @@ test("mobile recommended list keeps a dense first screen without horizontal over
   await login(page);
 
   await page.getByRole("link", { name: "推荐" }).click();
-  await expect(page.getByRole("heading", { name: "推荐文章" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "推荐" })).toBeVisible();
   await expect(page.getByText("推荐状态")).toBeVisible();
   await expect(page.getByRole("button", { name: /E2E Article Alpha/ })).toBeVisible();
 
@@ -72,19 +72,21 @@ test("mobile recommended article exposes algorithm transparency details", async 
   await login(page);
 
   await page.getByRole("link", { name: "推荐" }).click();
-  await expect(page.getByRole("heading", { name: "推荐文章" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "推荐" })).toBeVisible();
   await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
 
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
-  await expect(page.getByText(/基础排序|新鲜度|状态|来源|兴趣匹配/)).toBeVisible();
+  await expect(
+    page.getByTestId("reader-scroll-container").getByText("新鲜度", { exact: true })
+  ).toBeVisible();
 });
 
 test("mobile article actions expose selected favorite and read-later state", async ({ page }) => {
   await login(page);
 
-  await page.getByRole("button", { name: /E2E Article Beta/ }).click();
-  await expect(page.getByRole("heading", { name: "E2E Article Beta" })).toBeVisible();
+  await page.getByRole("button", { name: /E2E Article Extra 22/ }).click();
+  await expect(page.getByRole("heading", { name: "E2E Article Extra 22" })).toBeVisible();
 
   const favoriteButton = page.getByRole("button", { name: "收藏这篇文章" });
   await favoriteButton.click();
@@ -101,46 +103,53 @@ test("mobile article actions expose selected favorite and read-later state", asy
   );
 });
 
-test.fixme(
-  "mobile browser history back returns from article detail to the list",
-  async ({ page }) => {
-    await login(page);
-
-    await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
-    await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
-    await page.goBack();
-    await expect(page.getByRole("button", { name: /E2E Article Alpha/ })).toBeVisible();
-    const backLayout = await page.evaluate(mobilePanelState);
-    expect(backLayout.listDisplay).toBe("block");
-    expect(backLayout.readerDisplay).toBe("none");
-  }
-);
-
-test.fixme("favorites page sort dropdown can switch order", async ({ page }) => {
-  await login(page);
-
-  await page.getByRole("link", { name: "收藏" }).click();
-  await expect(page.getByRole("heading", { name: "收藏" })).toBeVisible();
-  await page.getByRole("combobox", { name: /排序/ }).selectOption("oldest");
-  await expect(page.getByRole("button", { name: /E2E Article/ }).first()).toBeVisible();
-});
-
-test.fixme("read-later page can open a saved article", async ({ page }) => {
-  await login(page);
-
-  await page.getByRole("link", { name: "稍后读" }).click();
-  await expect(page.getByRole("heading", { name: "稍后读" })).toBeVisible();
-  await page.getByRole("button", { name: /E2E Article/ }).first().click();
-  await expect(page.getByRole("heading", { name: /E2E Article/ })).toBeVisible();
-});
-
-test.fixme("liking an article exposes visible pressed UI state", async ({ page }) => {
+test("mobile browser history back returns from article detail to the list", async ({ page }) => {
   await login(page);
 
   await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
-  await page.getByRole("button", { name: /点赞|喜欢/ }).click();
-  await expect(page.getByRole("button", { name: /取消点赞|已点赞|已喜欢/ })).toHaveAttribute(
+  await page.goBack();
+  await expect(page.getByRole("button", { name: /E2E Article Alpha/ })).toBeVisible();
+  const backLayout = await page.evaluate(mobilePanelState);
+  expect(backLayout.listDisplay).toBe("block");
+  expect(backLayout.readerDisplay).toBe("none");
+});
+
+test("favorites page sort dropdown can switch order", async ({ page }) => {
+  await login(page);
+
+  await favoriteArticle(page, "E2E Article Alpha");
+  await favoriteArticle(page, "E2E Article Extra 24");
+
+  await page.getByRole("link", { name: "收藏" }).click();
+  await expect(page.getByRole("heading", { name: "收藏" })).toBeVisible();
+  await expect(page.getByLabel("排序")).toHaveValue("favorited_desc");
+  await expect(firstArticleTitle(page)).resolves.toContain("E2E Article Extra 24");
+
+  await page.getByLabel("排序").selectOption("favorited_asc");
+  const oldestFavorite = await firstArticleTitle(page);
+  expect(oldestFavorite).toContain("E2E Article");
+  expect(oldestFavorite).not.toContain("E2E Article Extra 24");
+});
+
+test("read-later page can open a saved article", async ({ page }) => {
+  await login(page);
+
+  await saveArticleForLater(page, "E2E Article Extra 23");
+
+  await page.getByRole("link", { name: "稍后读" }).click();
+  await expect(page.getByRole("heading", { name: "稍后读" })).toBeVisible();
+  await page.getByRole("button", { name: /E2E Article Extra 23/ }).click();
+  await expect(page.getByRole("heading", { name: "E2E Article Extra 23" })).toBeVisible();
+});
+
+test("liking an article exposes visible pressed UI state", async ({ page }) => {
+  await login(page);
+
+  await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
+  await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
+  await page.getByRole("button", { name: "点赞这篇文章" }).click();
+  await expect(page.getByRole("button", { name: "取消点赞这篇文章" })).toHaveAttribute(
     "aria-pressed",
     "true"
   );
@@ -171,6 +180,47 @@ async function blockExternalBrowserRequests(page: Page): Promise<void> {
     }
 
     await route.continue();
+  });
+}
+
+async function favoriteArticle(page: Page, title: string): Promise<void> {
+  await page.getByRole("link", { name: "最新" }).click();
+  await page.getByRole("button", { name: new RegExp(title) }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  const favorite = page.getByRole("button", { name: "收藏这篇文章" });
+  if (await favorite.isVisible()) {
+    await favorite.click();
+    await expect(page.getByRole("button", { name: "取消收藏这篇文章" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  }
+  await page.goBack();
+  await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
+}
+
+async function saveArticleForLater(page: Page, title: string): Promise<void> {
+  await page.getByRole("link", { name: "最新" }).click();
+  await page.getByRole("button", { name: new RegExp(title) }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  const readLater = page.getByRole("button", { name: "稍后读这篇文章" });
+  if (await readLater.isVisible()) {
+    await readLater.click();
+    await expect(page.getByRole("button", { name: "移出稍后读" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  }
+  await page.goBack();
+  await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
+}
+
+async function firstArticleTitle(page: Page): Promise<string> {
+  return page.getByTestId("article-list-scroll-container").evaluate((element) => {
+    const button = Array.from(element.querySelectorAll("button")).find((candidate) =>
+      candidate.textContent?.includes("E2E Article")
+    );
+    return button?.textContent ?? "";
   });
 }
 

@@ -109,7 +109,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByLabel("只看未读").uncheck();
     await page.getByRole("link", { name: "推荐" }).click();
     await expect(page.getByRole("heading", { name: "推荐文章" })).toBeVisible();
-    await expect(page.getByText("学习状态")).toBeVisible();
+    await expect(page.getByText("推荐状态")).toBeVisible();
     await expect(page.getByText("基础排序中")).toBeVisible();
     await expect(page.getByText(/行为 \d+/)).toBeVisible();
     await expect(page.getByText(/Coverage \d+%/)).toBeVisible();

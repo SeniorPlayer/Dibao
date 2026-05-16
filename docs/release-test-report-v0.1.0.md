@@ -1,6 +1,7 @@
 # Dibao v0.1.0 RC Test Report
 
-Test window: 2026-05-16 10:08-10:18 CST
+Test window: 2026-05-16 10:08-10:18 CST; feature integration gates rerun
+2026-05-16 17:10-17:20 CST
 
 Branch: `main`
 
@@ -12,7 +13,8 @@ Browser target: `http://127.0.0.1:8080`
 
 ## Release Decision
 
-Current `main` plus the v0.1.0 RC closure changes is suitable to tag as `v0.1.0` after the closure commit is reviewed and pushed.
+Current `main` plus the v0.1.0 RC closure and feature integration changes is suitable
+to tag as `v0.1.0` after the closure commit is reviewed and pushed.
 
 No P0 blocker remains from the previous release-readiness report:
 
@@ -26,15 +28,15 @@ No P0 blocker remains from the previous release-readiness report:
 | Check | Result | Notes |
 | --- | --- | --- |
 | `npm run typecheck` | Pass | All workspaces show `0.1.0` in npm output. |
-| `npm test` | Pass | 8 test files, 145 tests passed across workspaces. |
+| `npm test` | Pass | 10 test files, 166 tests passed across workspaces. |
 | `npm run build` | Pass | Web production bundle built; server/workspace TS builds passed. |
 | `npm run spike:sqlite-vec` | Pass | sqlite-vec `v0.1.9`, FTS, KNN, row mapping, and rebuild checks passed. |
-| `npm run e2e` | Pass | Rerun outside sandbox passed, 2/2 Playwright tests. |
-| `docker build -t dibao:local .` | Pass | Passed with Docker Desktop bundled CLI and `PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH`. |
+| `npm run e2e` | Pass | Rerun outside sandbox passed, 9/9 Playwright tests. |
+| `docker buildx build --platform linux/amd64 -t dibao:0.1.0-rc --load .` | Pass | Built the Synology-compatible release candidate image with Docker Desktop bundled CLI. |
 | `docker compose config` | Pass | Single `dibao` service and persistent `dibao-data` volume resolved. |
 | `npm run smoke:docker-recommendation` | Pass | Container smoke reached `coverageRatio: 1`, `embeddingCount: 2`, `recommendedCount: 2`. |
-| `npm run perf:recommendation` | Pass | Regenerated `docs/recommendation-performance.md`. |
-| `DIBAO_RUN_OLLAMA_TESTS=true npm run test:ollama:optional` | Pass | Local Ollama `bge-m3` returned dimension `1024`, latency `2713 ms`. |
+| `npm run perf:recommendation` | Previous pass | Regenerated `docs/recommendation-performance.md` during RC closure; not rerun in this feature-integration pass. |
+| `DIBAO_RUN_OLLAMA_TESTS=true npm run test:ollama:optional` | Previous pass | Local Ollama `bge-m3` returned dimension `1024` during RC closure; not rerun in this feature-integration pass. |
 | `git diff --check` | Pass | No whitespace errors after RC docs and report updates. |
 
 ## Performance Snapshot
@@ -67,24 +69,12 @@ and local application server:
   with explanation content.
 - Mobile reader action state remains visible after toggling favorite and read-later buttons through
   their pressed aria state.
-
-Pending Playwright `fixme` cases were added for product surfaces that are present in navigation or
-release scope but not yet wired in the current frontend:
-
-- Browser history back from mobile article detail to list.
-- Favorites page sort dropdown switching.
-- Read-later page opening a saved article.
-- Like/upvote action visible pressed state.
-
-Current QA sub-agent verification on 2026-05-16:
-
-- `npm run e2e` did not reach Playwright because the in-progress frontend worktree failed
-  TypeScript build on reader view keys and the new `liked` article state.
-- `node scripts/e2e/prepare.mjs && npx playwright test` was rerun outside the sandbox to allow
-  localhost binding, but without a fresh build it used stale dist output and failed in the existing
-  desktop seed flow while waiting for `E2E Article Beta`.
-- `npx playwright test tests/e2e/mobile.spec.ts --list` passed and listed 9 tests total: 1 desktop
-  dependency, 4 executable mobile tests, and 4 pending mobile product-surface tests.
+- Browser history back from mobile article detail returns to the list.
+- Favorites page sort dropdown can switch between recent/oldest saved order.
+- Read-later page can open a saved article.
+- Like action exposes visible pressed state.
+- Mobile recommended and article views use the renamed `推荐状态` copy instead of the old
+  `学习状态` label.
 
 ### First-Run Setup
 
@@ -98,7 +88,7 @@ Current QA sub-agent verification on 2026-05-16:
 
 - Latest article list loaded 8 local fixture articles.
 - Article detail opened automatically.
-- Favorite, read later, mark read, and not interested buttons were clickable.
+- Favorite, read later, like, mark read, and not interested buttons were clickable.
 - After actions, the selected article showed:
   - `取消收藏`
   - `移出稍后读`
