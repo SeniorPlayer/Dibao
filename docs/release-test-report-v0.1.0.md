@@ -56,6 +56,36 @@ Dataset: 20,000 articles, 100 feeds, deterministic local vectors, and realistic 
 
 Browser automation used a clean temporary SQLite database and a local RSS fixture server.
 
+### Follow-Up E2E Coverage Added
+
+The Playwright suite now includes additional mobile QA coverage using only the local fixture server
+and local application server:
+
+- Recommended list first screen density on a 390px mobile viewport: at least 5 article rows are
+  visible and the document has no horizontal overflow.
+- Mobile recommended article detail opens and renders the `为什么推荐` algorithm transparency panel
+  with explanation content.
+- Mobile reader action state remains visible after toggling favorite and read-later buttons through
+  their pressed aria state.
+
+Pending Playwright `fixme` cases were added for product surfaces that are present in navigation or
+release scope but not yet wired in the current frontend:
+
+- Browser history back from mobile article detail to list.
+- Favorites page sort dropdown switching.
+- Read-later page opening a saved article.
+- Like/upvote action visible pressed state.
+
+Current QA sub-agent verification on 2026-05-16:
+
+- `npm run e2e` did not reach Playwright because the in-progress frontend worktree failed
+  TypeScript build on reader view keys and the new `liked` article state.
+- `node scripts/e2e/prepare.mjs && npx playwright test` was rerun outside the sandbox to allow
+  localhost binding, but without a fresh build it used stale dist output and failed in the existing
+  desktop seed flow while waiting for `E2E Article Beta`.
+- `npx playwright test tests/e2e/mobile.spec.ts --list` passed and listed 9 tests total: 1 desktop
+  dependency, 4 executable mobile tests, and 4 pending mobile product-surface tests.
+
 ### First-Run Setup
 
 - First visit showed the welcome/setup flow.
