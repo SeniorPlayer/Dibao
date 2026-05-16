@@ -491,6 +491,48 @@ export const zhCN = {
       "合成总分：recommended/read_later 按 active rank context 排序；缺失时 fallback 到 base score。",
       "按频道输出：最新按时间，推荐按个性化分，稍后读按个性化分，收藏默认按收藏时间。"
     ],
+    rankingFlowDiagram: [
+      {
+        phase: "候选",
+        title: "收集候选",
+        description: "频道、来源、分组、未读开关和分页共同决定候选池。"
+      },
+      {
+        phase: "过滤",
+        title: "移除不可见项",
+        description: "隐藏、不感兴趣、已删除文章退出普通列表。"
+      },
+      {
+        phase: "状态",
+        title: "读取文章状态",
+        description: "收藏、点赞、稍后读、阅读深度、忽略和点进进入 state score。"
+      },
+      {
+        phase: "来源",
+        title: "计算来源偏好",
+        description: "手动来源权重与 feed_stats 合成 source score。"
+      },
+      {
+        phase: "时间",
+        title: "计算新鲜度",
+        description: "用发布时间或发现时间计算 freshness score，半衰期约 36 小时。"
+      },
+      {
+        phase: "模型",
+        title: "匹配用户模型卡",
+        description: "有 active embedding index 时，文章向量会匹配正/负兴趣簇。"
+      },
+      {
+        phase: "合成",
+        title: "融合排序分",
+        description: "兴趣、来源、新鲜度、状态与负向惩罚合成 active rank score。"
+      },
+      {
+        phase: "输出",
+        title: "按频道输出",
+        description: "最新按时间；推荐和稍后读按个性化分；收藏默认按收藏时间。"
+      }
+    ],
     channelRules: [
       "最新：默认按时间倒序。只看未读开关只过滤派生未读状态，不改变排序语义。",
       "推荐：使用个性化排序。没有模型卡或 embedding 时自动 fallback 到基础排序。",
@@ -1104,6 +1146,48 @@ export const enUS = {
       "If an active embedding index exists, compare article vectors with positive and negative interest clusters for interest score and negative penalty.",
       "Blend the final score: recommended/read_later use the active rank context, falling back to base score when needed.",
       "Return by channel: latest by time, recommended by personalized score, read later by personalized score, favorites by saved time by default."
+    ],
+    rankingFlowDiagram: [
+      {
+        phase: "Candidates",
+        title: "Collect candidates",
+        description: "Channel, source, folder, unread filter, and cursor form the candidate pool."
+      },
+      {
+        phase: "Filter",
+        title: "Remove invisible items",
+        description: "Hidden, not-interested, and deleted articles leave normal lists."
+      },
+      {
+        phase: "State",
+        title: "Read article state",
+        description: "Favorite, like, read later, depth, ignored, and opened feed into state score."
+      },
+      {
+        phase: "Source",
+        title: "Calculate source preference",
+        description: "Manual source weight and feed_stats are combined into source score."
+      },
+      {
+        phase: "Time",
+        title: "Calculate freshness",
+        description: "Published or discovered time drives freshness score with a roughly 36-hour half-life."
+      },
+      {
+        phase: "Profile",
+        title: "Match the profile card",
+        description: "With an active embedding index, vectors match positive and negative interest clusters."
+      },
+      {
+        phase: "Blend",
+        title: "Blend ranking score",
+        description: "Interest, source, freshness, state, and negative penalty form the active rank score."
+      },
+      {
+        phase: "Output",
+        title: "Return by channel",
+        description: "Latest uses time; recommended and read later use personalization; favorites use saved time."
+      }
     ],
     channelRules: [
       "Latest: time-descending by default. Only unread filters derived unread state without changing the sort meaning.",

@@ -2463,11 +2463,19 @@ export function AlgorithmTransparencyPage(props: {
           <div>
             <h3>{t.algorithmTransparency.sections.rankingFlow}</h3>
           </div>
-          <ol className={styles.algorithmFlowList}>
-            {t.algorithmTransparency.rankingFlow.map((step) => (
-              <li key={step}>{step}</li>
+          <div className={styles.algorithmFlowDiagram} role="list">
+            {t.algorithmTransparency.rankingFlowDiagram.map((step, index) => (
+              <article className={styles.algorithmFlowNode} key={step.title} role="listitem">
+                <span className={styles.algorithmFlowConnector} aria-hidden="true" />
+                <span className={styles.algorithmFlowIndex}>{String(index + 1).padStart(2, "0")}</span>
+                <div className={styles.algorithmFlowContent}>
+                  <span className={styles.algorithmFlowPhase}>{step.phase}</span>
+                  <strong>{step.title}</strong>
+                  <p>{step.description}</p>
+                </div>
+              </article>
             ))}
-          </ol>
+          </div>
         </section>
 
         <section className={styles.settingsSection}>
