@@ -371,7 +371,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus
           unreadCount={3}
-          unreadOnly={false}
+          unreadOnly={true}
         />
       </DibaoI18nProvider>
     );

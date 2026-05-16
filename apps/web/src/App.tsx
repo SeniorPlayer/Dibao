@@ -549,9 +549,11 @@ export function App() {
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
-    setRecommendationStatus(null);
-    setIsRecommendationStatusLoading(false);
-    setRecommendationStatusError(null);
+    if (view !== "recommended") {
+      setRecommendationStatus(null);
+      setIsRecommendationStatusLoading(false);
+      setRecommendationStatusError(null);
+    }
     setDetailError(null);
     setExplanationError(null);
 
