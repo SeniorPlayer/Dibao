@@ -99,12 +99,13 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     expect(readProgress?.metadata.activeDurationMs).toBeGreaterThanOrEqual(0);
     expect(readProgress?.metadata.progress).toBeGreaterThanOrEqual(0.25);
 
-    await page.getByRole("button", { name: "收藏" }).click();
-    await expect(page.getByRole("button", { name: "取消收藏" })).toBeVisible();
-    await page.getByRole("button", { name: "稍后读" }).click();
-    await expect(page.getByRole("button", { name: "移出稍后读" })).toBeVisible();
-    await page.getByRole("button", { name: "不再推荐类似文章" }).click();
-    await expect(page.getByRole("button", { name: "已标记不感兴趣" })).toBeVisible();
+    const readerPanel = page.getByTestId("reader-scroll-container");
+    await readerPanel.getByRole("button", { name: "收藏这篇文章" }).first().click();
+    await expect(readerPanel.getByRole("button", { name: "取消收藏这篇文章" }).first()).toBeVisible();
+    await readerPanel.getByRole("button", { name: "稍后读这篇文章" }).first().click();
+    await expect(readerPanel.getByRole("button", { name: "移出稍后读" }).first()).toBeVisible();
+    await readerPanel.getByRole("button", { name: "不再推荐类似文章" }).first().click();
+    await expect(readerPanel.getByRole("button", { name: "已标记不感兴趣" }).first()).toBeVisible();
 
     await page.getByLabel("只看未读").uncheck();
     await page.getByRole("link", { name: "推荐" }).click();
@@ -135,6 +136,18 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("button", { name: "重建向量索引" })).toBeVisible();
     await page.getByRole("button", { name: "测试连接" }).click();
     await expect(page.getByText("连接测试成功。")).toBeVisible();
+
+    await page.getByRole("link", { name: "查看算法透明说明" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "算法透明说明" })).toBeVisible();
+    await expect(page.getByText("当前推荐状态")).toBeVisible();
+    await expect(page.getByText("排序流程图")).toBeVisible();
+
+    await page.getByRole("link", { name: "订阅源" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "订阅源管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "导入、导出与刷新" })).toBeVisible();
+    await expect(page.getByLabel("RSS / Atom URL")).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新全部" })).toBeVisible();
+    await expect(page.getByText("Feed URL")).toBeVisible();
   } finally {
     await fixture.close();
   }

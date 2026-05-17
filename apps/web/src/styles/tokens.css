@@ -1,7 +1,11 @@
 :root {
+  color-scheme: light;
+
   --color-canvas: #f7f4ed;
   --color-surface: #fffefa;
-  --color-surface-subtle: #f1eee6;
+  --color-paper: #f1eee6;
+  --color-paper-strong: #e8e4d8;
+  --color-surface-subtle: var(--color-paper);
   --color-surface-raised: #fffefa;
   --color-ink: #202421;
   --color-ink-soft: #3d423d;
@@ -11,17 +15,28 @@
   --color-line: #d8d6ca;
   --color-line-strong: #b9b6a9;
   --color-line-subtle: #e9e5da;
-  --color-accent: #315f72;
-  --color-accent-hover: #264f60;
-  --color-accent-soft: #dce8ec;
-  --color-positive: #4f6f52;
-  --color-positive-soft: #dfe8dc;
-  --color-warning: #a66a2c;
-  --color-warning-soft: #f2e2cb;
-  --color-danger: #a64235;
-  --color-danger-soft: #edd8d4;
-  --color-focus: #315f72;
-  --color-selection: #dce8ec;
+  --color-pine: #315f72;
+  --color-pine-hover: #264f60;
+  --color-pine-soft: #dce8ec;
+  --color-matsu: #4f6f5b;
+  --color-matsu-soft: #dfe8dc;
+  --color-indigo: #343a6e;
+  --color-indigo-soft: #e0e2ef;
+  --color-vermilion: #a64235;
+  --color-vermilion-soft: #edd8d4;
+  --color-ochre: #8a5a2c;
+  --color-ochre-soft: #efe5c8;
+  --color-accent: var(--color-pine);
+  --color-accent-hover: var(--color-pine-hover);
+  --color-accent-soft: var(--color-pine-soft);
+  --color-positive: var(--color-matsu);
+  --color-positive-soft: var(--color-matsu-soft);
+  --color-warning: var(--color-ochre);
+  --color-warning-soft: var(--color-ochre-soft);
+  --color-danger: var(--color-vermilion);
+  --color-danger-soft: var(--color-vermilion-soft);
+  --color-focus: var(--color-pine);
+  --color-selection: var(--color-pine-soft);
 
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
     "Noto Sans JP", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
@@ -71,8 +86,8 @@
   --border-strong: 1px solid var(--color-line-strong);
 
   --shadow-none: none;
-  --shadow-popover: 0 8px 24px rgb(32 36 33 / 0.12);
-  --shadow-sheet: 0 -8px 24px rgb(32 36 33 / 0.14);
+  --shadow-popover: 0 12px 28px rgb(32 36 33 / 0.14);
+  --shadow-sheet: 0 -12px 28px rgb(32 36 33 / 0.16);
 
   --layout-sidebar-width: 176px;
   --layout-topbar-height: 48px;
@@ -97,16 +112,16 @@
   --button-padding-x-sm: 8px;
   --button-padding-x-md: 12px;
   --button-padding-x-lg: 16px;
-  --button-radius: var(--radius-sm);
+  --button-radius: var(--radius-md);
 
   --input-height-md: 36px;
   --input-padding-x: 10px;
-  --input-radius: var(--radius-sm);
+  --input-radius: var(--radius-md);
   --input-border: var(--border-default);
   --input-background: var(--color-surface);
 
-  --article-item-padding-y: 14px;
-  --article-item-padding-x: 0;
+  --article-item-padding-y: 16px;
+  --article-item-padding-x: 16px;
   --article-item-title-size: 16px;
   --article-item-summary-size: 14px;
   --article-item-meta-size: 13px;
@@ -123,4 +138,3 @@
   --sheet-shadow: var(--shadow-sheet);
   --sheet-background: var(--color-surface-raised);
 }
-

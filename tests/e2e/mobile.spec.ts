@@ -30,9 +30,10 @@ test("mobile MVP reader smoke has visible controls and no horizontal overflow", 
   await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
   await expect(page.getByRole("button", { name: "返回列表" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "收藏" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "稍后读" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "不再推荐类似文章" })).toBeVisible();
+  const readerPanel = page.getByTestId("reader-scroll-container");
+  await expect(readerPanel.getByRole("button", { name: "收藏这篇文章" }).first()).toBeVisible();
+  await expect(readerPanel.getByRole("button", { name: "稍后读这篇文章" }).first()).toBeVisible();
+  await expect(readerPanel.getByRole("button", { name: "不再推荐类似文章" }).first()).toBeVisible();
   const readingLayout = await page.evaluate(mobilePanelState);
   expect(readingLayout.listDisplay).toBe("none");
   expect(readingLayout.readerDisplay).toBe("block");
@@ -56,7 +57,7 @@ test("mobile recommended list keeps a dense first screen without horizontal over
 
   await page.getByRole("link", { name: "推荐" }).click();
   await expect(page.getByRole("heading", { name: "推荐" })).toBeVisible();
-  await expect(page.getByText("推荐状态")).toBeVisible();
+  await expect(page.getByText("推荐状态", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /E2E Article Alpha/ })).toBeVisible();
 
   const visibleArticles = await page.evaluate(visibleArticleCountInListViewport);
@@ -88,16 +89,17 @@ test("mobile article actions expose selected favorite and read-later state", asy
   await page.getByRole("button", { name: /E2E Article Extra 22/ }).click();
   await expect(page.getByRole("heading", { name: "E2E Article Extra 22" })).toBeVisible();
 
-  const favoriteButton = page.getByRole("button", { name: "收藏这篇文章" });
+  const readerPanel = page.getByTestId("reader-scroll-container");
+  const favoriteButton = readerPanel.getByRole("button", { name: "收藏这篇文章" }).first();
   await favoriteButton.click();
-  await expect(page.getByRole("button", { name: "取消收藏这篇文章" })).toHaveAttribute(
+  await expect(readerPanel.getByRole("button", { name: "取消收藏这篇文章" }).first()).toHaveAttribute(
     "aria-pressed",
     "true"
   );
 
-  const readLaterButton = page.getByRole("button", { name: "稍后读这篇文章" });
+  const readLaterButton = readerPanel.getByRole("button", { name: "稍后读这篇文章" }).first();
   await readLaterButton.click();
-  await expect(page.getByRole("button", { name: "移出稍后读" })).toHaveAttribute(
+  await expect(readerPanel.getByRole("button", { name: "移出稍后读" }).first()).toHaveAttribute(
     "aria-pressed",
     "true"
   );
@@ -148,8 +150,9 @@ test("liking an article exposes visible pressed UI state", async ({ page }) => {
 
   await page.getByRole("button", { name: /E2E Article Alpha/ }).click();
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
-  await page.getByRole("button", { name: "点赞这篇文章" }).click();
-  await expect(page.getByRole("button", { name: "取消点赞这篇文章" })).toHaveAttribute(
+  const readerPanel = page.getByTestId("reader-scroll-container");
+  await readerPanel.getByRole("button", { name: "点赞这篇文章" }).first().click();
+  await expect(readerPanel.getByRole("button", { name: "取消点赞这篇文章" }).first()).toHaveAttribute(
     "aria-pressed",
     "true"
   );
@@ -187,10 +190,11 @@ async function favoriteArticle(page: Page, title: string): Promise<void> {
   await page.getByRole("link", { name: "最新" }).click();
   await page.getByRole("button", { name: new RegExp(title) }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  const favorite = page.getByRole("button", { name: "收藏这篇文章" });
+  const readerPanel = page.getByTestId("reader-scroll-container");
+  const favorite = readerPanel.getByRole("button", { name: "收藏这篇文章" }).first();
   if (await favorite.isVisible()) {
     await favorite.click();
-    await expect(page.getByRole("button", { name: "取消收藏这篇文章" })).toHaveAttribute(
+    await expect(readerPanel.getByRole("button", { name: "取消收藏这篇文章" }).first()).toHaveAttribute(
       "aria-pressed",
       "true"
     );
@@ -203,10 +207,11 @@ async function saveArticleForLater(page: Page, title: string): Promise<void> {
   await page.getByRole("link", { name: "最新" }).click();
   await page.getByRole("button", { name: new RegExp(title) }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  const readLater = page.getByRole("button", { name: "稍后读这篇文章" });
+  const readerPanel = page.getByTestId("reader-scroll-container");
+  const readLater = readerPanel.getByRole("button", { name: "稍后读这篇文章" }).first();
   if (await readLater.isVisible()) {
     await readLater.click();
-    await expect(page.getByRole("button", { name: "移出稍后读" })).toHaveAttribute(
+    await expect(readerPanel.getByRole("button", { name: "移出稍后读" }).first()).toHaveAttribute(
       "aria-pressed",
       "true"
     );

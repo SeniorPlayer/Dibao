@@ -612,7 +612,8 @@ export const zhCN = {
       markRead: "标记这篇文章为已读",
       markUnread: "标记这篇文章为未读",
       notInterested: "不再推荐类似文章",
-      notInterestedActive: "已标记不感兴趣"
+      notInterestedActive: "已标记不感兴趣",
+      group: "文章操作"
     },
     errors: {
       favorite: "收藏失败。",
@@ -1258,7 +1259,8 @@ export const enUS = {
       markRead: "Mark this article as read",
       markUnread: "Mark this article as unread",
       notInterested: "Stop recommending similar articles",
-      notInterestedActive: "Already marked not interested"
+      notInterestedActive: "Already marked not interested",
+      group: "Article actions"
     },
     errors: {
       favorite: "Favorite failed.",

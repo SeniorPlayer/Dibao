@@ -314,6 +314,7 @@ describe("web i18n", () => {
     expect(feedPanel).not.toContain("刷新全部");
     expect(feedPanel).toContain("下次抓取");
     expect(feedPanel).toContain("分组");
+    expect(feedPanel).toContain('title="刷新 Design Feed"');
     expect(articlePanel).toContain("只看未读");
     expect(articlePanel).toContain("加载更多");
     expect(articlePanel).toContain("设计");
@@ -526,6 +527,7 @@ describe("web i18n", () => {
 
     expect(html).toContain("算法透明说明");
     expect(html).toContain("个性化推荐中");
+    expect(html).toContain("当前推荐状态");
     expect(html).toContain("8 / 10 · 80%");
     expect(html).toContain("like: 2");
     expect(html).toContain("LOW_COVERAGE");
@@ -593,9 +595,11 @@ describe("web i18n", () => {
     expect(html).toContain("刷新全部");
     expect(html).toContain("添加订阅源");
     expect(html).toContain("RSS / Atom URL");
+    expect(html).toContain("导入、导出与刷新");
     expect(html).toContain("重命名");
     expect(html).toContain("删除");
     expect(html).toContain("Design Feed");
+    expect(html).toContain("Feed URL");
     expect(html).toContain("https://example.com/feed.xml");
     expect(html).toContain("启用订阅源");
     expect(html).toContain("来源权重");
@@ -637,6 +641,7 @@ describe("web i18n", () => {
 
     expect(html).toContain("设置");
     expect(html).toContain("界面语言");
+    expect(html).toContain("查看算法透明说明");
     expect(html).toContain("字号");
     expect(html).toContain("行高");
     expect(html).toContain("段距");
@@ -771,6 +776,10 @@ describe("web i18n", () => {
     expect(html).toContain("点赞");
     expect(html).toContain("稍后读");
     expect(html).toContain("不感兴趣");
+    expect(html).toContain('aria-label="收藏这篇文章"');
+    expect(html).toContain('aria-label="点赞这篇文章"');
+    expect(html).toContain('aria-label="稍后读这篇文章"');
+    expect(html).toContain('aria-label="不再推荐类似文章"');
     expect(html).not.toContain("标记已读");
   });
 

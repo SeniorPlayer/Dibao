@@ -89,6 +89,8 @@ export type AppStage =
 
 export type ArticleActionIntent = "favorite" | "like" | "readLater" | "notInterested";
 
+type ArticleActionTarget = Pick<ArticleDetail, "id" | "state">;
+
 type PendingArticleAction = {
   articleId: string;
   intent: ArticleActionIntent;
@@ -1137,7 +1139,7 @@ export function App() {
     }
   }
 
-  async function handleArticleAction(article: ArticleDetail, intent: ArticleActionIntent) {
+  async function handleArticleAction(article: ArticleActionTarget, intent: ArticleActionIntent) {
     setPendingArticleAction({ articleId: article.id, intent });
     setArticleActionError(null);
 
@@ -1344,8 +1346,11 @@ export function App() {
               href="#"
               key={item}
               onClick={(event) => handleNavigationClick(event, item)}
+              title={t.navigation.items[item]}
+              aria-label={t.navigation.items[item]}
             >
-              {t.navigation.items[item]}
+              <NavigationIcon item={item} />
+              <span className={styles.navLabel}>{t.navigation.items[item]}</span>
             </a>
           ))}
         </nav>
@@ -1469,10 +1474,12 @@ export function App() {
               onIgnoreArticle={handleIgnoreArticle}
               onLoadMore={handleLoadMoreArticles}
               onOpenSources={() => setIsSourceDrawerOpen(true)}
+              onArticleAction={handleArticleAction}
               onSelectArticle={handleSelectArticle}
               onFavoriteSortChange={handleFavoriteSortChange}
               onUnreadOnlyChange={handleUnreadOnlyChange}
               favoriteSort={favoriteSort}
+              pendingAction={pendingArticleAction}
               recommendationStatus={
                 currentArticleView === "recommended" ? recommendationStatus : null
               }
@@ -1856,11 +1863,11 @@ export function SettingsWorkspace(props: {
 
   return (
     <form
-      className={styles.settingsWorkspace}
+      className={classNames(styles.settingsWorkspace, "settings-board-page")}
       onSubmit={(event) => void handleSubmit(event)}
       aria-labelledby="settings-title"
     >
-      <div className={styles.settingsHeader}>
+      <div className={classNames(styles.settingsHeader, "settings-content-head")}>
         <div>
           <p className={styles.kicker}>{t.navigation.items.settings}</p>
           <h2 id="settings-title">{t.settings.pageTitle}</h2>
@@ -1870,12 +1877,12 @@ export function SettingsWorkspace(props: {
         </button>
       </div>
 
-      <div className={styles.settingsContent}>
+      <div className={classNames(styles.settingsContent, "settings-content-board")}>
         {props.isLoading ? <p className={styles.settingsNotice}>{t.settings.loading}</p> : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
         {localError ? <p className={styles.errorText}>{localError}</p> : null}
 
-        <section className={styles.settingsSection} aria-labelledby="settings-language-title">
+        <section className={classNames(styles.settingsSection, "settings-card")} aria-labelledby="settings-language-title">
           <div>
             <h3 id="settings-language-title">{t.settings.sections.language.title}</h3>
             <p>{t.settings.sections.language.body}</p>
@@ -1898,7 +1905,7 @@ export function SettingsWorkspace(props: {
           </label>
         </section>
 
-        <section className={styles.settingsSection} aria-labelledby="settings-behavior-title">
+        <section className={classNames(styles.settingsSection, "settings-card")} aria-labelledby="settings-behavior-title">
           <div>
             <h3 id="settings-behavior-title">{t.settings.sections.behavior.title}</h3>
             <p>{t.settings.sections.behavior.body}</p>
@@ -1929,7 +1936,7 @@ export function SettingsWorkspace(props: {
           </label>
         </section>
 
-        <section className={styles.settingsSection} aria-labelledby="settings-reader-title">
+        <section className={classNames(styles.settingsSection, "settings-card", "reader-settings-card")} aria-labelledby="settings-reader-title">
           <div>
             <h3 id="settings-reader-title">{t.settings.sections.reader.title}</h3>
             <p>{t.settings.sections.reader.body}</p>
@@ -1976,7 +1983,7 @@ export function SettingsWorkspace(props: {
           </div>
         </section>
 
-        <section className={styles.settingsSection} aria-labelledby="settings-retention-title">
+        <section className={classNames(styles.settingsSection, "settings-card", "retention-card")} aria-labelledby="settings-retention-title">
           <div>
             <h3 id="settings-retention-title">{t.settings.sections.retention.title}</h3>
             <p>{t.settings.sections.retention.body}</p>
@@ -2010,7 +2017,7 @@ export function SettingsWorkspace(props: {
           <p className={styles.managementHint}>{t.settings.sections.retention.mappingHint}</p>
         </section>
 
-        <section className={styles.settingsSection} aria-labelledby="settings-provider-title">
+        <section className={classNames(styles.settingsSection, "settings-card", "provider-settings-card")} aria-labelledby="settings-provider-title">
           <div>
             <h3 id="settings-provider-title">{t.settings.sections.provider.title}</h3>
             <p>{t.settings.sections.provider.body}</p>
@@ -2244,7 +2251,7 @@ export function SettingsWorkspace(props: {
 
           <p className={styles.managementHint}>{t.settings.sections.provider.deleteHint}</p>
 
-          <div className={styles.settingsSection} aria-labelledby="settings-indexes-title">
+          <div className={classNames(styles.settingsSection, "settings-card", "index-settings-card")} aria-labelledby="settings-indexes-title">
             <div>
               <h3 id="settings-indexes-title">{t.settings.sections.provider.indexesTitle}</h3>
               <p>{t.settings.sections.provider.indexesBody}</p>
@@ -2321,8 +2328,11 @@ export function AlgorithmTransparencyPage(props: {
   const behaviorEntries = props.status ? Object.entries(props.status.behaviorCounts) : [];
 
   return (
-    <section className={styles.settingsWorkspace} aria-labelledby="algorithm-transparency-title">
-      <div className={styles.settingsHeader}>
+    <section
+      className={classNames(styles.settingsWorkspace, "algorithm-board-page")}
+      aria-labelledby="algorithm-transparency-title"
+    >
+      <div className={classNames(styles.settingsHeader, "algorithm-hero")}>
         <div>
           <p className={styles.kicker}>{t.settings.pageTitle}</p>
           <h2 id="algorithm-transparency-title">{t.algorithmTransparency.pageTitle}</h2>
@@ -2332,13 +2342,13 @@ export function AlgorithmTransparencyPage(props: {
         </button>
       </div>
 
-      <div className={styles.settingsContent}>
+      <div className={classNames(styles.settingsContent, "algorithm-board")}>
         {props.isLoading ? (
           <p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>
         ) : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card", "diagnostics-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.currentStatus}</h3>
             <p>{statusText}</p>
@@ -2415,7 +2425,7 @@ export function AlgorithmTransparencyPage(props: {
           ) : null}
         </section>
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.terms}</h3>
           </div>
@@ -2429,7 +2439,7 @@ export function AlgorithmTransparencyPage(props: {
           </dl>
         </section>
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.scoreTable}</h3>
           </div>
@@ -2459,7 +2469,7 @@ export function AlgorithmTransparencyPage(props: {
           </div>
         </section>
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.rankingFlow}</h3>
           </div>
@@ -2478,7 +2488,7 @@ export function AlgorithmTransparencyPage(props: {
           </div>
         </section>
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.channelRules}</h3>
           </div>
@@ -2489,7 +2499,7 @@ export function AlgorithmTransparencyPage(props: {
           </ul>
         </section>
 
-        <section className={styles.settingsSection}>
+        <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
             <h3>{t.algorithmTransparency.sections.dataAndFallback}</h3>
           </div>
@@ -2659,12 +2669,14 @@ export function ArticleListPanel(props: {
   isRecommendationStatusLoading: boolean;
   loadMoreError: string | null;
   nextCursor: string | null;
+  onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
   onFavoriteSortChange: (sort: FavoriteArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
   onLoadMore: () => void;
   onOpenSources: () => void;
   onSelectArticle: (articleId: string) => void;
   onUnreadOnlyChange: (unreadOnly: boolean) => void;
+  pendingAction?: PendingArticleAction | null;
   recommendationStatus: RecommendationStatus | null;
   recommendationStatusError: string | null;
   selectedArticleId: string | null;
@@ -2775,23 +2787,41 @@ export function ArticleListPanel(props: {
 
         {!props.isArticlesLoading &&
           props.articles.map((article) => (
-            <button
+            <article
               className={articleItemClassName(article, props.selectedArticleId)}
               data-article-id={article.id}
+              data-interaction-status={articleInteractionStatusForState(article.state)}
+              data-favorited={article.state.favorited ? "true" : undefined}
+              data-liked={article.state.liked ? "true" : undefined}
+              data-read-later={article.state.readLater ? "true" : undefined}
               key={article.id}
-              onClick={() => props.onSelectArticle(article.id)}
-              type="button"
             >
-              <span className={styles.meta}>
-                {t.articles.itemMeta(
-                  formatDate(article.publishedAt ?? article.discoveredAt),
-                  article.feedTitle
-                )}
-              </span>
-              <strong>{article.title}</strong>
-              {article.summary ? <span className={styles.summary}>{article.summary}</span> : null}
-              <ArticleStateBadges state={article.state} />
-            </button>
+              <button
+                className={styles.articleMain}
+                onClick={() => props.onSelectArticle(article.id)}
+                type="button"
+              >
+                <span className={styles.meta}>
+                  {t.articles.itemMeta(
+                    formatDate(article.publishedAt ?? article.discoveredAt),
+                    article.feedTitle
+                  )}
+                </span>
+                <strong>{article.title}</strong>
+                {article.summary ? <span className={styles.summary}>{article.summary}</span> : null}
+                <ArticleStateBadges state={article.state} />
+              </button>
+              <ArticleRowActions
+                article={article}
+                onAction={(intent) => props.onArticleAction?.(article, intent)}
+                onExplain={() => props.onSelectArticle(article.id)}
+                pendingAction={
+                  props.pendingAction?.articleId === article.id
+                    ? props.pendingAction.intent
+                    : null
+                }
+              />
+            </article>
           ))}
 
         {!props.isArticlesLoading && props.nextCursor ? (
@@ -3030,6 +3060,7 @@ function ArticleDetailPanel(props: {
               article={props.article}
               onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
               pendingAction={props.pendingAction}
+              placement="top"
             />
             <RankExplanationPanel
               error={props.explanationError}
@@ -3048,6 +3079,13 @@ function ArticleDetailPanel(props: {
               <p>{props.article.contentText ?? props.article.summary ?? t.reader.noContent}</p>
             </div>
           )}
+          <ArticleActionControls
+            actionError={null}
+            article={props.article}
+            onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
+            pendingAction={props.pendingAction}
+            placement="bottom"
+          />
         </article>
       ) : null}
     </section>
@@ -3082,10 +3120,10 @@ function ArticleStateBadges(props: { state: ArticleState }) {
   );
 }
 
-export function ArticleActionControls(props: {
-  actionError: string | null;
-  article: Pick<ArticleDetail, "id" | "state">;
+function ArticleRowActions(props: {
+  article: ArticleActionTarget;
   onAction: (intent: ArticleActionIntent) => void;
+  onExplain: () => void;
   pendingAction: ArticleActionIntent | null;
 }) {
   const { t } = useI18n();
@@ -3093,12 +3131,86 @@ export function ArticleActionControls(props: {
   const isBusy = props.pendingAction !== null;
 
   return (
-    <div className={styles.readerActions} aria-live="polite">
+    <div className={classNames(styles.actionButtonRow, styles.articleRowActions)} aria-live="polite">
+      <ActionButton
+        ariaLabel={state.favorited ? t.actions.aria.unfavorite : t.actions.aria.favorite}
+        busy={props.pendingAction === "favorite"}
+        disabled={isBusy}
+        icon={state.favorited ? "starFilled" : "star"}
+        label={state.favorited ? t.actions.unfavorite : t.actions.favorite}
+        onClick={() => props.onAction("favorite")}
+        selected={state.favorited}
+      />
+      <ActionButton
+        ariaLabel={state.liked ? t.actions.aria.unlike : t.actions.aria.like}
+        busy={props.pendingAction === "like"}
+        disabled={isBusy}
+        icon="like"
+        label={state.liked ? t.actions.unlike : t.actions.like}
+        onClick={() => props.onAction("like")}
+        selected={state.liked}
+      />
+      <ActionButton
+        ariaLabel={state.readLater ? t.actions.aria.removeReadLater : t.actions.aria.readLater}
+        busy={props.pendingAction === "readLater"}
+        disabled={isBusy}
+        icon="bookmark"
+        label={state.readLater ? t.actions.removeReadLater : t.actions.readLater}
+        onClick={() => props.onAction("readLater")}
+        selected={state.readLater}
+      />
+      <ActionButton
+        ariaLabel={
+          state.notInterested ? t.actions.aria.notInterestedActive : t.actions.aria.notInterested
+        }
+        busy={props.pendingAction === "notInterested"}
+        danger
+        disabled={isBusy || state.notInterested}
+        icon="dismiss"
+        label={state.notInterested ? t.actions.notInterestedActive : t.actions.notInterested}
+        onClick={() => props.onAction("notInterested")}
+        selected={state.notInterested}
+      />
+      <button
+        aria-label={t.explanation.title}
+        className={classNames(styles.actionButton, styles.actionExplain)}
+        onClick={props.onExplain}
+        title={t.explanation.title}
+        type="button"
+      >
+        <ActionIcon name="sparkle" />
+      </button>
+    </div>
+  );
+}
+
+export function ArticleActionControls(props: {
+  actionError: string | null;
+  article: Pick<ArticleDetail, "id" | "state">;
+  onAction: (intent: ArticleActionIntent) => void;
+  pendingAction: ArticleActionIntent | null;
+  placement?: "top" | "bottom";
+}) {
+  const { t } = useI18n();
+  const { state } = props.article;
+  const isBusy = props.pendingAction !== null;
+
+  return (
+    <div
+      className={classNames(
+        styles.readerActions,
+        props.placement === "top" ? styles.readerActionsTop : null,
+        props.placement === "bottom" ? styles.readerActionsBottom : null
+      )}
+      aria-label={t.actions.aria.group}
+      aria-live="polite"
+    >
       <div className={styles.actionButtonRow}>
         <ActionButton
           ariaLabel={state.favorited ? t.actions.aria.unfavorite : t.actions.aria.favorite}
           busy={props.pendingAction === "favorite"}
           disabled={isBusy}
+          icon={state.favorited ? "starFilled" : "star"}
           label={state.favorited ? t.actions.unfavorite : t.actions.favorite}
           onClick={() => props.onAction("favorite")}
           selected={state.favorited}
@@ -3107,6 +3219,7 @@ export function ArticleActionControls(props: {
           ariaLabel={state.liked ? t.actions.aria.unlike : t.actions.aria.like}
           busy={props.pendingAction === "like"}
           disabled={isBusy}
+          icon="like"
           label={state.liked ? t.actions.unlike : t.actions.like}
           onClick={() => props.onAction("like")}
           selected={state.liked}
@@ -3117,6 +3230,7 @@ export function ArticleActionControls(props: {
           }
           busy={props.pendingAction === "readLater"}
           disabled={isBusy}
+          icon="bookmark"
           label={state.readLater ? t.actions.removeReadLater : t.actions.readLater}
           onClick={() => props.onAction("readLater")}
           selected={state.readLater}
@@ -3130,6 +3244,7 @@ export function ArticleActionControls(props: {
           busy={props.pendingAction === "notInterested"}
           danger
           disabled={isBusy || state.notInterested}
+          icon="dismiss"
           label={
             state.notInterested ? t.actions.notInterestedActive : t.actions.notInterested
           }
@@ -3150,9 +3265,14 @@ export function RankExplanationPanel(props: {
   const { t, formatDate } = useI18n();
 
   return (
-    <section className={styles.explanationBox} aria-labelledby="rank-explanation-title">
+    <section
+      className={classNames(styles.explanationBox, styles.explanationInlineCard)}
+      aria-labelledby="rank-explanation-title"
+    >
       <div className={styles.explanationHeader}>
-        <h3 id="rank-explanation-title">{t.explanation.title}</h3>
+        <h3 id="rank-explanation-title">
+          <ActionIcon name="sparkle" /> {t.explanation.title}
+        </h3>
         {props.explanation ? (
           <span>{t.explanation.generatedAt(formatDate(props.explanation.generatedAt))}</span>
         ) : null}
@@ -3187,11 +3307,11 @@ function ActionButton(props: {
   busy: boolean;
   danger?: boolean;
   disabled: boolean;
+  icon: ActionIconName;
   label: string;
   onClick: () => void;
   selected: boolean;
 }) {
-  const { t } = useI18n();
   const className = props.danger
     ? styles.actionButtonDanger
     : props.selected
@@ -3206,10 +3326,109 @@ function ActionButton(props: {
       className={className}
       disabled={props.disabled}
       onClick={props.onClick}
+      title={props.label}
       type="button"
     >
-      {props.busy ? t.actions.saving : props.label}
+      {props.busy ? <span aria-hidden="true">...</span> : <ActionIcon name={props.icon} />}
     </button>
+  );
+}
+
+type ActionIconName =
+  | "bookmark"
+  | "dismiss"
+  | "feed"
+  | "gear"
+  | "like"
+  | "search"
+  | "sparkle"
+  | "star"
+  | "starFilled";
+
+function NavigationIcon(props: { item: NavigationItemKey }) {
+  const iconByItem: Record<NavigationItemKey, ActionIconName> = {
+    latest: "feed",
+    recommended: "sparkle",
+    favorites: "star",
+    read_later: "bookmark",
+    search: "search",
+    feeds: "feed",
+    settings: "gear"
+  };
+
+  return <ActionIcon name={iconByItem[props.item]} />;
+}
+
+function ActionIcon(props: { name: ActionIconName }) {
+  if (props.name === "sparkle") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="m12 3 1.6 5.2L19 10l-5.4 1.8L12 17l-1.6-5.2L5 10l5.4-1.8L12 3Z" fill="currentColor" />
+        <path d="m19 15 .7 2.1 2.1.7-2.1.7L19 21l-.7-2.5-2.1-.7 2.1-.7L19 15Z" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (props.name === "star" || props.name === "starFilled") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path
+          d="m12 4 2.35 4.76 5.25.76-3.8 3.7.9 5.23L12 16l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76L12 4Z"
+          fill={props.name === "starFilled" ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="1.7"
+        />
+      </svg>
+    );
+  }
+
+  if (props.name === "like") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="M7 10v10H4V10h3Zm4.2-6L9 10v10h8.8l2.2-8.2A2 2 0 0 0 18.1 9H14l.6-3.4A1.7 1.7 0 0 0 11.2 4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+
+  if (props.name === "bookmark") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="M7 4h10v16l-5-3-5 3V4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+
+  if (props.name === "dismiss") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (props.name === "search") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="M10.8 17.2a6.4 6.4 0 1 1 0-12.8 6.4 6.4 0 0 1 0 12.8Zm4.7-1.7L20 20" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (props.name === "gear") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" fill="none" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M4.8 13.4v-2.8l2-.7.7-1.6-.9-1.9 2-2 1.9.9 1.5-.6.8-2h2.8l.8 2 1.5.6 1.9-.9 2 2-.9 1.9.7 1.6 2 .7v2.8l-2 .7-.7 1.6.9 1.9-2 2-1.9-.9-1.5.6-.8 2h-2.8l-.8-2-1.5-.6-1.9.9-2-2 .9-1.9-.7-1.6-2-.7Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+      <path d="M5 5h10a4 4 0 0 1 4 4v10H9a4 4 0 0 1-4-4V5Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M8 9h7M8 13h5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
   );
 }
 
