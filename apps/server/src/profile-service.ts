@@ -290,7 +290,7 @@ export class ProfileService {
       if (!forceCreate) {
         return;
       }
-      this.createCluster(event.embeddingIndexId, polarity, vector, eventWeight, now);
+      this.createCluster(event.embeddingIndexId, polarity, vector, eventWeight, event, now);
       this.compactAndTrimClusters(event.embeddingIndexId, polarity);
       return;
     }
@@ -300,6 +300,7 @@ export class ProfileService {
       const merged = mergeCentroid(best.centroid, vector, learningRate);
       this.options.profiles.updateCluster({
         id: best.cluster.id,
+        label: best.cluster.label ?? clusterLabelForEvent(event),
         centroidVectorBlob: toVectorBlob(merged),
         weight: clamp(
           best.cluster.weight + eventWeight,
@@ -315,7 +316,7 @@ export class ProfileService {
     }
 
     if (forceCreate || (polarity === "positive" && best.similarity >= thresholds.create)) {
-      this.createCluster(event.embeddingIndexId, polarity, vector, eventWeight, now);
+      this.createCluster(event.embeddingIndexId, polarity, vector, eventWeight, event, now);
       this.compactAndTrimClusters(event.embeddingIndexId, polarity);
     }
   }
@@ -325,12 +326,14 @@ export class ProfileService {
     polarity: InterestClusterPolarity,
     vector: number[],
     eventWeight: number,
+    event: ProfileBehaviorEventRow,
     now: number
   ): void {
     this.options.profiles.upsertCluster({
       id: this.clusterIdFactory(),
       embeddingIndexId,
       polarity,
+      label: clusterLabelForEvent(event),
       centroidVectorBlob: toVectorBlob(vector),
       weight: clamp(eventWeight, profileAlgorithmDefaults.minClusterWeight, 8),
       sampleCount: 1,
@@ -404,6 +407,7 @@ export class ProfileService {
 
           this.options.profiles.updateCluster({
             id: survivor.id,
+            label: survivor.label ?? mergedAway.label,
             centroidVectorBlob: toVectorBlob(centroid),
             weight: clamp(
               survivor.weight + mergedAway.weight,
@@ -731,6 +735,39 @@ function snapshotBucket(
   snapshot.profileV0[embeddingIndexId] ??= {};
   snapshot.profileV0[embeddingIndexId][contentHash] ??= {};
   return snapshot.profileV0[embeddingIndexId][contentHash];
+}
+
+function clusterLabelForEvent(event: ProfileBehaviorEventRow): string | null {
+  return clusterLabelFromText(event.title) ?? clusterLabelFromText(event.summary);
+}
+
+function clusterLabelFromText(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const clean = value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) {
+    return null;
+  }
+
+  const segments = clean
+    .split(/[|｜:：;；,，。？?！!、/\\()[\]{}《》「」『』“”"'—–-]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => Array.from(segment).length >= 2);
+  const best = (segments.length > 0 ? segments : [clean]).sort(
+    (left, right) => Array.from(right).length - Array.from(left).length
+  )[0];
+  if (!best) {
+    return null;
+  }
+
+  const chars = Array.from(best);
+  return chars.length > 24 ? `${chars.slice(0, 24).join("")}...` : best;
 }
 
 function bestClusterMatch(vector: number[], clusters: InterestClusterRow[]) {

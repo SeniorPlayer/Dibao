@@ -58,7 +58,10 @@ describe("profile algorithm and recommendation ranking", () => {
       profile.processEvent(result!.eventId);
 
       expect(profiles.listClusters({ embeddingIndexId: "index_profile" })).toHaveLength(1);
-      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })[0]?.weight).toBe(6);
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })[0]).toMatchObject({
+        label: "Liked profile topic",
+        weight: 6
+      });
 
       articles.upsert({
         id: "article_liked",
@@ -186,6 +189,7 @@ describe("profile algorithm and recommendation ranking", () => {
 
       const clusters = profiles.listClusters({ embeddingIndexId: "index_like", polarity: "positive" });
       expect(clusters.map((cluster) => cluster.weight)).toEqual([8, 6]);
+      expect(clusters.map((cluster) => cluster.label)).toEqual(["Seed like", "Seed favorite"]);
       expect(feedStats(db, "feed_like").positiveScore).toBeGreaterThan(
         feedStats(db, "feed_favorite").positiveScore
       );

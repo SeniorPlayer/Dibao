@@ -271,7 +271,7 @@ export class SqliteProfileRepository implements ProfileRepository {
           )
           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(id) do update set
-            label = excluded.label,
+            label = coalesce(excluded.label, label),
             centroid_vector_blob = excluded.centroid_vector_blob,
             weight = excluded.weight,
             sample_count = excluded.sample_count,
@@ -311,6 +311,7 @@ export class SqliteProfileRepository implements ProfileRepository {
         `
           update interest_clusters
           set
+            label = ?,
             centroid_vector_blob = ?,
             weight = ?,
             sample_count = ?,
@@ -320,6 +321,7 @@ export class SqliteProfileRepository implements ProfileRepository {
         `
       )
       .run(
+        input.label === undefined ? existing.label : input.label,
         input.centroidVectorBlob ?? existing.centroidVectorBlob,
         input.weight ?? existing.weight,
         input.sampleCount ?? existing.sampleCount,

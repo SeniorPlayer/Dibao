@@ -358,6 +358,7 @@ export type UpsertInterestClusterInput = {
 
 export type UpdateInterestClusterInput = {
   id: string;
+  label?: string | null;
   centroidVectorBlob?: Buffer;
   weight?: number;
   sampleCount?: number;
