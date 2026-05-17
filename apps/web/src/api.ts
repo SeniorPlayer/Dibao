@@ -122,6 +122,15 @@ export type FavoriteArticleSort =
   | "published_desc"
   | "published_asc";
 
+export type ReadLaterArticleSort =
+  | "ranked"
+  | "read_later_desc"
+  | "read_later_asc"
+  | "published_desc"
+  | "published_asc";
+
+export type ArticleListSort = FavoriteArticleSort | ReadLaterArticleSort;
+
 export type ArticleListResponse = {
   data: ArticleListItem[];
   page: ApiPage;
@@ -668,7 +677,7 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
         cursor?: string | null;
         unreadOnly?: boolean;
         todayOnly?: boolean;
-        sort?: FavoriteArticleSort;
+        sort?: ArticleListSort;
       } = {}
     ): Promise<ArticleListResponse> {
       const params = new URLSearchParams({
@@ -692,7 +701,7 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       if (input.todayOnly && (view === "latest" || view === "recommended")) {
         params.set("todayOnly", "true");
       }
-      if (input.sort && view === "favorites") {
+      if (input.sort && (view === "favorites" || view === "read_later")) {
         params.set("sort", input.sort);
       }
 

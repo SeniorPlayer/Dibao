@@ -1499,10 +1499,40 @@ function parseArticleQuery(
   if (sort === null) {
     return {
       ok: false,
+      message:
+        "sort must be favorited_desc, favorited_asc, ranked, read_later_desc, read_later_asc, published_desc, or published_asc",
+      details: {
+        field: "sort",
+        allowed: [
+          "favorited_desc",
+          "favorited_asc",
+          "ranked",
+          "read_later_desc",
+          "read_later_asc",
+          "published_desc",
+          "published_asc"
+        ]
+      }
+    };
+  }
+  if (sort !== undefined && view === "favorites" && !isFavoriteArticleSort(sort)) {
+    return {
+      ok: false,
       message: "sort must be favorited_desc, favorited_asc, published_desc, or published_asc",
       details: {
         field: "sort",
         allowed: ["favorited_desc", "favorited_asc", "published_desc", "published_asc"]
+      }
+    };
+  }
+  if (sort !== undefined && view === "read_later" && !isReadLaterArticleSort(sort)) {
+    return {
+      ok: false,
+      message:
+        "sort must be ranked, read_later_desc, read_later_asc, published_desc, or published_asc",
+      details: {
+        field: "sort",
+        allowed: ["ranked", "read_later_desc", "read_later_asc", "published_desc", "published_asc"]
       }
     };
   }
@@ -1747,6 +1777,9 @@ function parseArticleSort(value: string | undefined): ArticleListInput["sort"] |
   if (
     value === "favorited_desc" ||
     value === "favorited_asc" ||
+    value === "ranked" ||
+    value === "read_later_desc" ||
+    value === "read_later_asc" ||
     value === "published_desc" ||
     value === "published_asc"
   ) {
@@ -1754,6 +1787,25 @@ function parseArticleSort(value: string | undefined): ArticleListInput["sort"] |
   }
 
   return null;
+}
+
+function isFavoriteArticleSort(value: ArticleListInput["sort"]): boolean {
+  return (
+    value === "favorited_desc" ||
+    value === "favorited_asc" ||
+    value === "published_desc" ||
+    value === "published_asc"
+  );
+}
+
+function isReadLaterArticleSort(value: ArticleListInput["sort"]): boolean {
+  return (
+    value === "ranked" ||
+    value === "read_later_desc" ||
+    value === "read_later_asc" ||
+    value === "published_desc" ||
+    value === "published_asc"
+  );
 }
 
 function parseJobStatus(value: string | undefined): JobStatus | undefined | null {

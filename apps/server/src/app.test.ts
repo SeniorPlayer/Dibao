@@ -2776,6 +2776,63 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("orders read later by supported manual sort modes", async () => {
+    const db = createArticleSortDatabase();
+    const actions = new SqliteArticleActionRepository(db);
+    for (const [articleId, savedAt] of [
+      ["article_read_later_active", 6000],
+      ["article_read_later_base", 7000],
+      ["article_read_later_unranked_new", 9000],
+      ["article_read_later_unranked_old", 8000]
+    ] as const) {
+      actions.record({ articleId, type: "read_later", now: savedAt });
+    }
+    insertRank(db, "article_read_later_base", 0.8, 10_000);
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const expected: Record<string, string[]> = {
+        read_later_desc: [
+          "article_read_later_unranked_new",
+          "article_read_later_unranked_old",
+          "article_read_later_base",
+          "article_read_later_active"
+        ],
+        read_later_asc: [
+          "article_read_later_active",
+          "article_read_later_base",
+          "article_read_later_unranked_old",
+          "article_read_later_unranked_new"
+        ],
+        published_desc: [
+          "article_read_later_unranked_old",
+          "article_read_later_unranked_new",
+          "article_read_later_base",
+          "article_read_later_active"
+        ],
+        published_asc: [
+          "article_read_later_active",
+          "article_read_later_base",
+          "article_read_later_unranked_new",
+          "article_read_later_unranked_old"
+        ]
+      };
+
+      for (const [sort, ids] of Object.entries(expected)) {
+        const response = await app.inject({
+          method: "GET",
+          url: `/api/articles?view=read_later&sort=${sort}`
+        });
+
+        expect(response.statusCode, `${sort}: ${response.body}`).toBe(200);
+        expect(response.json().data.map((article: { id: string }) => article.id)).toEqual(ids);
+      }
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("orders favorites by supported sort modes without rank ordering", async () => {
     const db = createArticleSortDatabase();
     const actions = new SqliteArticleActionRepository(db);
@@ -2826,24 +2883,48 @@ describe("server API vertical slice", () => {
     }
   });
 
-  it("returns a contract-shaped error for invalid favorite sort", async () => {
+  it("returns contract-shaped errors for invalid view-specific sort", async () => {
     const db = createArticleSortDatabase();
     const app = buildServer({ db, logger: false });
 
     try {
-      const response = await app.inject({
+      const favorite = await app.inject({
         method: "GET",
         url: "/api/articles?view=favorites&sort=ranked"
       });
 
-      expect(response.statusCode, response.body).toBe(400);
-      expect(response.json()).toEqual({
+      expect(favorite.statusCode, favorite.body).toBe(400);
+      expect(favorite.json()).toEqual({
         error: {
           code: "VALIDATION_ERROR",
           message: "sort must be favorited_desc, favorited_asc, published_desc, or published_asc",
           details: {
             field: "sort",
             allowed: ["favorited_desc", "favorited_asc", "published_desc", "published_asc"]
+          }
+        }
+      });
+
+      const readLater = await app.inject({
+        method: "GET",
+        url: "/api/articles?view=read_later&sort=favorited_desc"
+      });
+
+      expect(readLater.statusCode, readLater.body).toBe(400);
+      expect(readLater.json()).toEqual({
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "sort must be ranked, read_later_desc, read_later_asc, published_desc, or published_asc",
+          details: {
+            field: "sort",
+            allowed: [
+              "ranked",
+              "read_later_desc",
+              "read_later_asc",
+              "published_desc",
+              "published_asc"
+            ]
           }
         }
       });

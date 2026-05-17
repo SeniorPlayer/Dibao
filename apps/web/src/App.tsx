@@ -22,6 +22,7 @@ import {
   type OpmlImportResponse,
   type RankExplanation,
   type RankExplanationReason,
+  type ReadLaterArticleSort,
   type ReaderSettings,
   type RecommendationStatus,
   type SetupStatus,
@@ -51,6 +52,7 @@ const navigationItems: NavigationItemKey[] = [
 ];
 
 const defaultFavoriteArticleSort: FavoriteArticleSort = "favorited_desc";
+const defaultReadLaterArticleSort: ReadLaterArticleSort = "ranked";
 
 type Notice =
   | { type: "feedAddedAndRefreshed"; feedTitle: string }
@@ -171,6 +173,9 @@ export function App() {
   const [todayOnly, setTodayOnly] = useState(false);
   const [favoriteSort, setFavoriteSort] = useState<FavoriteArticleSort>(
     defaultFavoriteArticleSort
+  );
+  const [readLaterSort, setReadLaterSort] = useState<ReadLaterArticleSort>(
+    defaultReadLaterArticleSort
   );
   const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
@@ -297,6 +302,13 @@ export function App() {
     setFavoriteSort(nextSort);
   }
 
+  function handleReadLaterSortChange(nextSort: ReadLaterArticleSort) {
+    if (readLaterSort !== nextSort) {
+      resetArticleListForPendingQuery();
+    }
+    setReadLaterSort(nextSort);
+  }
+
   function handleUnreadOnlyChange(nextUnreadOnly: boolean) {
     if (unreadOnly !== nextUnreadOnly) {
       resetArticleListForPendingQuery();
@@ -322,6 +334,7 @@ export function App() {
     setUnreadOnly(false);
     setTodayOnly(false);
     setFavoriteSort(defaultFavoriteArticleSort);
+    setReadLaterSort(defaultReadLaterArticleSort);
     setSelectedArticleId(null);
     setArticleDetail(null);
     setRankExplanation(null);
@@ -575,6 +588,7 @@ export function App() {
     view: ArticleView,
     onlyUnread: boolean,
     sort: FavoriteArticleSort = defaultFavoriteArticleSort,
+    laterSort: ReadLaterArticleSort = defaultReadLaterArticleSort,
     onlyToday = false
   ) => {
     const requestVersion = articleRequestVersion.current + 1;
@@ -602,7 +616,7 @@ export function App() {
         limit: 50,
         unreadOnly: supportsUnreadOnly(view) ? onlyUnread : false,
         todayOnly: supportsQuickFilters(view) ? onlyToday : false,
-        sort: view === "favorites" ? sort : undefined
+        sort: articleSortForView(view, sort, laterSort)
       });
       if (requestVersion !== articleRequestVersion.current) {
         return;
@@ -644,8 +658,17 @@ export function App() {
       return;
     }
 
-    void loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, todayOnly);
-  }, [appPage, appStage.type, favoriteSort, loadArticles, sourceSelection, todayOnly, unreadOnly]);
+    void loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly);
+  }, [
+    appPage,
+    appStage.type,
+    favoriteSort,
+    loadArticles,
+    readLaterSort,
+    sourceSelection,
+    todayOnly,
+    unreadOnly
+  ]);
 
   useEffect(() => {
     if (
@@ -908,7 +931,7 @@ export function App() {
       await Promise.all([
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, todayOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -955,7 +978,7 @@ export function App() {
         loadFeedFolders(),
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, todayOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -1005,7 +1028,14 @@ export function App() {
     }
 
     if (appPage.type === "reader") {
-      await loadArticles(nextSourceSelection, appPage.view, unreadOnly, favoriteSort, todayOnly);
+      await loadArticles(
+        nextSourceSelection,
+        appPage.view,
+        unreadOnly,
+        favoriteSort,
+        readLaterSort,
+        todayOnly
+      );
     }
   }
 
@@ -1144,7 +1174,7 @@ export function App() {
         cursor: nextArticleCursor,
         unreadOnly: supportsUnreadOnly(currentArticleView) ? unreadOnly : false,
         todayOnly: supportsQuickFilters(currentArticleView) ? todayOnly : false,
-        sort: currentArticleView === "favorites" ? favoriteSort : undefined
+        sort: articleSortForView(currentArticleView, favoriteSort, readLaterSort)
       });
       if (requestVersion !== articleRequestVersion.current) {
         return;
@@ -1543,9 +1573,11 @@ export function App() {
                 handleOpenExplanation();
               }}
               onFavoriteSortChange={handleFavoriteSortChange}
+              onReadLaterSortChange={handleReadLaterSortChange}
               onTodayOnlyChange={handleTodayOnlyChange}
               onUnreadOnlyChange={handleUnreadOnlyChange}
               favoriteSort={favoriteSort}
+              readLaterSort={readLaterSort}
               pendingAction={pendingArticleAction}
               recommendationStatus={
                 currentArticleView === "recommended" ? recommendationStatus : null
@@ -2724,6 +2756,7 @@ export function ArticleListPanel(props: {
   articleView: ArticleView;
   articles: ArticleListItem[];
   favoriteSort: FavoriteArticleSort;
+  readLaterSort: ReadLaterArticleSort;
   feedCount: number;
   isIgnoreTelemetryEnabled: boolean;
   isArticlesLoading: boolean;
@@ -2733,6 +2766,7 @@ export function ArticleListPanel(props: {
   nextCursor: string | null;
   onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
   onFavoriteSortChange: (sort: FavoriteArticleSort) => void;
+  onReadLaterSortChange: (sort: ReadLaterArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
   onLoadMore: () => void;
   onOpenSources: () => void;
@@ -2786,18 +2820,37 @@ export function ArticleListPanel(props: {
           >
             {t.feeds.openSources}
           </button>
-          {props.articleView === "favorites" ? (
-            <label className={styles.articleSortControl} htmlFor="favorite-article-sort">
+          {props.articleView === "favorites" || props.articleView === "read_later" ? (
+            <label
+              className={styles.articleSortControl}
+              htmlFor={`${props.articleView}-article-sort`}
+            >
               <span>{t.articles.sort.label}</span>
               <select
-                id="favorite-article-sort"
-                onChange={(event) =>
-                  props.onFavoriteSortChange(event.target.value as FavoriteArticleSort)
+                id={`${props.articleView}-article-sort`}
+                onChange={(event) => {
+                  if (props.articleView === "favorites") {
+                    props.onFavoriteSortChange(event.target.value as FavoriteArticleSort);
+                    return;
+                  }
+                  props.onReadLaterSortChange(event.target.value as ReadLaterArticleSort);
+                }}
+                value={
+                  props.articleView === "favorites" ? props.favoriteSort : props.readLaterSort
                 }
-                value={props.favoriteSort}
               >
-                <option value="favorited_desc">{t.articles.sort.favorited_desc}</option>
-                <option value="favorited_asc">{t.articles.sort.favorited_asc}</option>
+                {props.articleView === "favorites" ? (
+                  <>
+                    <option value="favorited_desc">{t.articles.sort.favorited_desc}</option>
+                    <option value="favorited_asc">{t.articles.sort.favorited_asc}</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="ranked">{t.articles.sort.ranked}</option>
+                    <option value="read_later_desc">{t.articles.sort.read_later_desc}</option>
+                    <option value="read_later_asc">{t.articles.sort.read_later_asc}</option>
+                  </>
+                )}
                 <option value="published_desc">{t.articles.sort.published_desc}</option>
                 <option value="published_asc">{t.articles.sort.published_asc}</option>
               </select>
@@ -4141,6 +4194,22 @@ function supportsUnreadOnly(view: ArticleView): boolean {
 
 function supportsQuickFilters(view: ArticleView): boolean {
   return view === "latest" || view === "recommended";
+}
+
+function articleSortForView(
+  view: ArticleView,
+  favoriteSort: FavoriteArticleSort,
+  readLaterSort: ReadLaterArticleSort
+): FavoriteArticleSort | ReadLaterArticleSort | undefined {
+  if (view === "favorites") {
+    return favoriteSort;
+  }
+
+  if (view === "read_later") {
+    return readLaterSort;
+  }
+
+  return undefined;
 }
 
 function shouldLoadRankExplanation(view: ArticleView): boolean {

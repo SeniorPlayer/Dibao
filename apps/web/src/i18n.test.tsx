@@ -280,6 +280,7 @@ describe("web i18n", () => {
           articleView="latest"
           articles={[]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
@@ -288,6 +289,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor="cursor_1"
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -333,6 +335,7 @@ describe("web i18n", () => {
           articleView="recommended"
           articles={[]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
@@ -341,6 +344,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor={null}
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -407,6 +411,7 @@ describe("web i18n", () => {
           articleView="latest"
           articles={[article]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
@@ -415,6 +420,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor={null}
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -442,6 +448,7 @@ describe("web i18n", () => {
           articleView="recommended"
           articles={[article]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
@@ -450,6 +457,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor={null}
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -475,7 +483,7 @@ describe("web i18n", () => {
     expect(recommendedHtml).toContain("为什么推荐");
   });
 
-  it("renders favorites sorting and read-later without unread-only controls", () => {
+  it("renders favorites and read-later sorting without unread-only controls", () => {
     const likedArticle = articleListItem("liked_article", "unseen");
     const favoriteHtml = renderToStaticMarkup(
       <DibaoI18nProvider>
@@ -484,6 +492,7 @@ describe("web i18n", () => {
           articleView="favorites"
           articles={[{ ...likedArticle, state: { ...likedArticle.state, liked: true } }]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
@@ -492,6 +501,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor={null}
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -519,6 +529,7 @@ describe("web i18n", () => {
           articleView="read_later"
           articles={[]}
           favoriteSort="favorited_desc"
+          readLaterSort="ranked"
           feedCount={1}
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
@@ -527,6 +538,7 @@ describe("web i18n", () => {
           loadMoreError={null}
           nextCursor={null}
           onFavoriteSortChange={() => undefined}
+          onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
           onOpenSources={() => undefined}
@@ -553,7 +565,9 @@ describe("web i18n", () => {
     expect(favoriteHtml).not.toContain("已点赞");
     expect(favoriteHtml).not.toContain("只看未读");
     expect(readLaterHtml).toContain("稍后读");
-    expect(readLaterHtml).not.toContain("排序");
+    expect(readLaterHtml).toContain("排序");
+    expect(readLaterHtml).toContain("个性化排序");
+    expect(readLaterHtml).toContain("最近加入");
     expect(readLaterHtml).not.toContain("只看未读");
   });
 

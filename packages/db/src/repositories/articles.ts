@@ -599,6 +599,7 @@ function orderByForView(
             a.id desc
         `;
       case "favorited_desc":
+      default:
         return `
           order by
             s.favorited_at desc,
@@ -609,6 +610,41 @@ function orderByForView(
   }
 
   if (view === "read_later") {
+    switch (sort ?? "ranked") {
+      case "read_later_desc":
+        return `
+          order by
+            s.read_later_at desc,
+            coalesce(a.published_at, a.discovered_at) desc,
+            a.id desc
+        `;
+      case "read_later_asc":
+        return `
+          order by
+            s.read_later_at asc,
+            coalesce(a.published_at, a.discovered_at) asc,
+            a.id desc
+        `;
+      case "published_desc":
+        return `
+          order by
+            coalesce(a.published_at, a.discovered_at) desc,
+            s.read_later_at desc,
+            a.id desc
+        `;
+      case "published_asc":
+        return `
+          order by
+            coalesce(a.published_at, a.discovered_at) asc,
+            s.read_later_at desc,
+            a.id desc
+        `;
+      case "ranked":
+      case "favorited_desc":
+      case "favorited_asc":
+        break;
+    }
+
     return `
       order by
         case when coalesce(rs.score, base_rs.score) is null then 1 else 0 end,

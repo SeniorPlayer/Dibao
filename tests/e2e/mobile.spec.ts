@@ -146,6 +146,9 @@ test("read-later page can open a saved article", async ({ page }) => {
 
   await page.getByRole("link", { name: "稍后读" }).click();
   await expect(page.getByRole("heading", { name: "稍后读" })).toBeVisible();
+  await expect(page.getByLabel("排序")).toHaveValue("ranked");
+  await page.getByLabel("排序").selectOption("read_later_desc");
+  await expect(page.getByLabel("排序")).toHaveValue("read_later_desc");
   await page.getByRole("button", { name: /E2E Article Extra 23/ }).click();
   await expect(page.getByRole("heading", { name: "E2E Article Extra 23" })).toBeVisible();
 });

@@ -196,6 +196,15 @@ export type ArticleFavoriteSort =
   | "published_desc"
   | "published_asc";
 
+export type ArticleReadLaterSort =
+  | "ranked"
+  | "read_later_desc"
+  | "read_later_asc"
+  | "published_desc"
+  | "published_asc";
+
+export type ArticleListSort = ArticleFavoriteSort | ArticleReadLaterSort;
+
 export type ArticleReadStatus = "unread" | "read" | "all";
 
 export type ArticleInteractionStatus = "unseen" | "ignored" | "opened" | "reading" | "read";
@@ -211,7 +220,7 @@ export type ArticleListInput = {
   limit?: number;
   offset?: number;
   rankContext?: string;
-  sort?: ArticleFavoriteSort;
+  sort?: ArticleListSort;
 };
 
 export type ArticleStateSnapshot = {

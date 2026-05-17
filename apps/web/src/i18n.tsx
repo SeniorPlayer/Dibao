@@ -325,6 +325,9 @@ export const zhCN = {
       label: "排序",
       favorited_desc: "最近收藏",
       favorited_asc: "最早收藏",
+      ranked: "个性化排序",
+      read_later_desc: "最近加入",
+      read_later_asc: "最早加入",
       published_desc: "最新发布",
       published_asc: "最早发布"
     },
@@ -990,6 +993,9 @@ export const enUS = {
       label: "Sort",
       favorited_desc: "Recently favorited",
       favorited_asc: "Oldest favorited",
+      ranked: "Personalized",
+      read_later_desc: "Recently added",
+      read_later_asc: "Oldest added",
       published_desc: "Newest published",
       published_asc: "Oldest published"
     },

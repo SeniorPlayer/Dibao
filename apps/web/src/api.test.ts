@@ -635,6 +635,7 @@ describe("web API client", () => {
     });
     await api.listArticles({
       view: "read_later",
+      sort: "read_later_desc",
       unreadOnly: true
     });
 
@@ -642,7 +643,7 @@ describe("web API client", () => {
       "/api/articles?view=recommended&limit=20&folderId=folder_design&cursor=cursor_1&unreadOnly=true&todayOnly=true",
       "/api/articles?view=latest&limit=50&unreadOnly=true&todayOnly=true",
       "/api/articles?view=favorites&limit=50&sort=favorited_asc",
-      "/api/articles?view=read_later&limit=50"
+      "/api/articles?view=read_later&limit=50&sort=read_later_desc"
     ]);
     expect(first.meta.unreadCount).toBe(17);
   });

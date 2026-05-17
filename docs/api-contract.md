@@ -656,7 +656,7 @@ MVP 也接受 `application/xml` 请求体，便于本地自托管和自动化测
 - `latest` 始终按发布时间/发现时间排序。
 - `recommended` 在无 active embedding index 时使用 `rank_context = "base"`。
 - 存在 active embedding index 时使用 `rank_context = embeddingIndexId`，并在 active context 缺分数时 fallback 到 base rank，避免推荐列表为空。
-- `read_later` 使用 active rank context 个性化排序，缺 active 分数时 fallback 到 base rank，再 fallback 到 `read_later_at desc`。
+- `read_later` 默认使用 active rank context 个性化排序，缺 active 分数时 fallback 到 base rank，再 fallback 到 `read_later_at desc`；也可用 `sort` 手动切换加入时间或发布时间排序。
 - `favorites` 不使用 rank 排序，默认按 `favorited_at desc`；可用 `sort` 显式切换。
 
 查询参数：
@@ -670,14 +670,17 @@ unreadOnly=true|false
 todayOnly=true|false
 limit
 cursor
-sort=favorited_desc|favorited_asc|published_desc|published_asc
+sort=favorited_desc|favorited_asc|ranked|read_later_desc|read_later_asc|published_desc|published_asc
 ```
 
 `unreadOnly=true` 可用于 `latest` 与 `recommended`，只返回当前派生 `interactionStatus = "unseen"` 的文章。响应中的 `meta.unreadCount` 始终表示当前 view/source 条件下的真实未读总数，而不是当前分页返回数量。客户端可以在列表滚过产生 `impression`、点进文章产生 `open`、阅读进度产生 `read_progress` 后乐观更新该数字，同时保留当前已加载队列，避免用户在未读模式中误划过或点进后丢失当前文章。
 
 `todayOnly=true` 可用于 `latest` 与 `recommended`，按服务端本地日期筛选 `publishedAt ?? discoveredAt` 落在当天的文章。与 `unreadOnly` 同时启用时，先形成当前 view/source/今日候选集，再返回其中未读文章；`meta.unreadCount` 也遵循相同的今日/source 条件。
 
-`sort` 仅定义 `favorites` view 的排序语义；非法值返回 `VALIDATION_ERROR`。
+`sort` 仅定义 `favorites` 与 `read_later` view 的排序语义；非法值返回 `VALIDATION_ERROR`。
+
+- `favorites`: `favorited_desc` 默认、`favorited_asc`、`published_desc`、`published_asc`。
+- `read_later`: `ranked` 默认、`read_later_desc`、`read_later_asc`、`published_desc`、`published_asc`。
 
 响应：
 
