@@ -181,7 +181,9 @@ export function App() {
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
   const [rankExplanation, setRankExplanation] = useState<RankExplanation | null>(null);
+  const [listRankExplanation, setListRankExplanation] = useState<RankExplanation | null>(null);
   const [isExplanationOpen, setIsExplanationOpen] = useState(false);
+  const [isListExplanationOpen, setIsListExplanationOpen] = useState(false);
   const [recommendationStatus, setRecommendationStatus] = useState<RecommendationStatus | null>(
     null
   );
@@ -193,6 +195,7 @@ export function App() {
   const [isLoadingMoreArticles, setIsLoadingMoreArticles] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isExplanationLoading, setIsExplanationLoading] = useState(false);
+  const [isListExplanationLoading, setIsListExplanationLoading] = useState(false);
   const [isAddingFeed, setIsAddingFeed] = useState(false);
   const [isImportingOpml, setIsImportingOpml] = useState(false);
   const [isExportingOpml, setIsExportingOpml] = useState(false);
@@ -203,6 +206,7 @@ export function App() {
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [listExplanationError, setListExplanationError] = useState<string | null>(null);
   const [articleActionError, setArticleActionError] = useState<string | null>(null);
   const [opmlSummary, setOpmlSummary] = useState<OpmlImportResponse | null>(null);
   const [nextArticleCursor, setNextArticleCursor] = useState<string | null>(null);
@@ -214,6 +218,7 @@ export function App() {
   const ignoredArticleIds = useRef(new Set<string>());
   const articleStateById = useRef(new Map<string, ArticleState>());
   const articleRequestVersion = useRef(0);
+  const listExplanationRequestVersion = useRef(0);
   const hasLoadedSettingsForSession = useRef(false);
   const mobileArticleHistoryDepth = useRef(0);
   const mobileExplanationHistoryDepth = useRef(0);
@@ -268,6 +273,14 @@ export function App() {
     setExplanationError(null);
   }
 
+  function clearListExplanation() {
+    listExplanationRequestVersion.current += 1;
+    setListRankExplanation(null);
+    setIsListExplanationOpen(false);
+    setIsListExplanationLoading(false);
+    setListExplanationError(null);
+  }
+
   function resetArticleListForPendingQuery() {
     articleRequestVersion.current += 1;
     setArticles([]);
@@ -275,6 +288,7 @@ export function App() {
     articleStateById.current.clear();
     setNextArticleCursor(null);
     clearSelectedArticle();
+    clearListExplanation();
     setArticleError(null);
     setLoadMoreError(null);
     setIsLoadingMoreArticles(false);
@@ -1302,6 +1316,35 @@ export function App() {
     setIsExplanationOpen(true);
   }
 
+  async function handleOpenListExplanation(articleId: string) {
+    if (!shouldLoadRankExplanation(currentArticleView)) {
+      return;
+    }
+
+    const requestVersion = listExplanationRequestVersion.current + 1;
+    listExplanationRequestVersion.current = requestVersion;
+    setIsListExplanationOpen(true);
+    setIsListExplanationLoading(true);
+    setListExplanationError(null);
+    setListRankExplanation(null);
+
+    try {
+      const explanation = await dibaoApi.getArticleExplanation(articleId);
+      if (listExplanationRequestVersion.current === requestVersion) {
+        setListRankExplanation(explanation);
+      }
+    } catch (error) {
+      if (listExplanationRequestVersion.current === requestVersion) {
+        setListRankExplanation(null);
+        setListExplanationError(userMessageForError(error, t.errors.api));
+      }
+    } finally {
+      if (listExplanationRequestVersion.current === requestVersion) {
+        setIsListExplanationLoading(false);
+      }
+    }
+  }
+
   function handleCloseExplanation() {
     if (isMobileArticleHistoryEnabled() && mobileExplanationHistoryDepth.current > 0) {
       window.history.back();
@@ -1569,8 +1612,7 @@ export function App() {
               onArticleAction={handleArticleAction}
               onSelectArticle={handleSelectArticle}
               onExplainArticle={(articleId) => {
-                handleSelectArticle(articleId);
-                handleOpenExplanation();
+                void handleOpenListExplanation(articleId);
               }}
               onFavoriteSortChange={handleFavoriteSortChange}
               onReadLaterSortChange={handleReadLaterSortChange}
@@ -1621,6 +1663,14 @@ export function App() {
                   : null
               }
               readerSettings={appSettings.reader}
+            />
+
+            <ArticleExplanationDialog
+              error={listExplanationError}
+              explanation={listRankExplanation}
+              isLoading={isListExplanationLoading}
+              isOpen={isListExplanationOpen}
+              onClose={clearListExplanation}
             />
           </div>
         )}
@@ -3479,34 +3529,56 @@ export function ArticleExplanationEntry(props: {
         <span>{t.explanation.title}</span>
       </button>
 
-      {props.isOpen ? (
-        <div
-          className={styles.explanationOverlay}
-          onClick={props.onClose}
-          role="presentation"
-        >
-          <div
-            className={styles.explanationPopover}
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="rank-explanation-title"
-          >
-            <div className={styles.sheetHandle} aria-hidden="true" />
-            <RankExplanationPanel
-              error={props.error}
-              explanation={props.explanation}
-              isLoading={props.isLoading}
-            />
-            <div className={styles.overlayActions}>
-              <button className={styles.secondaryButton} onClick={props.onClose} type="button">
-                {t.common.close}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ArticleExplanationDialog
+        error={props.error}
+        explanation={props.explanation}
+        isLoading={props.isLoading}
+        isOpen={props.isOpen}
+        onClose={props.onClose}
+      />
     </>
+  );
+}
+
+function ArticleExplanationDialog(props: {
+  error: string | null;
+  explanation: RankExplanation | null;
+  isLoading: boolean;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+
+  if (!props.isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      className={styles.explanationOverlay}
+      onClick={props.onClose}
+      role="presentation"
+    >
+      <div
+        className={styles.explanationPopover}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rank-explanation-title"
+      >
+        <div className={styles.sheetHandle} aria-hidden="true" />
+        <RankExplanationPanel
+          error={props.error}
+          explanation={props.explanation}
+          isLoading={props.isLoading}
+        />
+        <div className={styles.overlayActions}>
+          <button className={styles.secondaryButton} onClick={props.onClose} type="button">
+            {t.common.close}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
