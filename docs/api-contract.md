@@ -970,6 +970,7 @@ cursor
 - 未出现字段保持原值；如果原值缺失或非法，使用默认值。
 - 任意未知字段、不可写字段、类型错误或越界值返回 `VALIDATION_ERROR`。
 - API 字段 `retention.retentionDays` 持久化到 storage key `retention.articleDays`。
+- `retention.retentionDays = 0` 表示永久保留普通文章，后台 retention cleanup 不会清理旧文章。
 - `behavior.markScrolledArticlesIgnored` 控制最新 / 推荐列表中“滚过未打开文章 -> 已忽略”的自动行为记录。
 - `behavior.removeReadLaterOnReadComplete` 控制稍后读文章触发完读后是否自动移出稍后读；当前完读阈值为 `read_progress >= 0.9` 或兼容 action `mark_read`。自动移出只更新文章状态，不额外写入 `remove_read_later` 行为事件。
 

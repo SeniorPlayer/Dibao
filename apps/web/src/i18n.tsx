@@ -203,7 +203,7 @@ export const zhCN = {
       },
       retention: {
         title: "文章保留",
-        body: "超过保留天数的普通文章会由后台清理。收藏和稍后读保留策略本轮固定开启。",
+        body: "超过保留天数的普通文章会由后台清理；填 0 表示永久保留。收藏和稍后读保留策略本轮固定开启。",
         retentionDays: "保留天数",
         keepFavorites: "保留收藏文章",
         keepReadLater: "保留稍后读文章",
@@ -297,7 +297,7 @@ export const zhCN = {
       lineHeight: "行高必须是 1.45 到 2.1。",
       paragraphGap: "段距必须是 0.6 到 1.6。",
       readerWidth: "阅读宽度必须是 560 到 860。",
-      retentionDays: "保留天数必须是 1 到 3650 的整数。"
+      retentionDays: "保留天数必须是 0 到 3650 的整数，0 表示永久。"
     },
     units: {
       px: "px",
@@ -872,7 +872,7 @@ export const enUS = {
       },
       retention: {
         title: "Article retention",
-        body: "Background cleanup removes ordinary articles older than the retention window. Favorite and read-later retention stay enabled in this version.",
+        body: "Background cleanup removes ordinary articles older than the retention window. Use 0 to keep articles forever. Favorite and read-later retention stay enabled in this version.",
         retentionDays: "Retention days",
         keepFavorites: "Keep favorited articles",
         keepReadLater: "Keep read-later articles",
@@ -966,7 +966,7 @@ export const enUS = {
       lineHeight: "Line height must be between 1.45 and 2.1.",
       paragraphGap: "Paragraph gap must be between 0.6 and 1.6.",
       readerWidth: "Reader width must be between 560 and 860.",
-      retentionDays: "Retention days must be an integer between 1 and 3650."
+      retentionDays: "Retention days must be an integer between 0 and 3650; 0 means forever."
     },
     units: {
       px: "px",

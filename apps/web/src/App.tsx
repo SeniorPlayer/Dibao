@@ -2114,7 +2114,7 @@ export function SettingsWorkspace(props: {
             id="settings-retention-days"
             label={t.settings.sections.retention.retentionDays}
             max={3650}
-            min={1}
+            min={0}
             onChange={(value) => applyDraft({ ...draft, retentionDays: value })}
             step={1}
             unit={t.settings.units.days}
@@ -4059,7 +4059,7 @@ function parseSettingsDraft(
     return { ok: false, error: t.settings.errors.readerWidth };
   }
 
-  const retentionDays = parseNumberDraft(draft.retentionDays, 1, 3650, true);
+  const retentionDays = parseNumberDraft(draft.retentionDays, 0, 3650, true);
   if (retentionDays === null) {
     return { ok: false, error: t.settings.errors.retentionDays };
   }

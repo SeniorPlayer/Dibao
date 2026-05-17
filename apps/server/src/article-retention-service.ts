@@ -7,7 +7,7 @@ import type { VectorStore } from "@dibao/db";
 
 export const RETENTION_ARTICLE_DAYS_SETTING_KEY = "retention.articleDays";
 export const DEFAULT_ARTICLE_RETENTION_DAYS = 60;
-export const MIN_ARTICLE_RETENTION_DAYS = 1;
+export const MIN_ARTICLE_RETENTION_DAYS = 0;
 export const MAX_ARTICLE_RETENTION_DAYS = 3650;
 export const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const RETENTION_CLEANUP_BATCH_SIZE = 100;
@@ -53,7 +53,7 @@ export class ArticleRetentionService {
   runCleanup(): ArticleRetentionSummary {
     const now = this.now();
     const retentionDays = this.getRetentionDays();
-    const cutoff = now - retentionDays * DAY_IN_MS;
+    const cutoff = retentionDays === 0 ? 0 : now - retentionDays * DAY_IN_MS;
     let vectorsDeleted = 0;
     let candidateArticles = 0;
     let cleanup: ArticleRetentionCleanupResult = {
@@ -63,6 +63,16 @@ export class ArticleRetentionService {
       rankScoresDeleted: 0,
       rankExplanationsDeleted: 0
     };
+
+    if (retentionDays === 0) {
+      return {
+        retentionDays,
+        cutoff,
+        candidateArticles,
+        vectorsDeleted,
+        ...cleanup
+      };
+    }
 
     while (true) {
       const candidates = this.options.articles.listRetentionCandidates({

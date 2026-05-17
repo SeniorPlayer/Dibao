@@ -179,6 +179,9 @@ describe("job runner foundation", () => {
       settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 30, 1000);
       expect(retention.getRetentionDays()).toBe(30);
 
+      settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 0, 1000);
+      expect(retention.getRetentionDays()).toBe(0);
+
       settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, "invalid", 1000);
       expect(retention.getRetentionDays()).toBe(DEFAULT_ARTICLE_RETENTION_DAYS);
 
@@ -188,10 +191,62 @@ describe("job runner foundation", () => {
         articles: new SqliteArticleRepository(db),
         vectorStore: new SqliteVecVectorStore(db),
         env: {
-          DIBAO_ARTICLE_RETENTION_DAYS: "0"
+          DIBAO_ARTICLE_RETENTION_DAYS: "-1"
         }
       });
       expect(invalidEnv.getRetentionDays()).toBe(DEFAULT_ARTICLE_RETENTION_DAYS);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("skips article retention cleanup when retention days is zero", () => {
+    const db = createEmptyDatabase();
+
+    try {
+      const settings = new SqliteAppSettingsRepository(db);
+      const feeds = new SqliteFeedRepository(db);
+      const articles = new SqliteArticleRepository(db);
+      const vectorStore = new SqliteVecVectorStore(db);
+      const now = Date.parse("2026-05-15T00:00:00.000Z");
+      settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 0, now);
+      feeds.upsert({
+        id: "feed_retention_zero",
+        title: "Retention Zero Feed",
+        feedUrl: "https://example.com/retention-zero.xml",
+        now
+      });
+      const article = articles.upsert({
+        id: "article_retention_zero",
+        feedId: "feed_retention_zero",
+        url: "https://example.com/retention-zero",
+        canonicalUrl: "https://example.com/retention-zero",
+        title: "Kept forever",
+        summary: "Retention zero should not clean this article.",
+        publishedAt: now - 400 * 24 * 60 * 60 * 1000,
+        discoveredAt: now - 400 * 24 * 60 * 60 * 1000,
+        dedupeKey: "article_retention_zero",
+        now
+      });
+
+      const retention = new ArticleRetentionService({
+        settings,
+        articles,
+        vectorStore,
+        now: () => now,
+        env: {}
+      });
+
+      expect(retention.runCleanup()).toMatchObject({
+        retentionDays: 0,
+        cutoff: 0,
+        candidateArticles: 0,
+        articlesSoftDeleted: 0
+      });
+      expect(articles.findById(article.id)).toMatchObject({
+        id: article.id,
+        deletedAt: null
+      });
     } finally {
       db.close();
     }

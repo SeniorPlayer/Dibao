@@ -1708,7 +1708,7 @@ describe("server API vertical slice", () => {
         },
         {
           retention: {
-            retentionDays: 0
+            retentionDays: -1
           }
         },
         {

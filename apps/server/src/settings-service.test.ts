@@ -34,6 +34,9 @@ describe("settings service", () => {
     settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 30);
     expect(service.getSettings().retention.retentionDays).toBe(30);
 
+    settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 0);
+    expect(service.getSettings().retention.retentionDays).toBe(0);
+
     settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, "invalid");
     expect(service.getSettings().retention.retentionDays).toBe(60);
 

@@ -149,7 +149,8 @@ system.instance_id
 ```
 
 `GET/PATCH /api/settings` 中的 API 字段 `retention.retentionDays` 映射到
-`app_settings.retention.articleDays`。`retention.settings` 预留给后续更完整的保留策略对象。
+`app_settings.retention.articleDays`。值为 `0` 时表示永久保留普通文章，后台
+retention cleanup 会跳过清理。`retention.settings` 预留给后续更完整的保留策略对象。
 
 ### auth_credentials
 
@@ -857,7 +858,7 @@ idx_jobs_created_at(created_at)
 app_settings.retention.articleDays > DIBAO_ARTICLE_RETENTION_DAYS > 60
 ```
 
-合法范围为 `1..3650`。非法 setting/env 会回退到默认值 `60`。
+合法范围为 `0..3650`，其中 `0` 表示永久保留。非法 setting/env 会回退到默认值 `60`。
 
 过期判断使用：
 
