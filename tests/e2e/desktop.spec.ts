@@ -119,6 +119,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
 
     await page.getByRole("link", { name: "最新" }).click();
+    await page.getByRole("button", { name: "打开来源" }).click();
     await page.getByTitle("刷新 E2E Fixture Feed").click();
     await expect(page.getByText("已刷新：E2E Fixture Feed")).toBeVisible();
 

@@ -252,16 +252,15 @@
 }
 
 .workspace {
+  position: relative;
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 280px minmax(340px, 430px) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 520px) minmax(0, 1fr);
   overflow: hidden;
 }
 
 .sourceBackdrop,
-.mobileSourceButton,
-.mobileSourceCloseButton,
 .mobileBackButton {
   display: none;
 }
@@ -865,6 +864,39 @@
   background: var(--color-surface);
 }
 
+.sourceBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: 0;
+  padding: 0;
+  background: rgb(20 24 28 / 0.12);
+}
+
+.workspaceSourcesOpen .sourceBackdrop {
+  display: block;
+}
+
+.feedPanel {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 4;
+  width: min(340px, calc(100vw - var(--layout-sidebar-width) - 32px));
+  box-shadow: var(--shadow-popover);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.feedPanelOpen {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
 .readerPanel {
   background: var(--reader-background, var(--color-surface));
 }
@@ -970,6 +1002,18 @@
   color: var(--color-muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+}
+
+.mobileSourceButton,
+.mobileSourceCloseButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feedList > .mobileSourceCloseButton {
+  width: calc(100% - var(--space-6));
+  margin: var(--space-3);
 }
 
 .secondaryButton {
@@ -1648,7 +1692,7 @@
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: 240px minmax(320px, 1fr);
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   }
 
   .managementWorkspace {
@@ -1665,8 +1709,7 @@
   }
 
   .readerPanel {
-    grid-column: 1 / -1;
-    border-top: var(--border-default);
+    border-top: 0;
   }
 }
 
