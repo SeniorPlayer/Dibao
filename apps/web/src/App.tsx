@@ -42,10 +42,10 @@ import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import { defaultLocale, useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
 
 const navigationItems: NavigationItemKey[] = [
-  "latest",
   "recommended",
-  "favorites",
+  "latest",
   "read_later",
+  "favorites",
   "search",
   "feeds",
   "settings"
