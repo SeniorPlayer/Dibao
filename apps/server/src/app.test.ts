@@ -616,7 +616,7 @@ describe("server API vertical slice", () => {
       });
 
       expect(response.statusCode, response.body).toBe(200);
-      expect(response.json()).toEqual({
+      expect(response.json()).toMatchObject({
         data: {
           mode: "baseline",
           activeProvider: null,
@@ -1119,7 +1119,7 @@ describe("server API vertical slice", () => {
           activeIndex: {
             id: active?.id
           },
-          activeRankContext: active?.id
+          activeRankContext: "rec_v2:embedding:cocoon_5:schema_2"
         }
       });
     } finally {
@@ -1347,7 +1347,7 @@ describe("server API vertical slice", () => {
             model: "fixture-embedding",
             dimension: 3
           },
-          activeRankContext: index.id,
+          activeRankContext: "rec_v2:embedding:cocoon_5:schema_2",
           coverage: {
             candidateCount: 2,
             eligibleArticleCount: 2,
@@ -1728,7 +1728,12 @@ describe("server API vertical slice", () => {
           ranking: {
             preferFreshness: 0.5,
             preferSource: 0.5,
-            preferDiversity: 0.5
+            preferDiversity: 0.5,
+            cocoonLevel: 5,
+            localLearningEnabled: false,
+            localLearningShadowMode: true,
+            explorationEnabled: true,
+            evaluationEnabled: false
           }
         }
       });
@@ -1747,6 +1752,9 @@ describe("server API vertical slice", () => {
         behavior: {
           markScrolledArticlesIgnored: false,
           removeReadLaterOnReadComplete: true
+        },
+        ranking: {
+          cocoonLevel: 7
         }
       });
       expect(updated.statusCode, updated.body).toBe(200);
@@ -1769,6 +1777,9 @@ describe("server API vertical slice", () => {
             behavior: {
               markScrolledArticlesIgnored: false,
               removeReadLaterOnReadComplete: true
+            },
+            ranking: {
+              cocoonLevel: 7
             }
           }
         }
@@ -2874,7 +2885,7 @@ describe("server API vertical slice", () => {
     insertRank(db, "article_read_later_base", 0.8, 10_000);
     insertRankForContext(db, {
       articleId: "article_read_later_active",
-      rankContext: "index_sort",
+      rankContext: "rec_v2:embedding:cocoon_5:schema_2",
       embeddingIndexId: "index_sort",
       score: 0.9,
       calculatedAt: 10_000

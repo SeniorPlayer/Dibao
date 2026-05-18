@@ -191,7 +191,9 @@ export const zhCN = {
         body: "控制列表浏览和稍后读队列中的自动行为记录。",
         algorithmTransparencyLink: "查看算法透明说明",
         markScrolledArticlesIgnored: "滚过未打开文章后，将其标记为已忽略并移出未读",
-        removeReadLaterOnReadComplete: "稍后读中的文章读完后，自动移出稍后读"
+        removeReadLaterOnReadComplete: "稍后读中的文章读完后，自动移出稍后读",
+        cocoonLevel: "信息茧房水平",
+        cocoonLevelHint: "1 表示更开放、更分散、更探索；10 表示更贴合、更稳定、更少扰动。所有级别都只在订阅源内排序，并始终尊重去重和明确负反馈。"
       },
       reader: {
         title: "阅读",
@@ -297,11 +299,13 @@ export const zhCN = {
       lineHeight: "行高必须是 1.45 到 2.1。",
       paragraphGap: "段距必须是 0.6 到 1.6。",
       readerWidth: "阅读宽度必须是 560 到 860。",
-      retentionDays: "保留天数必须是 0 到 3650 的整数，0 表示永久。"
+      retentionDays: "保留天数必须是 0 到 3650 的整数，0 表示永久。",
+      cocoonLevel: "信息茧房水平必须是 1 到 10 的整数。"
     },
     units: {
       px: "px",
-      days: "天"
+      days: "天",
+      level: "级"
     }
   },
   opml: {
@@ -381,7 +385,11 @@ export const zhCN = {
       behaviorCounts: "行为计数",
       clusters: "兴趣簇",
       lastUpdates: "最近更新",
-      warnings: "Warnings"
+      warnings: "Warnings",
+      cocoon: "信息茧房水平",
+      exploration: "探索",
+      formula: "当前公式",
+      failureStates: "Fallback / 任务状态"
     },
     clusters: {
       empty: "还没有形成兴趣簇。继续点赞、收藏、稍后读或读完文章后，系统会自动生成。",
@@ -887,7 +895,9 @@ export const enUS = {
         body: "Control automatic behavior capture for browsing lists and the read-later queue.",
         algorithmTransparencyLink: "View algorithm transparency",
         markScrolledArticlesIgnored: "Mark unopened scrolled-past articles as ignored and remove them from unread",
-        removeReadLaterOnReadComplete: "Remove read-later articles after completed reading"
+        removeReadLaterOnReadComplete: "Remove read-later articles after completed reading",
+        cocoonLevel: "Cocoon level",
+        cocoonLevelHint: "1 is more open, distributed, and exploratory; 10 is more personalized, stable, and less disruptive. Every level still ranks only your subscribed feeds and respects dedupe plus explicit negative feedback."
       },
       reader: {
         title: "Reading",
@@ -993,11 +1003,13 @@ export const enUS = {
       lineHeight: "Line height must be between 1.45 and 2.1.",
       paragraphGap: "Paragraph gap must be between 0.6 and 1.6.",
       readerWidth: "Reader width must be between 560 and 860.",
-      retentionDays: "Retention days must be an integer between 0 and 3650; 0 means forever."
+      retentionDays: "Retention days must be an integer between 0 and 3650; 0 means forever.",
+      cocoonLevel: "Cocoon level must be an integer from 1 to 10."
     },
     units: {
       px: "px",
-      days: "days"
+      days: "days",
+      level: "level"
     }
   },
   opml: {
@@ -1077,7 +1089,11 @@ export const enUS = {
       behaviorCounts: "Behavior counts",
       clusters: "Clusters",
       lastUpdates: "Last updates",
-      warnings: "Warnings"
+      warnings: "Warnings",
+      cocoon: "Cocoon level",
+      exploration: "Exploration",
+      formula: "Current formula",
+      failureStates: "Fallback / task states"
     },
     clusters: {
       empty: "No interest clusters have formed yet. Likes, favorites, read-later saves, and completed reads will generate them automatically.",

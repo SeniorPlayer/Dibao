@@ -130,6 +130,20 @@ describe("db package", () => {
         "feed_stats",
         "article_rank_scores",
         "article_rank_explanations",
+        "rank_contexts",
+        "interest_cluster_evidence",
+        "profile_terms",
+        "recent_intent_profiles",
+        "article_fingerprints",
+        "duplicate_groups",
+        "duplicate_group_members",
+        "rank_model_versions",
+        "rank_model_weights",
+        "rank_training_examples",
+        "exploration_buckets",
+        "ranking_eval_runs",
+        "ranking_eval_items",
+        "recommendation_backfill_state",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -154,7 +168,8 @@ describe("db package", () => {
 
       expect(runMigrations(db, loadDefaultMigrations(), () => 2000).map((migration) => migration.version)).toEqual([
         "002",
-        "003"
+        "003",
+        "004"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
@@ -222,6 +237,26 @@ describe("db package", () => {
       ).run();
       expect(db.prepare("select type from jobs where id = 'job_profile_event'").get()).toEqual({
         type: "profile_event_process"
+      });
+      db.prepare(
+        `
+          insert into jobs (
+            id,
+            type,
+            status,
+            attempts,
+            max_attempts,
+            run_after,
+            created_at,
+            updated_at
+          )
+          values ('job_duplicate_rebuild', 'duplicate_group_rebuild', 'queued', 0, 1, 2000, 2000, 2000)
+        `
+      ).run();
+      expect(
+        db.prepare("select type from jobs where id = 'job_duplicate_rebuild'").get()
+      ).toEqual({
+        type: "duplicate_group_rebuild"
       });
     } finally {
       db.close();

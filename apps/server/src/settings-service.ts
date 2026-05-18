@@ -10,6 +10,7 @@ import {
 export const UI_LOCALE_SETTING_KEY = "ui.locale";
 export const READER_SETTINGS_KEY = "reader.settings";
 export const BEHAVIOR_SETTINGS_KEY = "behavior.settings";
+export const RECOMMENDATION_SETTINGS_KEY = "recommendation.settings";
 
 export const supportedSettingsLocales = ["zh-CN", "en-US"] as const;
 export type SettingsLocale = (typeof supportedSettingsLocales)[number];
@@ -40,6 +41,11 @@ export type AppSettings = {
     preferFreshness: number;
     preferSource: number;
     preferDiversity: number;
+    cocoonLevel: number;
+    localLearningEnabled: boolean;
+    localLearningShadowMode: boolean;
+    explorationEnabled: boolean;
+    evaluationEnabled: boolean;
   };
 };
 
@@ -64,7 +70,12 @@ const DEFAULT_BEHAVIOR_SETTINGS = {
 const DEFAULT_RANKING_SETTINGS = {
   preferFreshness: 0.5,
   preferSource: 0.5,
-  preferDiversity: 0.5
+  preferDiversity: 0.5,
+  cocoonLevel: 5,
+  localLearningEnabled: false,
+  localLearningShadowMode: true,
+  explorationEnabled: true,
+  evaluationEnabled: false
 } as const;
 
 const READER_RANGES = {
@@ -89,6 +100,13 @@ type SettingsPatch = {
   behavior?: {
     markScrolledArticlesIgnored?: boolean;
     removeReadLaterOnReadComplete?: boolean;
+  };
+  ranking?: {
+    cocoonLevel?: number;
+    localLearningEnabled?: boolean;
+    localLearningShadowMode?: boolean;
+    explorationEnabled?: boolean;
+    evaluationEnabled?: boolean;
   };
 };
 
@@ -132,7 +150,7 @@ export class SettingsService {
         keepReadLater: true
       },
       ranking: {
-        ...DEFAULT_RANKING_SETTINGS
+        ...this.readRecommendationSettings()
       }
     };
   }
@@ -173,6 +191,17 @@ export class SettingsService {
         {
           ...this.readBehaviorSettings(),
           ...patch.behavior
+        },
+        now
+      );
+    }
+
+    if (patch.ranking !== undefined && Object.keys(patch.ranking).length > 0) {
+      this.options.settings.setJson(
+        RECOMMENDATION_SETTINGS_KEY,
+        {
+          ...this.readRecommendationSettings(),
+          ...patch.ranking
         },
         now
       );
@@ -243,13 +272,61 @@ export class SettingsService {
           : DEFAULT_BEHAVIOR_SETTINGS.removeReadLaterOnReadComplete
     };
   }
+
+  private readRecommendationSettings(): AppSettings["ranking"] {
+    const stored = this.options.settings.getJson<unknown>(RECOMMENDATION_SETTINGS_KEY);
+    const input = isPlainObject(stored) ? stored : {};
+
+    return {
+      preferFreshness: readOptionalStoredNumber(
+        input.preferFreshness,
+        DEFAULT_RANKING_SETTINGS.preferFreshness,
+        0,
+        1
+      ),
+      preferSource: readOptionalStoredNumber(
+        input.preferSource,
+        DEFAULT_RANKING_SETTINGS.preferSource,
+        0,
+        1
+      ),
+      preferDiversity: readOptionalStoredNumber(
+        input.preferDiversity,
+        DEFAULT_RANKING_SETTINGS.preferDiversity,
+        0,
+        1
+      ),
+      cocoonLevel: readIntegerInRange(
+        input.cocoonLevel,
+        DEFAULT_RANKING_SETTINGS.cocoonLevel,
+        1,
+        10
+      ),
+      localLearningEnabled:
+        typeof input.localLearningEnabled === "boolean"
+          ? input.localLearningEnabled
+          : DEFAULT_RANKING_SETTINGS.localLearningEnabled,
+      localLearningShadowMode:
+        typeof input.localLearningShadowMode === "boolean"
+          ? input.localLearningShadowMode
+          : DEFAULT_RANKING_SETTINGS.localLearningShadowMode,
+      explorationEnabled:
+        typeof input.explorationEnabled === "boolean"
+          ? input.explorationEnabled
+          : DEFAULT_RANKING_SETTINGS.explorationEnabled,
+      evaluationEnabled:
+        typeof input.evaluationEnabled === "boolean"
+          ? input.evaluationEnabled
+          : DEFAULT_RANKING_SETTINGS.evaluationEnabled
+    };
+  }
 }
 
 function parseSettingsPatch(body: unknown): SettingsPatch {
   const input = readBodyObject(body);
   const patch: SettingsPatch = {};
 
-  rejectUnknownKeys(input, ["ui", "reader", "retention", "behavior"]);
+  rejectUnknownKeys(input, ["ui", "reader", "retention", "behavior", "ranking"]);
 
   if (Object.hasOwn(input, "ui")) {
     patch.ui = parseUiPatch(input.ui);
@@ -265,6 +342,41 @@ function parseSettingsPatch(body: unknown): SettingsPatch {
 
   if (Object.hasOwn(input, "behavior")) {
     patch.behavior = parseBehaviorPatch(input.behavior);
+  }
+
+  if (Object.hasOwn(input, "ranking")) {
+    patch.ranking = parseRankingPatch(input.ranking);
+  }
+
+  return patch;
+}
+
+function parseRankingPatch(value: unknown): NonNullable<SettingsPatch["ranking"]> {
+  const input = readSectionObject(value, "ranking");
+  rejectUnknownKeys(input, [
+    "cocoonLevel",
+    "localLearningEnabled",
+    "localLearningShadowMode",
+    "explorationEnabled",
+    "evaluationEnabled"
+  ]);
+
+  const patch: NonNullable<SettingsPatch["ranking"]> = {};
+  if (Object.hasOwn(input, "cocoonLevel")) {
+    patch.cocoonLevel = parseIntegerField(input.cocoonLevel, "cocoonLevel", 1, 10);
+  }
+  for (const key of [
+    "localLearningEnabled",
+    "localLearningShadowMode",
+    "explorationEnabled",
+    "evaluationEnabled"
+  ] as const) {
+    if (Object.hasOwn(input, key)) {
+      if (typeof input[key] !== "boolean") {
+        throw validationError(`${key} must be a boolean`, { field: key });
+      }
+      patch[key] = input[key];
+    }
   }
 
   return patch;
@@ -432,6 +544,44 @@ function readStoredNumber(
 
   const range = READER_RANGES[field];
   return value >= range.min && value <= range.max ? value : fallback;
+}
+
+function readOptionalStoredNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return value >= min && value <= max ? value : fallback;
+}
+
+function readIntegerInRange(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return fallback;
+  }
+  return value >= min && value <= max ? value : fallback;
+}
+
+function parseIntegerField(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw validationError(`${field} must be an integer`, { field });
+  }
+  if (value < min || value > max) {
+    throw validationError(`${field} must be between ${min} and ${max}`, {
+      field,
+      min,
+      max
+    });
+  }
+  return value;
 }
 
 function parseNumberInRange(

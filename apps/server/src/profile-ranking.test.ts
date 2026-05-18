@@ -782,7 +782,7 @@ function insertArticleForFeed(
 
 function recommendedIds(
   db: DibaoDatabase,
-  rankContext = "index_eval",
+  rankContext = "rec_v2:embedding:cocoon_5:schema_2",
   limit = 100
 ): string[] {
   return new SqliteArticleRepository(db)
@@ -795,16 +795,21 @@ function activeScoreForContext(
   articleId: string,
   rankContext: string
 ): number | null {
+  const contexts =
+    rankContext === "base"
+      ? ["base"]
+      : [rankContext, "rec_v2:embedding:cocoon_5:schema_2"];
   const row = db
     .prepare(
       `
         select score
         from article_rank_scores
         where article_id = ?
-          and rank_context = ?
+          and rank_context in (${contexts.map(() => "?").join(", ")})
+        order by case when rank_context = 'rec_v2:embedding:cocoon_5:schema_2' then 0 else 1 end
       `
     )
-    .get(articleId, rankContext) as { score: number } | undefined;
+    .get(articleId, ...contexts) as { score: number } | undefined;
 
   return row?.score ?? null;
 }
@@ -891,7 +896,8 @@ function activeScore(db: DibaoDatabase, articleId: string): number | null {
         select score
         from article_rank_scores
         where article_id = ?
-          and rank_context = 'index_profile'
+          and rank_context in ('index_profile', 'rec_v2:embedding:cocoon_5:schema_2')
+        order by case when rank_context = 'rec_v2:embedding:cocoon_5:schema_2' then 0 else 1 end
       `
     )
     .get(articleId) as { score: number } | undefined;

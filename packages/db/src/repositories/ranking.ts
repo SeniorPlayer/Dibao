@@ -1,9 +1,12 @@
 import type {
   ArticleInteractionStatus,
+  ArticleRankExplanationPayloadRow,
   ArticleRankExplanationSourceRow,
   ArticleRankingCandidateRow,
   DibaoDatabase,
   RankedArticleCountsRow,
+  UpsertArticleRankExplanationInput,
+  UpsertRankContextInput,
   UpsertArticleRankScoreInput
 } from "../types.js";
 
@@ -12,6 +15,13 @@ export const BASE_RANK_CONTEXT = "base";
 type ArticleRankingCandidateDbRow = {
   articleId: string;
   feedId: string;
+  title: string;
+  summary: string | null;
+  contentText: string | null;
+  dedupeKey: string;
+  contentHash: string | null;
+  canonicalUrl: string | null;
+  url: string;
   publishedAt: number | null;
   discoveredAt: number;
   sourceWeight: number;
@@ -51,12 +61,29 @@ type ArticleRankExplanationSourceDbRow = {
   lastOpenedAt: number | null;
   lastIgnoredAt: number | null;
   score: number | null;
+  baseScore: number | null;
+  ftrlScore: number | null;
   interestScore: number | null;
+  semanticScore: number | null;
+  bm25Score: number | null;
   sourceScore: number | null;
   freshnessScore: number | null;
   stateScore: number | null;
   diversityScore: number | null;
   penaltyScore: number | null;
+  negativePenalty: number | null;
+  duplicatePenalty: number | null;
+  diversityPenalty: number | null;
+  explorationBonus: number | null;
+  pendingEmbeddingScore: number | null;
+  exposurePenalty: number | null;
+  preRerankScore: number | null;
+  rerankScore: number | null;
+  rerankPosition: number | null;
+  rerankWindowId: string | null;
+  algorithmVersion: string | null;
+  featureSchemaVersion: number | null;
+  cocoonLevel: number | null;
   calculatedAt: number | null;
   vectorBlob: Buffer | null;
   rankingStatus: ArticleRankExplanationSourceRow["rankingStatus"];
@@ -64,12 +91,17 @@ type ArticleRankExplanationSourceDbRow = {
 
 export interface RankingRepository {
   countRankedArticles(input: { activeRankContext: string }): RankedArticleCountsRow;
+  findExplanationPayload(input: {
+    articleId: string;
+    rankContext: string;
+  }): ArticleRankExplanationPayloadRow | null;
   findExplanationSource(input: {
     articleId: string;
     rankContext?: string;
   }): ArticleRankExplanationSourceRow | null;
   findBaseExplanationSource(articleId: string): ArticleRankExplanationSourceRow | null;
   getLastRankingUpdate(input: { activeRankContext: string }): number | null;
+  upsertRankContext(input: UpsertRankContextInput): void;
   listCandidates(input?: {
     articleIds?: string[];
     afterArticleId?: string | null;
@@ -79,6 +111,7 @@ export interface RankingRepository {
   listBaseCandidates(input?: { articleIds?: string[] }): ArticleRankingCandidateRow[];
   upsertScore(input: UpsertArticleRankScoreInput): void;
   upsertBaseScore(input: UpsertArticleRankScoreInput): void;
+  upsertExplanation(input: UpsertArticleRankExplanationInput): void;
 }
 
 export class SqliteRankingRepository implements RankingRepository {
@@ -118,12 +151,76 @@ export class SqliteRankingRepository implements RankingRepository {
     return row?.calculatedAt ?? null;
   }
 
+  findExplanationPayload(input: {
+    articleId: string;
+    rankContext: string;
+  }): ArticleRankExplanationPayloadRow | null {
+    const row = this.db
+      .prepare(
+        `
+          select
+            article_id as articleId,
+            rank_context as rankContext,
+            embedding_index_id as embeddingIndexId,
+            payload_json as payloadJson,
+            created_at as createdAt
+          from article_rank_explanations
+          where article_id = ?
+            and rank_context = ?
+        `
+      )
+      .get(input.articleId, input.rankContext) as ArticleRankExplanationPayloadRow | undefined;
+
+    return row ?? null;
+  }
+
+  upsertRankContext(input: UpsertRankContextInput): void {
+    const now = input.now ?? Date.now();
+    this.db
+      .prepare(
+        `
+          insert into rank_contexts (
+            id,
+            algorithm_version,
+            feature_schema_version,
+            embedding_index_id,
+            cocoon_level,
+            status,
+            metadata_json,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(id) do update set
+            algorithm_version = excluded.algorithm_version,
+            feature_schema_version = excluded.feature_schema_version,
+            embedding_index_id = excluded.embedding_index_id,
+            cocoon_level = excluded.cocoon_level,
+            status = excluded.status,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(
+        input.id,
+        input.algorithmVersion,
+        input.featureSchemaVersion,
+        input.embeddingIndexId ?? null,
+        input.cocoonLevel,
+        input.status ?? "active",
+        input.metadataJson ?? null,
+        now,
+        now
+      );
+  }
+
   findExplanationSource(input: {
     articleId: string;
     rankContext?: string;
   }): ArticleRankExplanationSourceRow | null {
     const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
-    const activeEmbeddingIndexId = rankContext === BASE_RANK_CONTEXT ? null : rankContext;
+    const activeEmbeddingIndexId =
+      rankContext === BASE_RANK_CONTEXT ? null : this.embeddingIndexIdForRankContext(rankContext);
     const row = this.db
       .prepare(
         `
@@ -147,12 +244,29 @@ export class SqliteRankingRepository implements RankingRepository {
                 and be.event_type = 'impression'
             ) as lastIgnoredAt,
             coalesce(rs.score, base_rs.score) as score,
+            coalesce(rs.base_score, base_rs.base_score) as baseScore,
+            coalesce(rs.ftrl_score, base_rs.ftrl_score) as ftrlScore,
             coalesce(rs.interest_score, base_rs.interest_score) as interestScore,
+            coalesce(rs.semantic_score, base_rs.semantic_score) as semanticScore,
+            coalesce(rs.bm25_score, base_rs.bm25_score) as bm25Score,
             coalesce(rs.source_score, base_rs.source_score) as sourceScore,
             coalesce(rs.freshness_score, base_rs.freshness_score) as freshnessScore,
             coalesce(rs.state_score, base_rs.state_score) as stateScore,
             coalesce(rs.diversity_score, base_rs.diversity_score) as diversityScore,
             coalesce(rs.penalty_score, base_rs.penalty_score) as penaltyScore,
+            coalesce(rs.negative_penalty, base_rs.negative_penalty) as negativePenalty,
+            coalesce(rs.duplicate_penalty, base_rs.duplicate_penalty) as duplicatePenalty,
+            coalesce(rs.diversity_penalty, base_rs.diversity_penalty) as diversityPenalty,
+            coalesce(rs.exploration_bonus, base_rs.exploration_bonus) as explorationBonus,
+            coalesce(rs.pending_embedding_score, base_rs.pending_embedding_score) as pendingEmbeddingScore,
+            coalesce(rs.exposure_penalty, base_rs.exposure_penalty) as exposurePenalty,
+            coalesce(rs.pre_rerank_score, base_rs.pre_rerank_score) as preRerankScore,
+            coalesce(rs.rerank_score, base_rs.rerank_score) as rerankScore,
+            coalesce(rs.rerank_position, base_rs.rerank_position) as rerankPosition,
+            coalesce(rs.rerank_window_id, base_rs.rerank_window_id) as rerankWindowId,
+            coalesce(rs.algorithm_version, base_rs.algorithm_version) as algorithmVersion,
+            coalesce(rs.feature_schema_version, base_rs.feature_schema_version) as featureSchemaVersion,
+            coalesce(rs.cocoon_level, base_rs.cocoon_level) as cocoonLevel,
             coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt,
             ae.vector_blob as vectorBlob,
             case
@@ -252,9 +366,16 @@ export class SqliteRankingRepository implements RankingRepository {
               group by article_id
             )
             select
-              a.id as articleId,
-              a.feed_id as feedId,
-              a.published_at as publishedAt,
+            a.id as articleId,
+            a.feed_id as feedId,
+            a.title,
+            a.summary,
+            ac.content_text as contentText,
+            a.dedupe_key as dedupeKey,
+            a.content_hash as contentHash,
+            a.canonical_url as canonicalUrl,
+            a.url,
+            a.published_at as publishedAt,
               a.discovered_at as discoveredAt,
               f.source_weight as sourceWeight,
               coalesce(fs.positive_score, 0) as feedPositiveScore,
@@ -288,6 +409,7 @@ export class SqliteRankingRepository implements RankingRepository {
             from articles a
             join feeds f on f.id = a.feed_id
             left join article_states s on s.article_id = a.id
+            left join article_contents ac on ac.article_id = a.id
             left join feed_stats fs on fs.feed_id = a.feed_id
             left join event_stats es on es.article_id = a.id
             left join article_embeddings ae
@@ -322,24 +444,58 @@ export class SqliteRankingRepository implements RankingRepository {
             rank_context,
             embedding_index_id,
             score,
+            base_score,
+            ftrl_score,
             interest_score,
+            semantic_score,
+            bm25_score,
             source_score,
             freshness_score,
             state_score,
             diversity_score,
             penalty_score,
+            negative_penalty,
+            duplicate_penalty,
+            diversity_penalty,
+            exploration_bonus,
+            pending_embedding_score,
+            exposure_penalty,
+            pre_rerank_score,
+            rerank_score,
+            rerank_position,
+            rerank_window_id,
+            algorithm_version,
+            feature_schema_version,
+            cocoon_level,
             calculated_at
           )
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(article_id, rank_context) do update set
             embedding_index_id = excluded.embedding_index_id,
             score = excluded.score,
+            base_score = excluded.base_score,
+            ftrl_score = excluded.ftrl_score,
             interest_score = excluded.interest_score,
+            semantic_score = excluded.semantic_score,
+            bm25_score = excluded.bm25_score,
             source_score = excluded.source_score,
             freshness_score = excluded.freshness_score,
             state_score = excluded.state_score,
             diversity_score = excluded.diversity_score,
             penalty_score = excluded.penalty_score,
+            negative_penalty = excluded.negative_penalty,
+            duplicate_penalty = excluded.duplicate_penalty,
+            diversity_penalty = excluded.diversity_penalty,
+            exploration_bonus = excluded.exploration_bonus,
+            pending_embedding_score = excluded.pending_embedding_score,
+            exposure_penalty = excluded.exposure_penalty,
+            pre_rerank_score = excluded.pre_rerank_score,
+            rerank_score = excluded.rerank_score,
+            rerank_position = excluded.rerank_position,
+            rerank_window_id = excluded.rerank_window_id,
+            algorithm_version = excluded.algorithm_version,
+            feature_schema_version = excluded.feature_schema_version,
+            cocoon_level = excluded.cocoon_level,
             calculated_at = excluded.calculated_at
         `
       )
@@ -348,12 +504,29 @@ export class SqliteRankingRepository implements RankingRepository {
         input.rankContext ?? BASE_RANK_CONTEXT,
         input.embeddingIndexId ?? null,
         input.score,
+        input.baseScore ?? null,
+        input.ftrlScore ?? null,
         input.interestScore,
+        input.semanticScore ?? input.interestScore,
+        input.bm25Score ?? null,
         input.sourceScore,
         input.freshnessScore,
         input.stateScore,
         input.diversityScore,
         input.penaltyScore,
+        input.negativePenalty ?? null,
+        input.duplicatePenalty ?? null,
+        input.diversityPenalty ?? null,
+        input.explorationBonus ?? null,
+        input.pendingEmbeddingScore ?? null,
+        input.exposurePenalty ?? null,
+        input.preRerankScore ?? null,
+        input.rerankScore ?? null,
+        input.rerankPosition ?? null,
+        input.rerankWindowId ?? null,
+        input.algorithmVersion ?? null,
+        input.featureSchemaVersion ?? null,
+        input.cocoonLevel ?? null,
         input.calculatedAt
       );
   }
@@ -364,6 +537,47 @@ export class SqliteRankingRepository implements RankingRepository {
       rankContext: input.rankContext ?? BASE_RANK_CONTEXT,
       embeddingIndexId: null
     });
+  }
+
+  upsertExplanation(input: UpsertArticleRankExplanationInput): void {
+    this.db
+      .prepare(
+        `
+          insert into article_rank_explanations (
+            article_id,
+            rank_context,
+            embedding_index_id,
+            payload_json,
+            created_at
+          )
+          values (?, ?, ?, ?, ?)
+          on conflict(article_id, rank_context) do update set
+            embedding_index_id = excluded.embedding_index_id,
+            payload_json = excluded.payload_json,
+            created_at = excluded.created_at
+        `
+      )
+      .run(
+        input.articleId,
+        input.rankContext,
+        input.embeddingIndexId ?? null,
+        input.payloadJson,
+        input.createdAt
+      );
+  }
+
+  private embeddingIndexIdForRankContext(rankContext: string): string | null {
+    const row = this.db
+      .prepare(
+        `
+          select embedding_index_id as embeddingIndexId
+          from rank_contexts
+          where id = ?
+        `
+      )
+      .get(rankContext) as { embeddingIndexId: string | null } | undefined;
+
+    return row?.embeddingIndexId ?? rankContext;
   }
 }
 
@@ -414,12 +628,29 @@ function mapExplanationSource(
         ? null
         : {
             score: row.score,
+            baseScore: row.baseScore,
+            ftrlScore: row.ftrlScore,
             interestScore: row.interestScore,
+            semanticScore: row.semanticScore,
+            bm25Score: row.bm25Score,
             sourceScore: row.sourceScore,
             freshnessScore: row.freshnessScore,
             stateScore: row.stateScore,
             diversityScore: row.diversityScore,
             penaltyScore: row.penaltyScore,
+            negativePenalty: row.negativePenalty,
+            duplicatePenalty: row.duplicatePenalty,
+            diversityPenalty: row.diversityPenalty,
+            explorationBonus: row.explorationBonus,
+            pendingEmbeddingScore: row.pendingEmbeddingScore,
+            exposurePenalty: row.exposurePenalty,
+            preRerankScore: row.preRerankScore,
+            rerankScore: row.rerankScore,
+            rerankPosition: row.rerankPosition,
+            rerankWindowId: row.rerankWindowId,
+            algorithmVersion: row.algorithmVersion,
+            featureSchemaVersion: row.featureSchemaVersion,
+            cocoonLevel: row.cocoonLevel,
             calculatedAt: row.calculatedAt
           }
   };
@@ -429,6 +660,13 @@ function mapCandidate(row: ArticleRankingCandidateDbRow): ArticleRankingCandidat
   return {
     articleId: row.articleId,
     feedId: row.feedId,
+    title: row.title,
+    summary: row.summary,
+    contentText: row.contentText,
+    dedupeKey: row.dedupeKey,
+    contentHash: row.contentHash,
+    canonicalUrl: row.canonicalUrl,
+    url: row.url,
     publishedAt: row.publishedAt,
     discoveredAt: row.discoveredAt,
     sourceWeight: row.sourceWeight,

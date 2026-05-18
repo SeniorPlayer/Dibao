@@ -189,6 +189,11 @@ export type AppSettings = {
     preferFreshness: number;
     preferSource: number;
     preferDiversity: number;
+    cocoonLevel: number;
+    localLearningEnabled: boolean;
+    localLearningShadowMode: boolean;
+    explorationEnabled: boolean;
+    evaluationEnabled: boolean;
   };
 };
 
@@ -205,6 +210,13 @@ export type UpdateSettingsInput = {
   };
   retention?: {
     retentionDays?: number;
+  };
+  ranking?: {
+    cocoonLevel?: number;
+    localLearningEnabled?: boolean;
+    localLearningShadowMode?: boolean;
+    explorationEnabled?: boolean;
+    evaluationEnabled?: boolean;
   };
 };
 
@@ -303,6 +315,22 @@ export type RecommendationStatus = {
     dimension: number;
   } | null;
   activeRankContext: string;
+  algorithm?: {
+    version: string;
+    featureSchemaVersion: number;
+    cocoonLevel: number;
+    localLearning: {
+      enabled: boolean;
+      shadowMode: boolean;
+    };
+    exploration: {
+      enabled: boolean;
+    };
+    evaluation: {
+      enabled: boolean;
+    };
+    cocoonParameters: Record<string, number>;
+  };
   coverage: {
     candidateCount: number;
     eligibleArticleCount?: number;
@@ -331,6 +359,26 @@ export type RecommendationStatus = {
     code: string;
     message: string;
   }>;
+};
+
+export type RecommendationTransparency = RecommendationStatus & {
+  transparency: {
+    currentFormula: string;
+    fallbackReason: string | null;
+    rankingCore: {
+      usesRemoteLlm: boolean;
+      usesRemoteReranker: boolean;
+      usesExternalSearchService: boolean;
+      allowedRemoteDependency: string;
+    };
+    maintenance: {
+      schemaMigration: string;
+      backfillState: string;
+      explanationAuthority: string;
+      scoreAuthority: string;
+    };
+    failureStates: Record<string, boolean>;
+  };
 };
 
 export type RecommendationClusterItem = {
@@ -400,7 +448,12 @@ export const defaultAppSettings: AppSettings = {
   ranking: {
     preferFreshness: 0.5,
     preferSource: 0.5,
-    preferDiversity: 0.5
+    preferDiversity: 0.5,
+    cocoonLevel: 5,
+    localLearningEnabled: false,
+    localLearningShadowMode: true,
+    explorationEnabled: true,
+    evaluationEnabled: false
   }
 };
 
@@ -606,6 +659,10 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
 
     async getRecommendationStatus(): Promise<RecommendationStatus> {
       return (await request<RecommendationStatus>("/api/recommendation/status")).data;
+    },
+
+    async getRecommendationTransparency(): Promise<RecommendationTransparency> {
+      return (await request<RecommendationTransparency>("/api/recommendation/transparency")).data;
     },
 
     async rebuildEmbeddingIndex(indexId: string): Promise<RebuildEmbeddingIndexResponse> {

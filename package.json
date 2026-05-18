@@ -18,7 +18,8 @@
     "perf:recommendation": "tsx scripts/perf/recommendation-performance.ts",
     "smoke:docker-recommendation": "node scripts/smoke/docker-recommendation-smoke.mjs",
     "test:ollama:optional": "node scripts/smoke/ollama-probe.mjs",
-    "spike:sqlite-vec": "node scripts/spikes/sqlite-vec-node.mjs"
+    "spike:sqlite-vec": "node scripts/spikes/sqlite-vec-node.mjs",
+    "ops:migrate:recommendation-v2": "tsx scripts/ops/recommendation-v2-live-migrate.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

@@ -1509,6 +1509,70 @@ PROFILE_WARMUP
 - `activeIndex` 不返回 sqlite-vec table name 或 vector 数据。
 - 不返回正文、API key、session token、embedding vectors 或原始 job payload。
 
+### GET /api/recommendation/transparency
+
+返回推荐透明页所需的状态摘要。该接口复用 `/api/recommendation/status` 的字段，并额外返回：
+
+```ts
+{
+  transparency: {
+    currentFormula: string
+    fallbackReason: string | null
+    rankingCore: {
+      usesRemoteLlm: false
+      usesRemoteReranker: false
+      usesExternalSearchService: false
+      allowedRemoteDependency: "one embedding provider"
+    }
+    maintenance: {
+      schemaMigration: "004_recommendation_v2"
+      backfillState: string
+      explanationAuthority: "article_rank_explanations"
+      scoreAuthority: "article_rank_scores"
+    }
+    failureStates: Record<string, boolean>
+  }
+}
+```
+
+透明页必须能解释 fallback/running/failed 状态，而不是只展示正常态。
+
+### Recommendation Maintenance APIs
+
+以下接口均受 session auth 保护。会触发后台或本地维护任务的接口必须去重：如果已有同类 queued/running job，返回已有 job id，不重复入队。
+
+```text
+POST /api/recommendation/recalculate
+POST /api/recommendation/backfill/fingerprints
+POST /api/recommendation/rebuild-duplicates
+POST /api/recommendation/rebuild-keywords
+POST /api/recommendation/evaluate
+POST /api/recommendation/ftrl/reset
+```
+
+前五个接口响应：
+
+```json
+{
+  "data": {
+    "jobId": "job_01",
+    "existing": false
+  }
+}
+```
+
+`POST /api/recommendation/ftrl/reset` 响应：
+
+```json
+{
+  "data": {
+    "ok": true
+  }
+}
+```
+
+维护任务只操作本地 SQLite 派生数据，不调用远程 LLM、reranker、classifier 或外部搜索服务。
+
 ## System
 
 ### GET /api/system/health

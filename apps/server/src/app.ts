@@ -96,6 +96,15 @@ import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_JOB_TYPE
 } from "./ranking-job-service.js";
+import {
+  ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE,
+  DUPLICATE_GROUP_REBUILD_JOB_TYPE,
+  FTRL_TRAIN_JOB_TYPE,
+  KEYWORD_PROFILE_REBUILD_JOB_TYPE,
+  RANKING_EVAL_RUN_JOB_TYPE,
+  RECOMMENDATION_BACKFILL_JOB_TYPE,
+  RecommendationMaintenanceService
+} from "./recommendation-maintenance-service.js";
 import { RecommendationRankingService } from "./ranking-service.js";
 import {
   DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
@@ -242,10 +251,15 @@ export function buildServer(options: BuildServerOptions = {}) {
     profiles,
     now: options.now
   });
+  const settingsService = new SettingsService({
+    settings,
+    now: options.now
+  });
   const rankingService = new RecommendationRankingService({
     embeddings,
     profiles,
     rankings,
+    getRankingSettings: () => settingsService.getSettings().ranking,
     now: options.now
   });
   const rankingJobService = new RankingRecalculateJobService({
@@ -253,8 +267,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     ranking: rankingService,
     now: options.now
   });
-  const settingsService = new SettingsService({
-    settings,
+  const recommendationMaintenanceService = new RecommendationMaintenanceService({
+    db,
+    jobs,
+    rankingJobs: rankingJobService,
     now: options.now
   });
   const embeddingJobService = new EmbeddingJobService({
@@ -364,7 +380,19 @@ export function buildServer(options: BuildServerOptions = {}) {
       [EMBEDDING_GENERATE_JOB_TYPE]: (job) =>
         embeddingJobService.handleEmbeddingGenerateJob(job),
       [VECTOR_INDEX_REBUILD_JOB_TYPE]: (job) =>
-        vectorIndexRebuildJobService.handleVectorIndexRebuildJob(job)
+        vectorIndexRebuildJobService.handleVectorIndexRebuildJob(job),
+      [ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [DUPLICATE_GROUP_REBUILD_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [KEYWORD_PROFILE_REBUILD_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [RANKING_EVAL_RUN_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [FTRL_TRAIN_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [RECOMMENDATION_BACKFILL_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job)
     },
     now: options.now,
     pollIntervalMs: options.jobRunnerIntervalMs,
@@ -574,8 +602,43 @@ export function buildServer(options: BuildServerOptions = {}) {
       embeddings,
       profiles,
       rankings,
-      rankingService
+      rankingService,
+      settings: settingsService.getSettings().ranking
     })
+  }));
+
+  app.get("/api/recommendation/transparency", async () => ({
+    data: getRecommendationTransparency({
+      embeddings,
+      profiles,
+      rankings,
+      rankingService,
+      settings: settingsService.getSettings().ranking
+    })
+  }));
+
+  app.post("/api/recommendation/recalculate", async () => ({
+    data: recommendationMaintenanceService.enqueueRecalculate()
+  }));
+
+  app.post("/api/recommendation/backfill/fingerprints", async () => ({
+    data: recommendationMaintenanceService.enqueueFingerprintBackfill()
+  }));
+
+  app.post("/api/recommendation/rebuild-duplicates", async () => ({
+    data: recommendationMaintenanceService.enqueueDuplicateRebuild()
+  }));
+
+  app.post("/api/recommendation/rebuild-keywords", async () => ({
+    data: recommendationMaintenanceService.enqueueKeywordRebuild()
+  }));
+
+  app.post("/api/recommendation/evaluate", async () => ({
+    data: recommendationMaintenanceService.enqueueEvaluation()
+  }));
+
+  app.post("/api/recommendation/ftrl/reset", async () => ({
+    data: recommendationMaintenanceService.resetFtrl()
   }));
 
   app.get("/api/settings", async () => ({
@@ -1195,6 +1258,7 @@ function getRecommendationStatus(options: {
   profiles: SqliteProfileRepository;
   rankings: SqliteRankingRepository;
   rankingService: RecommendationRankingService;
+  settings: ReturnType<SettingsService["getSettings"]>["ranking"];
 }) {
   const activeProvider = options.embeddings.findActiveProvider();
   const indexes = options.embeddings.listIndexes();
@@ -1214,7 +1278,7 @@ function getRecommendationStatus(options: {
     .listClusters({
       ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
     })
-    .slice(0, 12)
+    .slice(0, 64)
     .map((cluster, index) => mapRecommendationCluster(cluster, index + 1, clusterEvidence));
   const rankedArticles = options.rankings.countRankedArticles({ activeRankContext });
   const lastProfileUpdate = options.profiles.getLastProfileUpdate({
@@ -1239,6 +1303,22 @@ function getRecommendationStatus(options: {
     activeProvider: activeProvider ? mapRecommendationProvider(activeProvider) : null,
     activeIndex: activeIndex ? mapRecommendationIndex(activeIndex) : null,
     activeRankContext,
+    algorithm: {
+      version: "rec_v2",
+      featureSchemaVersion: 2,
+      cocoonLevel: options.settings.cocoonLevel,
+      localLearning: {
+        enabled: options.settings.localLearningEnabled,
+        shadowMode: options.settings.localLearningShadowMode
+      },
+      exploration: {
+        enabled: options.settings.explorationEnabled
+      },
+      evaluation: {
+        enabled: options.settings.evaluationEnabled
+      },
+      cocoonParameters: cocoonParametersForStatus(options.settings.cocoonLevel)
+    },
     coverage: mapCoverage(coverage),
     behaviorCounts,
     clusters: {
@@ -1249,6 +1329,56 @@ function getRecommendationStatus(options: {
     lastProfileUpdate: timestampToIso(lastProfileUpdate),
     lastRankingUpdate: timestampToIso(lastRankingUpdate),
     warnings
+  };
+}
+
+function getRecommendationTransparency(options: {
+  embeddings: SqliteEmbeddingRepository;
+  profiles: SqliteProfileRepository;
+  rankings: SqliteRankingRepository;
+  rankingService: RecommendationRankingService;
+  settings: ReturnType<SettingsService["getSettings"]>["ranking"];
+}) {
+  const status = getRecommendationStatus(options);
+  const fallbackReason =
+    status.mode === "baseline"
+      ? "no_active_embedding_provider_or_index"
+      : status.mode === "embedding"
+        ? "embedding_backfill_or_indexing_in_progress"
+        : status.mode === "degraded"
+          ? "provider_or_embedding_job_failure"
+          : null;
+
+  return {
+    ...status,
+    transparency: {
+      currentFormula:
+        status.mode === "baseline"
+          ? "freshness + source + state + local keyword fallback"
+          : "semantic + BM25/keywords + freshness + source + state - negative/dedupe/exposure + canonical MMR rerank",
+      fallbackReason,
+      rankingCore: {
+        usesRemoteLlm: false,
+        usesRemoteReranker: false,
+        usesExternalSearchService: false,
+        allowedRemoteDependency: "one embedding provider"
+      },
+      maintenance: {
+        schemaMigration: "004_recommendation_v2",
+        backfillState: "tracked in recommendation_backfill_state",
+        explanationAuthority: "article_rank_explanations",
+        scoreAuthority: "article_rank_scores"
+      },
+      failureStates: {
+        migrationNotCompleted: false,
+        backfillRunning: status.coverage.pendingJobs > 0,
+        rankContextMissing: status.rankedArticles.active === 0,
+        embeddingCoverageLow: status.coverage.coverageRatio < 0.8,
+        ftrlShadowMode: status.algorithm.localLearning.shadowMode,
+        evaluationUnavailable: !status.algorithm.evaluation.enabled,
+        recommendationUsingFallback: status.mode !== "personalized"
+      }
+    }
   };
 }
 
@@ -1527,6 +1657,23 @@ function mapCoverage(coverage: RecommendationCoverage) {
   };
 }
 
+function cocoonParametersForStatus(level: number) {
+  const c = Math.min(Math.max((level - 1) / 9, 0), 1);
+  const lerp = (left: number, right: number) => left + (right - left) * c;
+  return {
+    personalizationStrength: roundMetric(lerp(0.65, 1.25)),
+    diversityStrength: roundMetric(lerp(1.25, 0.55)),
+    mmrLambda: roundMetric(lerp(0.55, 0.88)),
+    explorationRatio: roundMetric(lerp(0.08, 0.005)),
+    sourceCapTop20: Math.round(lerp(3, 12)),
+    pendingEmbeddingFloor: roundMetric(lerp(0.12, 0.03)),
+    freshnessWeight: roundMetric(lerp(1.15, 0.75)),
+    negativeSemanticStrength: roundMetric(lerp(0.75, 1.15)),
+    recentIntentStrength: roundMetric(lerp(0.75, 1.2)),
+    keywordProfileStrength: roundMetric(lerp(0.75, 1.15))
+  };
+}
+
 function profilePolarityForEvent(
   event: Pick<InterestClusterEvidenceRow, "eventType" | "metadataJson" | "readingProgress">
 ): "positive" | "negative" | null {
@@ -1681,7 +1828,7 @@ function parseJobQuery(query: JobQuery):
     return {
       ok: false,
       message:
-        "type must be feed_refresh, content_extract, embedding_generate, profile_event_process, ranking_recalculate, profile_decay, retention_cleanup, or vector_index_rebuild",
+        "type must be a supported job type",
       details: { field: "type" }
     };
   }
@@ -2103,7 +2250,13 @@ function parseJobType(value: string | undefined): JobType | undefined | null {
     value === "ranking_recalculate" ||
     value === "profile_decay" ||
     value === "retention_cleanup" ||
-    value === "vector_index_rebuild"
+    value === "vector_index_rebuild" ||
+    value === ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE ||
+    value === DUPLICATE_GROUP_REBUILD_JOB_TYPE ||
+    value === KEYWORD_PROFILE_REBUILD_JOB_TYPE ||
+    value === RANKING_EVAL_RUN_JOB_TYPE ||
+    value === FTRL_TRAIN_JOB_TYPE ||
+    value === RECOMMENDATION_BACKFILL_JOB_TYPE
   ) {
     return value;
   }

@@ -54,7 +54,14 @@ export type JobType =
   | "ranking_recalculate"
   | "profile_decay"
   | "retention_cleanup"
-  | "vector_index_rebuild";
+  | "vector_index_rebuild"
+  | "article_fingerprint_backfill"
+  | "duplicate_group_rebuild"
+  | "keyword_profile_rebuild"
+  | "recent_intent_rebuild"
+  | "ftrl_train"
+  | "ranking_eval_run"
+  | "recommendation_backfill";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -278,6 +285,13 @@ export type ArticleRankSnapshot = {
 export type ArticleRankingCandidateRow = {
   articleId: string;
   feedId: string;
+  title: string;
+  summary: string | null;
+  contentText: string | null;
+  dedupeKey: string;
+  contentHash: string | null;
+  canonicalUrl: string | null;
+  url: string;
   publishedAt: number | null;
   discoveredAt: number;
   sourceWeight: number;
@@ -299,23 +313,57 @@ export type UpsertArticleRankScoreInput = {
   rankContext?: string;
   embeddingIndexId?: string | null;
   score: number;
+  baseScore?: number | null;
+  ftrlScore?: number | null;
   interestScore: number;
+  semanticScore?: number | null;
+  bm25Score?: number | null;
   sourceScore: number;
   freshnessScore: number;
   stateScore: number;
   diversityScore: number;
   penaltyScore: number;
+  negativePenalty?: number | null;
+  duplicatePenalty?: number | null;
+  diversityPenalty?: number | null;
+  explorationBonus?: number | null;
+  pendingEmbeddingScore?: number | null;
+  exposurePenalty?: number | null;
+  preRerankScore?: number | null;
+  rerankScore?: number | null;
+  rerankPosition?: number | null;
+  rerankWindowId?: string | null;
+  algorithmVersion?: string | null;
+  featureSchemaVersion?: number | null;
+  cocoonLevel?: number | null;
   calculatedAt: number;
 };
 
 export type ArticleRankScoreComponentsRow = {
   score: number;
+  baseScore: number | null;
+  ftrlScore: number | null;
   interestScore: number;
+  semanticScore: number | null;
+  bm25Score: number | null;
   sourceScore: number;
   freshnessScore: number;
   stateScore: number;
   diversityScore: number;
   penaltyScore: number;
+  negativePenalty: number | null;
+  duplicatePenalty: number | null;
+  diversityPenalty: number | null;
+  explorationBonus: number | null;
+  pendingEmbeddingScore: number | null;
+  exposurePenalty: number | null;
+  preRerankScore: number | null;
+  rerankScore: number | null;
+  rerankPosition: number | null;
+  rerankWindowId: string | null;
+  algorithmVersion: string | null;
+  featureSchemaVersion: number | null;
+  cocoonLevel: number | null;
   calculatedAt: number;
 };
 
@@ -346,15 +394,72 @@ export type InterestClusterRow = {
 };
 
 export type InterestClusterEvidenceRow = {
+  id?: string;
+  clusterId?: string;
   articleId: string;
   feedId: string;
   feedTitle: string;
+  behaviorEventId?: string | null;
+  evidenceSource?: "live_event" | "reconstructed";
+  confidence?: number;
+  similarity?: number | null;
+  weightDelta?: number;
   eventType: BehaviorEventType;
   metadataJson: string | null;
   readingProgress: number;
   title: string;
   vectorBlob: Buffer;
   createdAt: number;
+};
+
+export type RankContextRow = {
+  id: string;
+  algorithmVersion: string;
+  featureSchemaVersion: number;
+  embeddingIndexId: string | null;
+  cocoonLevel: number;
+  status: "active" | "retired" | "failed";
+  metadataJson: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type UpsertRankContextInput = {
+  id: string;
+  algorithmVersion: string;
+  featureSchemaVersion: number;
+  embeddingIndexId?: string | null;
+  cocoonLevel: number;
+  status?: RankContextRow["status"];
+  metadataJson?: string | null;
+  now?: number;
+};
+
+export type UpsertArticleRankExplanationInput = {
+  articleId: string;
+  rankContext: string;
+  embeddingIndexId?: string | null;
+  payloadJson: string;
+  createdAt: number;
+};
+
+export type ArticleRankExplanationPayloadRow = {
+  articleId: string;
+  rankContext: string;
+  embeddingIndexId: string | null;
+  payloadJson: string;
+  createdAt: number;
+};
+
+export type RecommendationMaintenanceStateRow = {
+  taskKey: string;
+  status: "idle" | "running" | "succeeded" | "failed";
+  cursor: string | null;
+  processedCount: number;
+  error: string | null;
+  startedAt: number | null;
+  updatedAt: number;
+  finishedAt: number | null;
 };
 
 export type UpsertInterestClusterInput = {

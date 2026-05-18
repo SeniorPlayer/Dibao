@@ -25,6 +25,7 @@ import {
   type ReadLaterArticleSort,
   type ReaderSettings,
   type RecommendationStatus,
+  type RecommendationTransparency,
   type SetupStatus,
   type UpdateFeedFolderInput,
   type UpdateFeedInput,
@@ -553,7 +554,7 @@ export function App() {
     setRecommendationStatusError(null);
 
     try {
-      const status = await dibaoApi.getRecommendationStatus();
+      const status = await dibaoApi.getRecommendationTransparency();
       setRecommendationStatus(status);
     } catch (error) {
       setRecommendationStatus(null);
@@ -1900,6 +1901,7 @@ type SettingsDraft = {
   paragraphGap: string;
   readerWidth: string;
   retentionDays: string;
+  cocoonLevel: string;
 };
 
 type SupportedEmbeddingProviderType = Extract<
@@ -2106,6 +2108,17 @@ export function SettingsWorkspace(props: {
             />
             <span>{t.settings.sections.behavior.removeReadLaterOnReadComplete}</span>
           </label>
+          <NumberSettingField
+            id="settings-cocoon-level"
+            label={t.settings.sections.behavior.cocoonLevel}
+            max={10}
+            min={1}
+            onChange={(value) => applyDraft({ ...draft, cocoonLevel: value })}
+            step={1}
+            unit={t.settings.units.level}
+            value={draft.cocoonLevel}
+          />
+          <p className={styles.managementHint}>{t.settings.sections.behavior.cocoonLevelHint}</p>
         </section>
 
         <section className={classNames(styles.settingsSection, "settings-card", "reader-settings-card")} aria-labelledby="settings-reader-title">
@@ -2490,6 +2503,10 @@ export function AlgorithmTransparencyPage(props: {
   status: RecommendationStatus | null;
 }) {
   const { t, formatDate } = useI18n();
+  const transparency =
+    props.status && "transparency" in props.status
+      ? (props.status as RecommendationTransparency).transparency
+      : null;
   const statusText = props.error
     ? t.recommendationStatus.fallback
     : props.status
@@ -2593,6 +2610,36 @@ export function AlgorithmTransparencyPage(props: {
                     : t.algorithmTransparency.noWarnings}
                 </dd>
               </div>
+              {props.status.algorithm ? (
+                <div>
+                  <dt>{t.algorithmTransparency.fields.cocoon}</dt>
+                  <dd>
+                    {props.status.algorithm.cocoonLevel} · MMR λ{" "}
+                    {props.status.algorithm.cocoonParameters.mmrLambda} ·{" "}
+                    {t.algorithmTransparency.fields.exploration}:{" "}
+                    {props.status.algorithm.exploration.enabled
+                      ? t.settings.sections.retention.enabled
+                      : t.settings.sections.retention.disabled}
+                  </dd>
+                </div>
+              ) : null}
+              {transparency ? (
+                <div>
+                  <dt>{t.algorithmTransparency.fields.formula}</dt>
+                  <dd>{transparency.currentFormula}</dd>
+                </div>
+              ) : null}
+              {transparency ? (
+                <div>
+                  <dt>{t.algorithmTransparency.fields.failureStates}</dt>
+                  <dd>
+                    {Object.entries(transparency.failureStates)
+                      .filter(([, active]) => active)
+                      .map(([name]) => name)
+                      .join(" · ") || t.algorithmTransparency.noWarnings}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           ) : null}
         </section>
@@ -4084,7 +4131,8 @@ function draftForSettings(settings: AppSettings): SettingsDraft {
     lineHeight: String(settings.reader.lineHeight),
     paragraphGap: String(settings.reader.paragraphGap),
     readerWidth: String(settings.reader.readerWidth),
-    retentionDays: String(settings.retention.retentionDays)
+    retentionDays: String(settings.retention.retentionDays),
+    cocoonLevel: String(settings.ranking.cocoonLevel)
   };
 }
 
@@ -4189,6 +4237,10 @@ function parseSettingsDraft(
   if (retentionDays === null) {
     return { ok: false, error: t.settings.errors.retentionDays };
   }
+  const cocoonLevel = parseNumberDraft(draft.cocoonLevel, 1, 10, true);
+  if (cocoonLevel === null) {
+    return { ok: false, error: t.settings.errors.cocoonLevel };
+  }
 
   const settings: AppSettings = {
     ...current,
@@ -4210,6 +4262,10 @@ function parseSettingsDraft(
     retention: {
       ...current.retention,
       retentionDays
+    },
+    ranking: {
+      ...current.ranking,
+      cocoonLevel
     }
   };
 
@@ -4232,6 +4288,9 @@ function parseSettingsDraft(
       },
       retention: {
         retentionDays
+      },
+      ranking: {
+        cocoonLevel
       }
     }
   };
