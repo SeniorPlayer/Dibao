@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { openDatabase } from "@dibao/db";
+import { openDatabase, runMigrations } from "@dibao/db";
 
 const dbPath = process.env.DIBAO_DATABASE_PATH;
 
@@ -35,6 +35,7 @@ try {
   const activeIndex = db
     .prepare("select id from embedding_indexes where status = 'active' order by updated_at desc limit 1")
     .get() as { id: string } | undefined;
+  const appliedNow = runMigrations(db);
   const migrations = db
     .prepare("select version, name from schema_migrations order by version")
     .all() as Array<{ version: string; name: string }>;
@@ -57,6 +58,7 @@ try {
       activeEmbeddingIndexId: activeIndex?.id ?? null
     },
     migrations,
+    appliedNow,
     postMigration: {
       counts: postCounts,
       newTablesExist: hasRankContexts,
