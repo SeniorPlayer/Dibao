@@ -281,6 +281,7 @@ export type EmbeddingIndex = {
   distanceMetric: "cosine";
   status: "active" | "building" | "disabled" | "failed" | "retired";
   candidateCount?: number;
+  coveredArticleCount?: number;
   embeddingCount: number;
   coverageRatio?: number;
   pendingJobs: number;
@@ -293,6 +294,13 @@ export type EmbeddingIndex = {
 
 export type RebuildEmbeddingIndexResponse = {
   jobId: string;
+};
+
+export type BackfillEmbeddingIndexResponse = {
+  jobIds: string[];
+  candidateCount: number;
+  enqueuedArticleCount: number;
+  dedupedArticleCount: number;
 };
 
 export type RecommendationMode = "baseline" | "personalized" | "embedding" | "degraded";
@@ -336,6 +344,7 @@ export type RecommendationStatus = {
     eligibleArticleCount?: number;
     missingEmbeddingCount?: number;
     staleEmbeddingCount?: number;
+    coveredArticleCount?: number;
     embeddingCount: number;
     coverageRatio: number;
     pendingJobs: number;
@@ -669,6 +678,17 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (
         await request<RebuildEmbeddingIndexResponse>(
           `/api/embedding/indexes/${encodeURIComponent(indexId)}/rebuild`,
+          {
+            method: "POST"
+          }
+        )
+      ).data;
+    },
+
+    async backfillEmbeddingIndex(indexId: string): Promise<BackfillEmbeddingIndexResponse> {
+      return (
+        await request<BackfillEmbeddingIndexResponse>(
+          `/api/embedding/indexes/${encodeURIComponent(indexId)}/backfill`,
           {
             method: "POST"
           }

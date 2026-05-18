@@ -1479,6 +1479,7 @@ type RecommendationCoverage = {
   eligibleArticleCount: number;
   missingEmbeddingCount: number;
   staleEmbeddingCount: number;
+  coveredArticleCount: number;
   embeddingCount: number;
   coverageRatio: number;
   pendingJobs: number;
@@ -1507,6 +1508,7 @@ function coverageFor(index: EmbeddingIndexListRow | null): RecommendationCoverag
       eligibleArticleCount: 0,
       missingEmbeddingCount: 0,
       staleEmbeddingCount: 0,
+      coveredArticleCount: 0,
       embeddingCount: 0,
       coverageRatio: 0,
       pendingJobs: 0,
@@ -1521,6 +1523,7 @@ function coverageFor(index: EmbeddingIndexListRow | null): RecommendationCoverag
     eligibleArticleCount: index.eligibleArticleCount,
     missingEmbeddingCount: index.missingEmbeddingCount,
     staleEmbeddingCount: index.staleEmbeddingCount,
+    coveredArticleCount: index.coveredArticleCount,
     embeddingCount: index.embeddingCount,
     coverageRatio: index.coverageRatio,
     pendingJobs: index.pendingJobs,
@@ -1589,7 +1592,7 @@ function recommendationWarnings(input: {
     });
   }
 
-  if (input.coverage.failedJobs > 0 || input.activeIndex.status === "failed") {
+  if (hasBlockingEmbeddingFailures(input.coverage) || input.activeIndex.status === "failed") {
     warnings.push({
       code: "EMBEDDING_JOB_FAILED",
       message: "Embedding generation has failed jobs for the active index."
@@ -1648,6 +1651,7 @@ function mapCoverage(coverage: RecommendationCoverage) {
     eligibleArticleCount: coverage.eligibleArticleCount,
     missingEmbeddingCount: coverage.missingEmbeddingCount,
     staleEmbeddingCount: coverage.staleEmbeddingCount,
+    coveredArticleCount: coverage.coveredArticleCount,
     embeddingCount: coverage.embeddingCount,
     coverageRatio: coverage.coverageRatio,
     pendingJobs: coverage.pendingJobs,

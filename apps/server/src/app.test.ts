@@ -1525,6 +1525,7 @@ describe("server API vertical slice", () => {
             eligibleArticleCount: 2,
             missingEmbeddingCount: 2,
             staleEmbeddingCount: 0,
+            coveredArticleCount: 0,
             embeddingCount: 0,
             coverageRatio: 0,
             pendingJobs: 0,
@@ -1600,7 +1601,8 @@ describe("server API vertical slice", () => {
       });
 
       expect(status.statusCode, status.body).toBe(200);
-      expect(status.json()).toMatchObject({
+      const body = status.json();
+      expect(body).toMatchObject({
         data: {
           mode: "personalized",
           coverage: {
@@ -1608,21 +1610,23 @@ describe("server API vertical slice", () => {
             eligibleArticleCount: 2,
             missingEmbeddingCount: 0,
             staleEmbeddingCount: 0,
+            coveredArticleCount: 2,
             embeddingCount: 2,
             coverageRatio: 1,
             pendingJobs: 0,
-            failedJobs: 1,
-            lastFailedAt: "1970-01-01T00:00:07.100Z",
-            lastError: "Provider request failed"
-          },
-          warnings: expect.arrayContaining([
-            {
-              code: "EMBEDDING_JOB_FAILED",
-              message: "Embedding generation has failed jobs for the active index."
-            }
-          ])
+            failedJobs: 0,
+            lastFailedAt: null,
+            lastError: null
+          }
         }
       });
+      expect(body.data.warnings).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "EMBEDDING_JOB_FAILED"
+          })
+        ])
+      );
     } finally {
       await app.close();
       db.close();

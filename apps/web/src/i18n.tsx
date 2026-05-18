@@ -264,6 +264,7 @@ export const zhCN = {
           `${model} · ${status} · ${count} 条 embedding`,
         coverage: (embeddingCount: number, candidateCount: number, ratio: string) =>
           `${embeddingCount} / ${candidateCount} · ${ratio}`,
+        indexTotal: (count: number) => `索引总量：${count} 条 embedding`,
         coverageUnavailable: "Coverage 暂不可用",
         pendingJobs: (count: number) => `待处理 ${count}`,
         failedJobs: (count: number) => `失败 ${count}`,
@@ -272,11 +273,14 @@ export const zhCN = {
         noJobFailures: "暂无 embedding job 失败。",
         rebuild: "重建向量索引",
         rebuilding: "已加入",
+        backfill: "补齐缺失向量",
+        backfilling: "已加入",
         notices: {
           saved: "Embedding provider 已保存。",
           tested: "连接测试成功。",
           deleted: "Embedding provider 已删除。",
-          rebuildQueued: "Embedding index 重建已加入队列。"
+          rebuildQueued: "Embedding index 重建已加入队列。",
+          backfillQueued: "Embedding backfill 已加入队列。"
         },
         errors: {
           nameRequired: "请输入 provider 名称。",
@@ -968,6 +972,7 @@ export const enUS = {
           `${model} · ${status} · ${count} ${count === 1 ? "embedding" : "embeddings"}`,
         coverage: (embeddingCount: number, candidateCount: number, ratio: string) =>
           `${embeddingCount} / ${candidateCount} · ${ratio}`,
+        indexTotal: (count: number) => `Index total: ${count} ${count === 1 ? "embedding" : "embeddings"}`,
         coverageUnavailable: "Coverage unavailable",
         pendingJobs: (count: number) => `${count} pending`,
         failedJobs: (count: number) => `${count} failed`,
@@ -976,11 +981,14 @@ export const enUS = {
         noJobFailures: "No embedding job failures.",
         rebuild: "Rebuild vector index",
         rebuilding: "Queued",
+        backfill: "Backfill missing vectors",
+        backfilling: "Queued",
         notices: {
           saved: "Embedding provider saved.",
           tested: "Connection test succeeded.",
           deleted: "Embedding provider deleted.",
-          rebuildQueued: "Embedding index rebuild queued."
+          rebuildQueued: "Embedding index rebuild queued.",
+          backfillQueued: "Embedding backfill queued."
         },
         errors: {
           nameRequired: "Enter a provider name.",

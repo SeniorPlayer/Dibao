@@ -325,8 +325,10 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
       this.db
         .prepare(
           `
-            with eligible_articles as (
-              select count(*) as candidateCount
+            with eligible_article_rows as (
+              select
+                a.id as articleId,
+                coalesce(a.content_hash, a.id || ':' || a.updated_at) as contentHash
               from articles a
               join feeds f on f.id = a.feed_id
               left join article_contents ac on ac.article_id = a.id
@@ -336,17 +338,47 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
                 and f.enabled = 1
                 and trim(coalesce(a.title, '') || ' ' || coalesce(a.summary, '') || ' ' || coalesce(ac.content_text, '')) != ''
             ),
+            eligible_articles as (
+              select count(*) as candidateCount
+              from eligible_article_rows
+            ),
             job_diagnostics as (
               select
                 json_extract(j.payload_json, '$.embeddingIndexId') as embeddingIndexId,
-                sum(case when j.status in ('queued', 'running') then 1 else 0 end) as pendingJobs,
-                sum(case when j.status = 'failed' then 1 else 0 end) as failedJobs,
-                max(case when j.status = 'failed' then coalesce(j.finished_at, j.updated_at) else null end) as lastFailedAt
+                sum(case when j.status in ('queued', 'running') then 1 else 0 end) as pendingJobs
               from jobs j
               where j.type = 'embedding_generate'
                 and j.payload_json is not null
                 and json_valid(j.payload_json)
               group by json_extract(j.payload_json, '$.embeddingIndexId')
+            ),
+            failed_job_articles as (
+              select
+                json_extract(j.payload_json, '$.embeddingIndexId') as embeddingIndexId,
+                j.id as jobId,
+                j.error as error,
+                coalesce(j.finished_at, j.updated_at) as failedAt,
+                article.value as articleId
+              from jobs j,
+                json_each(j.payload_json, '$.articleIds') article
+              where j.type = 'embedding_generate'
+                and j.status = 'failed'
+                and j.payload_json is not null
+                and json_valid(j.payload_json)
+            ),
+            actionable_failed_jobs as (
+              select
+                fja.embeddingIndexId,
+                count(distinct fja.jobId) as failedJobs,
+                max(fja.failedAt) as lastFailedAt
+              from failed_job_articles fja
+              join eligible_article_rows ear on ear.articleId = fja.articleId
+              left join article_embeddings ae
+                on ae.article_id = ear.articleId
+               and ae.embedding_index_id = fja.embeddingIndexId
+              where ae.article_id is null
+                or ae.content_hash != ear.contentHash
+              group by fja.embeddingIndexId
             )
             select
               ei.id,
@@ -362,34 +394,28 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
               ea.candidateCount as eligibleArticleCount,
               (
                 select count(*)
-                from articles a
-                join feeds f on f.id = a.feed_id
-                left join article_contents ac on ac.article_id = a.id
+                from eligible_article_rows ear
                 left join article_embeddings ae
-                  on ae.article_id = a.id
+                  on ae.article_id = ear.articleId
                  and ae.embedding_index_id = ei.id
-                where a.deleted_at is null
-                  and a.status != 'deleted'
-                  and f.deleted_at is null
-                  and f.enabled = 1
-                  and trim(coalesce(a.title, '') || ' ' || coalesce(a.summary, '') || ' ' || coalesce(ac.content_text, '')) != ''
-                  and ae.article_id is null
+                where ae.article_id is null
               ) as missingEmbeddingCount,
               (
                 select count(*)
-                from articles a
-                join feeds f on f.id = a.feed_id
-                left join article_contents ac on ac.article_id = a.id
+                from eligible_article_rows ear
                 join article_embeddings ae
-                  on ae.article_id = a.id
+                  on ae.article_id = ear.articleId
                  and ae.embedding_index_id = ei.id
-                where a.deleted_at is null
-                  and a.status != 'deleted'
-                  and f.deleted_at is null
-                  and f.enabled = 1
-                  and trim(coalesce(a.title, '') || ' ' || coalesce(a.summary, '') || ' ' || coalesce(ac.content_text, '')) != ''
-                  and ae.content_hash != coalesce(a.content_hash, a.id || ':' || a.updated_at)
+                where ae.content_hash != ear.contentHash
               ) as staleEmbeddingCount,
+              (
+                select count(*)
+                from eligible_article_rows ear
+                join article_embeddings ae
+                  on ae.article_id = ear.articleId
+                 and ae.embedding_index_id = ei.id
+                where ae.content_hash = ear.contentHash
+              ) as coveredArticleCount,
               (
                 select count(*)
                 from article_embeddings ae
@@ -397,22 +423,27 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
               ) as embeddingCount,
               0 as coverageRatio,
               coalesce(jd.pendingJobs, 0) as pendingJobs,
-              coalesce(jd.failedJobs, 0) as failedJobs,
-              jd.lastFailedAt as lastFailedAt,
+              coalesce(afj.failedJobs, 0) as failedJobs,
+              afj.lastFailedAt as lastFailedAt,
               (
-                select j.error
-                from jobs j
-                where j.type = 'embedding_generate'
-                  and j.status = 'failed'
-                  and j.payload_json is not null
-                  and json_valid(j.payload_json)
-                  and json_extract(j.payload_json, '$.embeddingIndexId') = ei.id
-                order by coalesce(j.finished_at, j.updated_at) desc, j.id desc
+                select fja.error
+                from failed_job_articles fja
+                join eligible_article_rows ear on ear.articleId = fja.articleId
+                left join article_embeddings ae
+                  on ae.article_id = ear.articleId
+                 and ae.embedding_index_id = fja.embeddingIndexId
+                where fja.embeddingIndexId = ei.id
+                  and (
+                    ae.article_id is null
+                    or ae.content_hash != ear.contentHash
+                  )
+                order by fja.failedAt desc, fja.jobId desc
                 limit 1
               ) as lastError
             from embedding_indexes ei
             cross join eligible_articles ea
             left join job_diagnostics jd on jd.embeddingIndexId = ei.id
+            left join actionable_failed_jobs afj on afj.embeddingIndexId = ei.id
             order by
               case ei.status
                 when 'active' then 0
@@ -427,7 +458,7 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
         .all() as EmbeddingIndexListRow[]
     ).map((row) => ({
       ...row,
-      coverageRatio: coverageRatio(row.embeddingCount, row.candidateCount)
+      coverageRatio: coverageRatio(row.coveredArticleCount, row.candidateCount)
     }));
   }
 
@@ -512,8 +543,8 @@ function mapProvider(row: EmbeddingProviderDbRow): EmbeddingProviderRow {
   };
 }
 
-function coverageRatio(embeddingCount: number, candidateCount: number): number {
-  return candidateCount === 0 ? 0 : embeddingCount / candidateCount;
+function coverageRatio(coveredArticleCount: number, candidateCount: number): number {
+  return candidateCount === 0 ? 0 : Math.min(1, coveredArticleCount / candidateCount);
 }
 
 function baseIndexSelect(): string {

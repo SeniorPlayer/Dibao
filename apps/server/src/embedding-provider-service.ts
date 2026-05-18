@@ -40,6 +40,7 @@ export type EmbeddingIndexResponse = {
   eligibleArticleCount: number;
   missingEmbeddingCount: number;
   staleEmbeddingCount: number;
+  coveredArticleCount: number;
   embeddingCount: number;
   coverageRatio: number;
   pendingJobs: number;
@@ -579,6 +580,7 @@ function mapIndex(index: EmbeddingIndexListRow): EmbeddingIndexResponse {
     eligibleArticleCount: index.eligibleArticleCount,
     missingEmbeddingCount: index.missingEmbeddingCount,
     staleEmbeddingCount: index.staleEmbeddingCount,
+    coveredArticleCount: index.coveredArticleCount,
     embeddingCount: index.embeddingCount,
     coverageRatio: index.coverageRatio,
     pendingJobs: index.pendingJobs,

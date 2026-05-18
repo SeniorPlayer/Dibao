@@ -750,6 +750,7 @@ describe("web i18n", () => {
     const html = renderToStaticMarkup(
       <DibaoI18nProvider>
         <SettingsWorkspace
+          backfillingIndexId={null}
           deletingProviderId={null}
           embeddingError={null}
           embeddingIndexes={[]}
@@ -761,7 +762,8 @@ describe("web i18n", () => {
           isSaving={false}
           rebuildingIndexId={null}
           testingProviderId={null}
-          onDeleteEmbeddingProvider={() => Promise.resolve()}
+                    onBackfillEmbeddingIndex={() => Promise.resolve()}
+onDeleteEmbeddingProvider={() => Promise.resolve()}
           onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
@@ -777,6 +779,7 @@ describe("web i18n", () => {
     expect(html).toContain("界面语言");
     expect(html).toContain("查看算法透明说明");
     expect(html).toContain("稍后读中的文章读完后，自动移出稍后读");
+    expect(html).toContain("type=\"range\"");
     expect(html).toContain("字号");
     expect(html).toContain("行高");
     expect(html).toContain("段距");
@@ -797,6 +800,7 @@ describe("web i18n", () => {
     const html = renderToStaticMarkup(
       <DibaoI18nProvider>
         <SettingsWorkspace
+          backfillingIndexId={null}
           deletingProviderId={null}
           embeddingError={null}
           embeddingIndexes={[
@@ -808,6 +812,7 @@ describe("web i18n", () => {
               distanceMetric: "cosine",
               status: "active",
               candidateCount: 10,
+              coveredArticleCount: 6,
               embeddingCount: 6,
               coverageRatio: 0.6,
               pendingJobs: 2,
@@ -843,7 +848,8 @@ describe("web i18n", () => {
           isSaving={false}
           rebuildingIndexId={null}
           testingProviderId={null}
-          onDeleteEmbeddingProvider={() => Promise.resolve()}
+                    onBackfillEmbeddingIndex={() => Promise.resolve()}
+onDeleteEmbeddingProvider={() => Promise.resolve()}
           onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
@@ -859,9 +865,11 @@ describe("web i18n", () => {
     expect(html).toContain("连接测试成功");
     expect(html).toContain("Embedding job 状态");
     expect(html).toContain("6 / 10 · 60%");
+    expect(html).toContain("索引总量：6 条 embedding");
     expect(html).toContain("待处理 2");
     expect(html).toContain("失败 1");
     expect(html).toContain("错误：Provider request failed");
+    expect(html).toContain("补齐缺失向量");
     expect(html).toContain("重建向量索引");
     expect(html).toContain("bge-m3");
     expect(html).toContain("1024");

@@ -332,6 +332,7 @@ describe("web API client", () => {
     await api.testEmbeddingProvider("provider/openai");
     await api.listEmbeddingIndexes();
     await api.rebuildEmbeddingIndex("index/openai");
+    await api.backfillEmbeddingIndex("index/openai");
     await api.deleteEmbeddingProvider("provider/openai");
 
     expect(calls).toEqual([
@@ -373,6 +374,11 @@ describe("web API client", () => {
       },
       {
         path: "/api/embedding/indexes/index%2Fopenai/rebuild",
+        method: "POST",
+        body: null
+      },
+      {
+        path: "/api/embedding/indexes/index%2Fopenai/backfill",
         method: "POST",
         body: null
       },

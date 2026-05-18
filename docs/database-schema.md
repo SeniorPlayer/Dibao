@@ -637,8 +637,13 @@ packages/db/src/vector/sqlite-vec-vector-store.ts
 `candidateCount` 不排除 hidden/not_interested，因为它表示 embedding 生成候选，不是推荐列表候选。
 `eligibleArticleCount` 当前与 `candidateCount` 同义；`missingEmbeddingCount` 和
 `staleEmbeddingCount` 是 active/backfill 诊断用的只读投影。
-`coverageRatio = embeddingCount / candidateCount`；`candidateCount = 0` 时 API 返回 `0`。
-pending/failed/lastFailedAt/lastError 从当前 index 的 `embedding_generate` jobs 聚合。
+`coveredArticleCount` 表示当前 eligible articles 中已有匹配当前 `content_hash` 的 embedding 的数量。
+`embeddingCount` 表示当前 index 的 embedding authority table 总量，可能包含历史文章，因此可能大于
+`candidateCount`。`coverageRatio = coveredArticleCount / candidateCount`；`candidateCount = 0`
+时 API 返回 `0`。
+pending 从当前 index 的 open `embedding_generate` jobs 聚合。failed/lastFailedAt/lastError 只统计
+仍对应 missing/stale eligible article 的 actionable failed jobs；已被后续 backfill 修复的历史失败不再
+使推荐状态降级。
 
 ## 用户画像
 

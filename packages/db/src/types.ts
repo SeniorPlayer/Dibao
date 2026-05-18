@@ -673,6 +673,7 @@ export type EmbeddingIndexListRow = EmbeddingIndexRow & {
   eligibleArticleCount: number;
   missingEmbeddingCount: number;
   staleEmbeddingCount: number;
+  coveredArticleCount: number;
   embeddingCount: number;
   coverageRatio: number;
   pendingJobs: number;

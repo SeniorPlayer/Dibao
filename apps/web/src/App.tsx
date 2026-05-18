@@ -65,7 +65,8 @@ type Notice =
   | { type: "embeddingProviderSaved" }
   | { type: "embeddingProviderTested" }
   | { type: "embeddingProviderDeleted" }
-  | { type: "embeddingIndexRebuildQueued" };
+  | { type: "embeddingIndexRebuildQueued" }
+  | { type: "embeddingIndexBackfillQueued" };
 
 export type SourceSelection =
   | { type: "all" }
@@ -163,6 +164,7 @@ export function App() {
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
   const [rebuildingIndexId, setRebuildingIndexId] = useState<string | null>(null);
+  const [backfillingIndexId, setBackfillingIndexId] = useState<string | null>(null);
   const [embeddingError, setEmbeddingError] = useState<string | null>(null);
   const [feedFolders, setFeedFolders] = useState<FeedFolder[]>([]);
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -1172,6 +1174,23 @@ export function App() {
     }
   }
 
+  async function handleBackfillEmbeddingIndex(indexId: string) {
+    setBackfillingIndexId(indexId);
+    setEmbeddingError(null);
+    setNotice(null);
+
+    try {
+      await dibaoApi.backfillEmbeddingIndex(indexId);
+      await loadEmbeddingSettings();
+      await loadRecommendationStatus();
+      setNotice({ type: "embeddingIndexBackfillQueued" });
+    } catch (error) {
+      setEmbeddingError(userMessageForError(error, t.errors.api));
+    } finally {
+      setBackfillingIndexId(null);
+    }
+  }
+
   async function handleLoadMoreArticles() {
     if (!nextArticleCursor) {
       return;
@@ -1548,9 +1567,11 @@ export function App() {
             isLoading={isSettingsLoading}
             isSavingEmbeddingProvider={isSavingEmbeddingProvider}
             isSaving={isSavingSettings}
+            backfillingIndexId={backfillingIndexId}
             deletingProviderId={deletingProviderId}
             rebuildingIndexId={rebuildingIndexId}
             testingProviderId={testingProviderId}
+            onBackfillEmbeddingIndex={handleBackfillEmbeddingIndex}
             onDeleteEmbeddingProvider={handleDeleteEmbeddingProvider}
             onPreviewSettings={handlePreviewSettings}
             onRebuildEmbeddingIndex={handleRebuildEmbeddingIndex}
@@ -1924,6 +1945,7 @@ type EmbeddingProviderDraft = {
 const newEmbeddingProviderId = "__new_provider__";
 
 export function SettingsWorkspace(props: {
+  backfillingIndexId: string | null;
   deletingProviderId: string | null;
   embeddingError: string | null;
   embeddingIndexes: EmbeddingIndex[];
@@ -1935,6 +1957,7 @@ export function SettingsWorkspace(props: {
   isSaving: boolean;
   rebuildingIndexId: string | null;
   testingProviderId: string | null;
+  onBackfillEmbeddingIndex: (indexId: string) => Promise<void>;
   onDeleteEmbeddingProvider: (providerId: string) => Promise<void>;
   onOpenAlgorithmTransparency: () => void;
   onPreviewSettings: (settings: AppSettings) => void;
@@ -2108,7 +2131,7 @@ export function SettingsWorkspace(props: {
             />
             <span>{t.settings.sections.behavior.removeReadLaterOnReadComplete}</span>
           </label>
-          <NumberSettingField
+          <RangeSettingField
             id="settings-cocoon-level"
             label={t.settings.sections.behavior.cocoonLevel}
             max={10}
@@ -2457,6 +2480,7 @@ export function SettingsWorkspace(props: {
                       )}
                     </strong>
                     <p>{embeddingCoverageText(index, t)}</p>
+                    <p>{t.settings.sections.provider.indexTotal(index.embeddingCount)}</p>
                     <p>
                       {t.settings.sections.provider.embeddingJobStatusTitle}:{" "}
                       {t.settings.sections.provider.pendingJobs(index.pendingJobs)}
@@ -2476,6 +2500,16 @@ export function SettingsWorkspace(props: {
                       <p>{t.settings.sections.provider.noJobFailures}</p>
                     )}
                   </div>
+                  <button
+                    className={styles.secondaryButton}
+                    disabled={props.backfillingIndexId === index.id || index.status !== "active"}
+                    onClick={() => void props.onBackfillEmbeddingIndex(index.id)}
+                    type="button"
+                  >
+                    {props.backfillingIndexId === index.id
+                      ? t.settings.sections.provider.backfilling
+                      : t.settings.sections.provider.backfill}
+                  </button>
                   <button
                     className={styles.secondaryButton}
                     disabled={props.rebuildingIndexId === index.id}
@@ -2564,7 +2598,7 @@ export function AlgorithmTransparencyPage(props: {
                 <dt>{t.algorithmTransparency.fields.coverage}</dt>
                 <dd>
                   {t.settings.sections.provider.coverage(
-                    props.status.coverage.embeddingCount,
+                    props.status.coverage.coveredArticleCount ?? props.status.coverage.embeddingCount,
                     props.status.coverage.candidateCount,
                     formatPercent(props.status.coverage.coverageRatio)
                   )}
@@ -2808,6 +2842,42 @@ function NumberSettingField(props: {
           value={props.value}
         />
         {props.unit ? <small>{props.unit}</small> : null}
+      </div>
+    </label>
+  );
+}
+
+function RangeSettingField(props: {
+  id: string;
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: string) => void;
+  step: number;
+  unit?: string;
+  value: string;
+}) {
+  return (
+    <label className={styles.settingsField} htmlFor={props.id}>
+      <span>{props.label}</span>
+      <div className={styles.settingsRangeRow}>
+        <input
+          id={props.id}
+          max={props.max}
+          min={props.min}
+          onChange={(event) => props.onChange(event.target.value)}
+          step={props.step}
+          type="range"
+          value={props.value}
+        />
+        <strong>
+          {props.value}
+          {props.unit ? ` ${props.unit}` : ""}
+        </strong>
+      </div>
+      <div className={styles.settingsRangeScale} aria-hidden="true">
+        <span>{props.min}</span>
+        <span>{props.max}</span>
       </div>
     </label>
   );
@@ -4564,6 +4634,8 @@ function noticeTextFor(notice: Notice, t: Dictionary): string {
       return t.settings.sections.provider.notices.deleted;
     case "embeddingIndexRebuildQueued":
       return t.settings.sections.provider.notices.rebuildQueued;
+    case "embeddingIndexBackfillQueued":
+      return t.settings.sections.provider.notices.backfillQueued;
   }
 }
 
@@ -4595,13 +4667,14 @@ function recommendationStatusMetrics(
 function embeddingCoverageText(index: EmbeddingIndex, t: Dictionary): string {
   if (
     typeof index.candidateCount !== "number" ||
+    typeof index.coveredArticleCount !== "number" ||
     typeof index.coverageRatio !== "number"
   ) {
     return t.settings.sections.provider.coverageUnavailable;
   }
 
   return t.settings.sections.provider.coverage(
-    index.embeddingCount,
+    index.coveredArticleCount,
     index.candidateCount,
     formatPercent(index.coverageRatio)
   );
