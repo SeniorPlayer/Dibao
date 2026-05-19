@@ -13,6 +13,7 @@ export const UI_DEFAULT_HOME_VIEW_SETTING_KEY = "ui.defaultHomeView";
 export const READER_SETTINGS_KEY = "reader.settings";
 export const BEHAVIOR_SETTINGS_KEY = "behavior.settings";
 export const RECOMMENDATION_SETTINGS_KEY = "recommendation.settings";
+export const RECOMMENDATION_MAINTENANCE_SETTINGS_KEY = "recommendation.maintenanceSettings";
 
 export const supportedSettingsLocales = ["zh-CN", "en-US"] as const;
 export type SettingsLocale = (typeof supportedSettingsLocales)[number];
@@ -52,6 +53,19 @@ export type AppSettings = {
     explorationEnabled: boolean;
     evaluationEnabled: boolean;
   };
+  recommendationMaintenance: RecommendationMaintenanceSettings;
+};
+
+export type RecommendationMaintenanceSettings = {
+  maintenanceEnabled: boolean;
+  recentIntentAutoRebuildEnabled: boolean;
+  keywordAutoRebuildEnabled: boolean;
+  duplicateAutoRebuildEnabled: boolean;
+  ftrlAutoTrainEnabled: boolean;
+  ftrlAutoPromoteEnabled: boolean;
+  evaluationAutoRunEnabled: boolean;
+  evaluationAutoRunIntervalDays: number;
+  embeddingHealthAutoBackfillEnabled: boolean;
 };
 
 export type UpdateSettingsResult = {
@@ -87,6 +101,17 @@ const DEFAULT_RANKING_SETTINGS = {
   explorationEnabled: true,
   evaluationEnabled: false
 } as const;
+export const DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS: RecommendationMaintenanceSettings = {
+  maintenanceEnabled: true,
+  recentIntentAutoRebuildEnabled: true,
+  keywordAutoRebuildEnabled: true,
+  duplicateAutoRebuildEnabled: true,
+  ftrlAutoTrainEnabled: true,
+  ftrlAutoPromoteEnabled: false,
+  evaluationAutoRunEnabled: false,
+  evaluationAutoRunIntervalDays: 7,
+  embeddingHealthAutoBackfillEnabled: true
+};
 
 const READER_RANGES = {
   fontSize: { min: 16, max: 24 },
@@ -121,6 +146,7 @@ type SettingsPatch = {
     explorationEnabled?: boolean;
     evaluationEnabled?: boolean;
   };
+  recommendationMaintenance?: Partial<RecommendationMaintenanceSettings>;
 };
 
 export class SettingsServiceError extends Error {
@@ -164,7 +190,8 @@ export class SettingsService {
       },
       ranking: {
         ...this.readRecommendationSettings()
-      }
+      },
+      recommendationMaintenance: this.readRecommendationMaintenanceSettings()
     };
   }
 
@@ -242,6 +269,20 @@ export class SettingsService {
         {
           ...this.readRecommendationSettings(),
           ...patch.ranking
+        },
+        now
+      );
+    }
+
+    if (
+      patch.recommendationMaintenance !== undefined &&
+      Object.keys(patch.recommendationMaintenance).length > 0
+    ) {
+      this.options.settings.setJson(
+        RECOMMENDATION_MAINTENANCE_SETTINGS_KEY,
+        {
+          ...this.readRecommendationMaintenanceSettings(),
+          ...patch.recommendationMaintenance
         },
         now
       );
@@ -381,13 +422,59 @@ export class SettingsService {
           : DEFAULT_RANKING_SETTINGS.evaluationEnabled
     };
   }
+
+  private readRecommendationMaintenanceSettings(): RecommendationMaintenanceSettings {
+    const stored = this.options.settings.getJson<unknown>(RECOMMENDATION_MAINTENANCE_SETTINGS_KEY);
+    const input = isPlainObject(stored) ? stored : {};
+
+    return {
+      maintenanceEnabled: readStoredBoolean(
+        input.maintenanceEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.maintenanceEnabled
+      ),
+      recentIntentAutoRebuildEnabled: readStoredBoolean(
+        input.recentIntentAutoRebuildEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.recentIntentAutoRebuildEnabled
+      ),
+      keywordAutoRebuildEnabled: readStoredBoolean(
+        input.keywordAutoRebuildEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.keywordAutoRebuildEnabled
+      ),
+      duplicateAutoRebuildEnabled: readStoredBoolean(
+        input.duplicateAutoRebuildEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.duplicateAutoRebuildEnabled
+      ),
+      ftrlAutoTrainEnabled: readStoredBoolean(
+        input.ftrlAutoTrainEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.ftrlAutoTrainEnabled
+      ),
+      ftrlAutoPromoteEnabled: readStoredBoolean(
+        input.ftrlAutoPromoteEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.ftrlAutoPromoteEnabled
+      ),
+      evaluationAutoRunEnabled: readStoredBoolean(
+        input.evaluationAutoRunEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.evaluationAutoRunEnabled
+      ),
+      evaluationAutoRunIntervalDays: readIntegerInRange(
+        input.evaluationAutoRunIntervalDays,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.evaluationAutoRunIntervalDays,
+        1,
+        30
+      ),
+      embeddingHealthAutoBackfillEnabled: readStoredBoolean(
+        input.embeddingHealthAutoBackfillEnabled,
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SETTINGS.embeddingHealthAutoBackfillEnabled
+      )
+    };
+  }
 }
 
 function parseSettingsPatch(body: unknown): SettingsPatch {
   const input = readBodyObject(body);
   const patch: SettingsPatch = {};
 
-  rejectUnknownKeys(input, ["ui", "reader", "retention", "behavior", "ranking"]);
+  rejectUnknownKeys(input, ["ui", "reader", "retention", "behavior", "ranking", "recommendationMaintenance"]);
 
   if (Object.hasOwn(input, "ui")) {
     patch.ui = parseUiPatch(input.ui);
@@ -407,6 +494,61 @@ function parseSettingsPatch(body: unknown): SettingsPatch {
 
   if (Object.hasOwn(input, "ranking")) {
     patch.ranking = parseRankingPatch(input.ranking);
+  }
+
+  if (Object.hasOwn(input, "recommendationMaintenance")) {
+    patch.recommendationMaintenance = parseRecommendationMaintenancePatch(
+      input.recommendationMaintenance
+    );
+  }
+
+  return patch;
+}
+
+function parseRecommendationMaintenancePatch(
+  value: unknown
+): NonNullable<SettingsPatch["recommendationMaintenance"]> {
+  const input = readSectionObject(value, "recommendationMaintenance");
+  rejectUnknownKeys(input, [
+    "maintenanceEnabled",
+    "recentIntentAutoRebuildEnabled",
+    "keywordAutoRebuildEnabled",
+    "duplicateAutoRebuildEnabled",
+    "ftrlAutoTrainEnabled",
+    "ftrlAutoPromoteEnabled",
+    "evaluationAutoRunEnabled",
+    "evaluationAutoRunIntervalDays",
+    "embeddingHealthAutoBackfillEnabled"
+  ], "recommendationMaintenance");
+
+  const patch: NonNullable<SettingsPatch["recommendationMaintenance"]> = {};
+  for (const key of [
+    "maintenanceEnabled",
+    "recentIntentAutoRebuildEnabled",
+    "keywordAutoRebuildEnabled",
+    "duplicateAutoRebuildEnabled",
+    "ftrlAutoTrainEnabled",
+    "ftrlAutoPromoteEnabled",
+    "evaluationAutoRunEnabled",
+    "embeddingHealthAutoBackfillEnabled"
+  ] as const) {
+    if (Object.hasOwn(input, key)) {
+      if (typeof input[key] !== "boolean") {
+        throw validationError(`recommendationMaintenance.${key} must be a boolean`, {
+          field: `recommendationMaintenance.${key}`
+        });
+      }
+      patch[key] = input[key];
+    }
+  }
+
+  if (Object.hasOwn(input, "evaluationAutoRunIntervalDays")) {
+    patch.evaluationAutoRunIntervalDays = parseIntegerField(
+      input.evaluationAutoRunIntervalDays,
+      "recommendationMaintenance.evaluationAutoRunIntervalDays",
+      1,
+      30
+    );
   }
 
   return patch;
@@ -636,6 +778,10 @@ function readOptionalStoredNumber(
     return fallback;
   }
   return value >= min && value <= max ? value : fallback;
+}
+
+function readStoredBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function readIntegerInRange(

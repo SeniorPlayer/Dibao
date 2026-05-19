@@ -198,6 +198,19 @@ export type AppSettings = {
     explorationEnabled: boolean;
     evaluationEnabled: boolean;
   };
+  recommendationMaintenance: RecommendationMaintenanceSettings;
+};
+
+export type RecommendationMaintenanceSettings = {
+  maintenanceEnabled: boolean;
+  recentIntentAutoRebuildEnabled: boolean;
+  keywordAutoRebuildEnabled: boolean;
+  duplicateAutoRebuildEnabled: boolean;
+  ftrlAutoTrainEnabled: boolean;
+  ftrlAutoPromoteEnabled: boolean;
+  evaluationAutoRunEnabled: boolean;
+  evaluationAutoRunIntervalDays: number;
+  embeddingHealthAutoBackfillEnabled: boolean;
 };
 
 export type UpdateSettingsInput = {
@@ -224,6 +237,7 @@ export type UpdateSettingsInput = {
     explorationEnabled?: boolean;
     evaluationEnabled?: boolean;
   };
+  recommendationMaintenance?: Partial<RecommendationMaintenanceSettings>;
 };
 
 export type UpdateSettingsResponse = {
@@ -391,6 +405,16 @@ export type RecommendationTransparency = RecommendationStatus & {
       backfillState: string;
       explanationAuthority: string;
       scoreAuthority: string;
+      automaticMaintenanceEnabled?: boolean;
+      settings?: RecommendationMaintenanceSettings | null;
+      schedule?: Array<{
+        taskKey: string;
+        lastEnqueuedAt: string | null;
+        lastCompletedAt: string | null;
+        lastSkippedReason: string | null;
+        lastJobId: string | null;
+        updatedAt: string;
+      }>;
     };
     moduleStatus: {
       bm25ProfileTerms: "not_active" | "empty" | "stale" | "active";
@@ -399,8 +423,12 @@ export type RecommendationTransparency = RecommendationStatus & {
         | "disabled"
         | "shadow_no_samples"
         | "insufficient_samples"
-        | "shadow_trained"
+        | "shadow_training"
+        | "ready_to_promote"
+        | "active_low_weight"
         | "active"
+        | "auto_paused"
+        | "retired"
         | "failed";
       exploration: "disabled" | "enabled_bonus_only" | "enabled_slots_active";
       evaluation: "unavailable" | "diagnostic_only" | "lightweight_replay_diagnostic" | "strict_replay";
@@ -493,6 +521,17 @@ export const defaultAppSettings: AppSettings = {
     localLearningShadowMode: false,
     explorationEnabled: true,
     evaluationEnabled: false
+  },
+  recommendationMaintenance: {
+    maintenanceEnabled: true,
+    recentIntentAutoRebuildEnabled: true,
+    keywordAutoRebuildEnabled: true,
+    duplicateAutoRebuildEnabled: true,
+    ftrlAutoTrainEnabled: true,
+    ftrlAutoPromoteEnabled: false,
+    evaluationAutoRunEnabled: false,
+    evaluationAutoRunIntervalDays: 7,
+    embeddingHealthAutoBackfillEnabled: true
   }
 };
 

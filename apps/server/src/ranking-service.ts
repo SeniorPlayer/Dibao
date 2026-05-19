@@ -18,6 +18,7 @@ import {
   type ProfileRepository,
   type RankingRepository
 } from "@dibao/db";
+import { FTRL_ACTIVE_ALPHA_CAP } from "./recommendation-maintenance-service.js";
 
 export interface ArticleRankingRecalculator {
   recalculateArticle(articleId: string): number;
@@ -1228,7 +1229,7 @@ function calculateV2Score(input: {
     !input.settings.localLearningShadowMode &&
     input.ftrlModel?.status === "active" &&
     input.ftrlModel.sampleCount >= 50
-      ? clamp(input.ftrlModel.blendAlpha, 0, 0.25)
+      ? clamp(input.ftrlModel.blendAlpha, 0, FTRL_ACTIVE_ALPHA_CAP)
       : 0;
   const score = clamp(
     ftrlBlendAlpha > 0

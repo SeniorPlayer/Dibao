@@ -108,6 +108,10 @@ import {
   RecommendationMaintenanceService,
   RecommendationMaintenanceServiceError
 } from "./recommendation-maintenance-service.js";
+import {
+  DEFAULT_RECOMMENDATION_MAINTENANCE_SCHEDULER_INTERVAL_MS,
+  RecommendationMaintenanceScheduler
+} from "./recommendation-maintenance-scheduler.js";
 import { RecommendationRankingService } from "./ranking-service.js";
 import {
   DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
@@ -214,6 +218,7 @@ type BuildServerOptions = {
   feedRefreshIntervalMs?: number;
   retentionCleanupIntervalMs?: number;
   profileDecayIntervalMs?: number;
+  recommendationMaintenanceIntervalMs?: number;
   jobRunnerIntervalMs?: number;
   jobRetryDelayMs?: number;
   embeddingFetcher?: typeof fetch;
@@ -275,6 +280,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     db,
     jobs,
     rankingJobs: rankingJobService,
+    getRankingSettings: () => settingsService.getSettings().ranking,
+    getMaintenanceSettings: () => settingsService.getSettings().recommendationMaintenance,
     now: options.now
   });
   const embeddingJobService = new EmbeddingJobService({
@@ -305,6 +312,18 @@ export function buildServer(options: BuildServerOptions = {}) {
     refreshService: feedRefreshService,
     afterRefresh: (result) => {
       enqueueEmbeddingArticles(result.articleIds);
+      const maintenanceSettings = settingsService.getSettings().recommendationMaintenance;
+      if (
+        result.articleIds.length > 0 &&
+        maintenanceSettings.maintenanceEnabled &&
+        maintenanceSettings.duplicateAutoRebuildEnabled
+      ) {
+        recommendationMaintenanceService.enqueueFingerprintBackfill();
+        const duplicateResult = recommendationMaintenanceService.enqueueDuplicateRebuild({
+          runAfter: (options.now ?? Date.now)() + 20 * 60_000
+        });
+        recommendationMaintenanceService.recordScheduleEnqueue("duplicate_hourly", duplicateResult);
+      }
     }
   });
   const feedRefreshJobService = new FeedRefreshJobService({
@@ -323,6 +342,47 @@ export function buildServer(options: BuildServerOptions = {}) {
     actions: articleActions,
     profileJobs: profileEventJobService,
     rankingJobs: rankingJobService,
+    maintenance: {
+      enqueueStrongActionMaintenance: (now) => {
+        const maintenanceSettings = settingsService.getSettings().recommendationMaintenance;
+        if (
+          !maintenanceSettings.maintenanceEnabled ||
+          (!maintenanceSettings.recentIntentAutoRebuildEnabled &&
+            !maintenanceSettings.ftrlAutoTrainEnabled)
+        ) {
+          recommendationMaintenanceService.recordScheduleSkip("recent_intent_periodic", "disabled");
+          recommendationMaintenanceService.recordScheduleSkip("ftrl_train_periodic", "disabled");
+          return null;
+        }
+
+        const results = {
+          recentIntent: maintenanceSettings.recentIntentAutoRebuildEnabled
+            ? recommendationMaintenanceService.enqueueRecentIntentRebuild({
+                runAfter: (now ?? (options.now ?? Date.now)()) + 10 * 60_000
+              })
+            : null,
+          ftrlTrain: maintenanceSettings.ftrlAutoTrainEnabled
+            ? recommendationMaintenanceService.enqueueFtrlTrain({
+                runAfter: (now ?? (options.now ?? Date.now)()) + 15 * 60_000
+              })
+            : null
+        };
+        if (results.recentIntent) {
+          recommendationMaintenanceService.recordScheduleEnqueue(
+            "recent_intent_periodic",
+            results.recentIntent
+          );
+        } else {
+          recommendationMaintenanceService.recordScheduleSkip("recent_intent_periodic", "disabled");
+        }
+        if (results.ftrlTrain) {
+          recommendationMaintenanceService.recordScheduleEnqueue("ftrl_train_periodic", results.ftrlTrain);
+        } else {
+          recommendationMaintenanceService.recordScheduleSkip("ftrl_train_periodic", "disabled");
+        }
+        return results;
+      }
+    },
     removeReadLaterOnReadComplete: () =>
       settingsService.getSettings().behavior.removeReadLaterOnReadComplete,
     now: options.now
@@ -423,6 +483,19 @@ export function buildServer(options: BuildServerOptions = {}) {
     intervalMs: options.profileDecayIntervalMs ?? DEFAULT_PROFILE_DECAY_INTERVAL_MS,
     onError: (error) => app.log.error(error)
   });
+  const recommendationMaintenanceScheduler = new RecommendationMaintenanceScheduler({
+    db,
+    jobs,
+    maintenance: recommendationMaintenanceService,
+    settings: () => settingsService.getSettings().recommendationMaintenance,
+    embeddingJobs: embeddingJobService,
+    runner: jobRunner,
+    intervalMs:
+      options.recommendationMaintenanceIntervalMs ??
+      DEFAULT_RECOMMENDATION_MAINTENANCE_SCHEDULER_INTERVAL_MS,
+    now: options.now,
+    onError: (error) => app.log.error(error)
+  });
 
   function drainBackgroundJobs(): void {
     if (backgroundJobs) {
@@ -510,10 +583,12 @@ export function buildServer(options: BuildServerOptions = {}) {
       feedRefreshScheduler.start();
       retentionCleanupScheduler.start();
       profileDecayScheduler.start();
+      recommendationMaintenanceScheduler.start();
     });
   }
 
   app.addHook("onClose", async () => {
+    recommendationMaintenanceScheduler.stop();
     profileDecayScheduler.stop();
     retentionCleanupScheduler.stop();
     feedRefreshScheduler.stop();
@@ -621,7 +696,9 @@ export function buildServer(options: BuildServerOptions = {}) {
       profiles,
       rankings,
       rankingService,
-      settings: settingsService.getSettings().ranking
+      settings: settingsService.getSettings().ranking,
+      maintenanceSettings: settingsService.getSettings().recommendationMaintenance,
+      maintenanceScheduleStates: recommendationMaintenanceService.listScheduleStates()
     })
   }));
 
@@ -1375,6 +1452,15 @@ function getRecommendationTransparency(options: {
   rankings: SqliteRankingRepository;
   rankingService: RecommendationRankingService;
   settings: ReturnType<SettingsService["getSettings"]>["ranking"];
+  maintenanceSettings?: ReturnType<SettingsService["getSettings"]>["recommendationMaintenance"];
+  maintenanceScheduleStates?: Array<{
+    taskKey: string;
+    lastEnqueuedAt: number | null;
+    lastCompletedAt: number | null;
+    lastSkippedReason: string | null;
+    lastJobId: string | null;
+    updatedAt: number;
+  }>;
 }) {
   const status = getRecommendationStatus(options);
   const fallbackReason =
@@ -1407,10 +1493,20 @@ function getRecommendationTransparency(options: {
       moduleStatus,
       algorithmModules: recommendationAlgorithmModules(status, moduleStatus),
       maintenance: {
-        schemaMigration: "005_recommendation_v2_completion",
+        schemaMigration: "006_recommendation_maintenance_schedule",
         backfillState: "tracked in recommendation_backfill_state",
         explanationAuthority: "article_rank_explanations",
-        scoreAuthority: "article_rank_scores"
+        scoreAuthority: "article_rank_scores",
+        automaticMaintenanceEnabled: options.maintenanceSettings?.maintenanceEnabled ?? true,
+        settings: options.maintenanceSettings ?? null,
+        schedule: (options.maintenanceScheduleStates ?? []).map((state) => ({
+          taskKey: state.taskKey,
+          lastEnqueuedAt: timestampToIso(state.lastEnqueuedAt),
+          lastCompletedAt: timestampToIso(state.lastCompletedAt),
+          lastSkippedReason: state.lastSkippedReason,
+          lastJobId: state.lastJobId,
+          updatedAt: timestampToIsoValue(state.updatedAt)
+        }))
       },
       failureStates: {
         migrationNotCompleted: false,
@@ -1424,7 +1520,11 @@ function getRecommendationTransparency(options: {
           status.rankedArticles.base + status.rankedArticles.active === 0,
         bm25ProfileTermsActive: moduleStatus.bm25ProfileTerms === "active",
         recentIntentMissing: moduleStatus.recentIntent !== "active",
-        ftrlTrained: moduleStatus.ftrl === "shadow_trained" || moduleStatus.ftrl === "active",
+        ftrlTrained:
+          moduleStatus.ftrl === "shadow_training" ||
+          moduleStatus.ftrl === "ready_to_promote" ||
+          moduleStatus.ftrl === "active_low_weight" ||
+          moduleStatus.ftrl === "active",
         duplicateNearMatchActive: moduleStatus.duplicate === "near_duplicate_active",
         evidenceUsingDynamicFallback: moduleStatus.evidence === "dynamic_fallback",
         ftrlShadowMode: status.algorithm.localLearning.shadowMode,
@@ -1581,7 +1681,8 @@ function recommendationAlgorithmModules(
       status:
         moduleStatus.ftrl === "failed"
           ? "stopped"
-          : moduleStatus.ftrl === "active" && !status.algorithm.localLearning.shadowMode
+          : (moduleStatus.ftrl === "active" || moduleStatus.ftrl === "active_low_weight") &&
+              !status.algorithm.localLearning.shadowMode
           ? "normal"
           : "disabled",
       summary: `FTRL: ${moduleStatus.ftrl}; shadow mode: ${status.algorithm.localLearning.shadowMode}.`
@@ -1876,14 +1977,25 @@ function recommendationModuleStatus(
   const model = db
     .prepare(
       `
-        select status, sample_count as sampleCount
+        select
+          status,
+          sample_count as sampleCount,
+          blend_alpha as blendAlpha,
+          metrics_json as metricsJson
         from rank_model_versions
-        where status in ('shadow', 'active', 'failed')
+        where status in ('shadow', 'active', 'failed', 'retired')
         order by updated_at desc
         limit 1
       `
     )
-    .get() as { status: "shadow" | "active" | "failed"; sampleCount: number } | undefined;
+    .get() as
+    | {
+        status: "shadow" | "active" | "failed" | "retired";
+        sampleCount: number;
+        blendAlpha: number;
+        metricsJson: string | null;
+      }
+    | undefined;
   const nearDuplicateActive =
     scalarCount(
       db,
@@ -1930,17 +2042,7 @@ function recommendationModuleStatus(
   return {
     bm25ProfileTerms: profileTermCount > 0 ? "active" : "not_active",
     recentIntent: recentIntentActive ? "active" : "missing",
-    ftrl: !algorithm.localLearning.enabled
-      ? "disabled"
-      : model?.status === "failed"
-        ? "failed"
-        : model?.status === "active"
-          ? "active"
-          : model && model.sampleCount > 0 && model.sampleCount < 50
-            ? "insufficient_samples"
-            : model && model.sampleCount > 0
-              ? "shadow_trained"
-            : "shadow_no_samples",
+    ftrl: ftrlStatusForTransparency(model, algorithm.localLearning.enabled),
     exploration: algorithm.exploration.enabled
       ? "enabled_bonus_only"
       : "disabled",
@@ -1971,6 +2073,86 @@ function evaluationModeFromMetrics(
       : "diagnostic_only";
   } catch {
     return "diagnostic_only";
+  }
+}
+
+function ftrlStatusForTransparency(
+  model:
+    | {
+        status: "shadow" | "active" | "failed" | "retired";
+        sampleCount: number;
+        blendAlpha: number;
+        metricsJson: string | null;
+      }
+    | undefined,
+  localLearningEnabled: boolean
+):
+  | "disabled"
+  | "shadow_no_samples"
+  | "insufficient_samples"
+  | "shadow_training"
+  | "ready_to_promote"
+  | "active_low_weight"
+  | "active"
+  | "auto_paused"
+  | "retired"
+  | "failed" {
+  if (!localLearningEnabled) {
+    return "disabled";
+  }
+  if (!model) {
+    return "shadow_no_samples";
+  }
+  if (model.status === "failed") {
+    return "failed";
+  }
+  if (model.status === "retired") {
+    return "retired";
+  }
+
+  const metrics = parseJsonObject(model.metricsJson);
+  const lifecycleStatus = metrics.lifecycleStatus;
+  if (
+    lifecycleStatus === "shadow_no_samples" ||
+    lifecycleStatus === "insufficient_samples" ||
+    lifecycleStatus === "shadow_training" ||
+    lifecycleStatus === "ready_to_promote" ||
+    lifecycleStatus === "active_low_weight" ||
+    lifecycleStatus === "active" ||
+    lifecycleStatus === "auto_paused" ||
+    lifecycleStatus === "retired"
+  ) {
+    return lifecycleStatus;
+  }
+
+  const highQualitySamples =
+    typeof metrics.highQualitySamples === "number" ? metrics.highQualitySamples : model.sampleCount;
+  if (model.status === "active") {
+    return model.blendAlpha <= 0.05 ? "active_low_weight" : "active";
+  }
+  if (highQualitySamples >= 100) {
+    return "ready_to_promote";
+  }
+  if (highQualitySamples >= 50) {
+    return "shadow_training";
+  }
+  if (highQualitySamples > 0) {
+    return "insufficient_samples";
+  }
+  return "shadow_no_samples";
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
   }
 }
 

@@ -13,7 +13,7 @@ This document records the phased V2/V3 recommendation architecture and the curre
 
 ### Implemented and active by default
 
-- `004_recommendation_v2` plus append-only `005_recommendation_v2_completion`.
+- `004_recommendation_v2`, append-only `005_recommendation_v2_completion`, and append-only `006_recommendation_maintenance_schedule`.
 - Canonical rank context remains `article_rank_scores.rank_context`; there is no second `rank_context_id`.
 - Ranking jobs persist `rerank_position`, and `view=recommended` reads that canonical order before falling back to score.
 - Ranking setting changes enqueue a deduped `ranking_recalculate` job without enqueueing embedding, FTS, or vector rebuild jobs.
@@ -25,10 +25,11 @@ This document records the phased V2/V3 recommendation architecture and the curre
 - Feed source normalization writes Bayesian smoothing fields and ranking prefers them when available.
 - Recent intent rebuild uses existing embeddings only and does not call an embedding provider.
 - Offline evaluation writes `lightweight_replay_diagnostic` metrics from sampled cutoffs and labels; it is not full strict replay and not causal A/B evidence.
+- `RecommendationMaintenanceScheduler` organizes existing maintenance jobs with local due logic, SQLite schedule state, and queued/running dedupe.
 
 ### Implemented but shadow or disabled
 
-- FTRL training generates examples and weights locally. Transparency distinguishes `disabled`, `shadow_no_samples`, `insufficient_samples`, `shadow_trained`, `active`, and `failed`. It writes non-zero shadow `ftrl_score`, but final ranking uses it only after explicit local promotion, sufficient samples, `localLearningEnabled=true`, and `localLearningShadowMode=false`.
+- FTRL training generates examples and weights locally. Transparency distinguishes `disabled`, `shadow_no_samples`, `insufficient_samples`, `shadow_training`, `ready_to_promote`, `active_low_weight`, `active`, `auto_paused`, `retired`, and `failed`. It writes non-zero shadow `ftrl_score`, but final ranking uses it only after explicit local promotion or guarded auto-promotion, sufficient samples, `localLearningEnabled=true`, and `localLearningShadowMode=false`.
 - Micro-exploration currently exposes bounded local exploration bonus/slot state. It must be shown as `enabled_bonus_only` until bucket alpha/beta statistics are used for slot selection.
 
 ### Planned / disabled
@@ -46,6 +47,40 @@ rec_v2:<base|embedding>:cocoon_<level>:schema_2
 ```
 
 `rank_contexts.id` is equal to `article_rank_scores.rank_context`. Legacy contexts such as `base` and older embedding-index ids remain readable and are used as fallback.
+
+## Recommendation Automatic Maintenance Cycle
+
+The automatic cycle is a lightweight scheduler. It only enqueues existing jobs and never performs heavy work inline. All state remains in SQLite, and every automatic enqueue checks queued/running jobs before creating a new row.
+
+Real-time event-driven hooks:
+
+- RSS refresh keeps the existing `embedding_generate` enqueue path. When new/updated article ids exist, it also enqueues fingerprint backfill and a delayed deduped `duplicate_group_rebuild`.
+- Embedding completion keeps the existing profile/ranking hook.
+- Strong user actions enqueue the existing article/profile/ranking hooks and add delayed maintenance: `recent_intent_rebuild` after 10 minutes and `ftrl_train` after 15 minutes. Strong actions are favorite, like, read_later, mark_read/read_complete, hide, not_interested, and `read_progress >= 0.75`. Open, impression, and lower progress do not trigger maintenance rebuilds.
+- Profile decay and retention cleanup schedulers remain separate and unchanged.
+
+Periodic maintenance:
+
+- 15 minutes: if there are strong recent behaviors or untrained FTRL examples, enqueue deduped recent intent and FTRL train jobs.
+- Hourly: enqueue deduped recent intent and duplicate rebuilds; run embedding coverage health only when an active index exists and no embedding job is already open. Hourly ranking recalculation is only queued when a maintenance output completed since the last hourly ranking enqueue.
+- Daily: enqueue keyword profile rebuild, duplicate rebuild, recent intent rebuild, FTRL train, and ranking recalculation.
+- Weekly diagnostic: `ranking_eval_run` is disabled by default. When enabled, it runs no more often than `evaluationAutoRunIntervalDays`.
+
+Sorting impact:
+
+- Recent intent, keyword profile, duplicate groups, and FTRL train can affect `view=recommended` after a deduped `ranking_recalculate`.
+- Evaluation is diagnostic only. It does not update profile, FTRL, or ranking scores.
+- Embedding health may enqueue small active-index embedding backfill when coverage is missing/stale; it does not run on settings changes.
+- `view=latest` remains ordered by latest article time and is not affected by recommendation maintenance.
+
+FTRL lifecycle:
+
+- `< 50` high-quality samples: shadow/insufficient; no final score impact.
+- `50..99`: shadow training; still no final score impact.
+- `>= 100`: ready to promote; transparency says local learning can be enabled at 5%.
+- Active starts at `alpha = 0.05`, increases at most `0.05` every 7 days, and is capped at `0.20` (`0.25` remains the absolute historical safety ceiling).
+- Elevated hide/not_interested feedback lowers alpha; repeated deterioration can auto-pause by returning the model to shadow.
+- FTRL may train daily, but it is not automatically promoted daily. Auto-promotion is disabled by default and requires a successful local lightweight diagnostic.
 
 ## Score And Explanation Storage
 
@@ -185,6 +220,8 @@ Migration `004_recommendation_v2`:
 - expands job types with a recreate-copy-rename migration
 
 Migration `005_recommendation_v2_completion` is append-only and safe for databases that already applied `004`. It adds FTRL state columns (`z`, `n`), source normalization derived fields on `feed_stats`, and non-unique indexes for P1/P2 work. It intentionally avoids unique indexes that could fail on dirty derived rows.
+
+Migration `006_recommendation_maintenance_schedule` is append-only. It adds only `recommendation_maintenance_schedule_state` for scheduler observability and does not rewrite derived recommendation data.
 
 Live migration is gated. Use:
 

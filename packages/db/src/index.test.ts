@@ -144,6 +144,7 @@ describe("db package", () => {
         "ranking_eval_runs",
         "ranking_eval_items",
         "recommendation_backfill_state",
+        "recommendation_maintenance_schedule_state",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -175,12 +176,14 @@ describe("db package", () => {
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
       expect(hasColumn(db, "rank_model_weights", "z")).toBe(true);
       expect(hasColumn(db, "feed_stats", "clear_signal_count")).toBe(true);
+      expect(hasTableOrView(db, "recommendation_maintenance_schedule_state")).toBe(true);
 
       db.prepare(
         `
@@ -324,7 +327,8 @@ describe("db package", () => {
       const checksum004 = getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum;
 
       expect(runMigrations(db, loadDefaultMigrations(), () => 2000).map((migration) => migration.version)).toEqual([
-        "005"
+        "005",
+        "006"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -336,6 +340,7 @@ describe("db package", () => {
       expect(hasColumn(db, "rank_model_weights", "z")).toBe(true);
       expect(hasColumn(db, "feed_stats", "smoothed_positive_rate")).toBe(true);
       expect(hasIndex(db, "idx_duplicate_group_members_article_reason")).toBe(true);
+      expect(hasTableOrView(db, "recommendation_maintenance_schedule_state")).toBe(true);
     } finally {
       db.close();
     }

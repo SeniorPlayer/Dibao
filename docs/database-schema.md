@@ -12,6 +12,7 @@ packages/db/migrations/002_article_state_likes.sql
 packages/db/migrations/003_profile_event_jobs.sql
 packages/db/migrations/004_recommendation_v2.sql
 packages/db/migrations/005_recommendation_v2_completion.sql
+packages/db/migrations/006_recommendation_maintenance_schedule.sql
 ```
 
 实现时可以根据具体库和 sqlite-vec 版本调整语法，但不得改变这里定义的数据边界和所有权原则。
@@ -816,9 +817,43 @@ content_text
 
 ## 本地学习与评估派生表
 
-`rank_model_versions` / `rank_model_weights` / `rank_training_examples` 存储本地 FTRL shadow/active 模型、低维特征权重和训练样本。默认模型是 shadow；`POST /api/recommendation/ftrl/promote` 只在高质量样本足够且 `blend_alpha > 0` 时把模型标记为 active。
+`rank_model_versions` / `rank_model_weights` / `rank_training_examples` 存储本地 FTRL shadow/active 模型、低维特征权重和训练样本。默认模型是 shadow；`POST /api/recommendation/ftrl/promote` 只在高质量样本足够时把模型标记为 active。active alpha 起步 `0.05`，每 7 天最多调整 `0.05`，默认上限 `0.20`；FTRL 训练可以每日运行，但不会每日自动上线。
 
 `ranking_eval_runs.metrics_json` 当前存储 `lightweight_replay_diagnostic` 指标，例如 `cutoffCount`、`labelCount`、`hitAt10`、`ndcgAt10`、`mrr`。该表不是因果 A/B 结果；在没有完整 strict time-travel profile 前，文档和透明页都不得称为 full strict replay。
+
+## 推荐自动维护调度状态
+
+### recommendation_maintenance_schedule_state
+
+`006_recommendation_maintenance_schedule` 新增。该表只记录 scheduler 的 enqueue/skip 状态，不替代 `jobs`，也不存放外部服务状态。
+
+```text
+task_key TEXT PRIMARY KEY
+last_enqueued_at INTEGER
+last_completed_at INTEGER
+last_skipped_reason TEXT
+last_job_id TEXT
+updated_at INTEGER NOT NULL
+```
+
+常见 `task_key`：
+
+```text
+recent_intent_periodic
+recent_intent_hourly
+recent_intent_daily
+keyword_profile_daily
+duplicate_hourly
+duplicate_daily
+ftrl_train_periodic
+ftrl_train_daily
+ranking_recalculate_hourly
+ranking_recalculate_daily
+evaluation_weekly
+embedding_health_hourly
+```
+
+`last_skipped_reason` 可为 `disabled`、`existing_job`、`no_active_index`、`no_missing_or_stale_embeddings` 等。透明页读取该表展示 recent intent、keyword profile、duplicate、FTRL、evaluation、embedding health 的最近调度状态。
 
 ## 任务系统
 
@@ -852,6 +887,13 @@ ranking_recalculate
 profile_decay
 retention_cleanup
 vector_index_rebuild
+article_fingerprint_backfill
+duplicate_group_rebuild
+keyword_profile_rebuild
+recent_intent_rebuild
+ftrl_train
+ranking_eval_run
+recommendation_backfill
 ```
 
 `status` 可选值：
@@ -876,6 +918,8 @@ MVP runner 约定：
 - `embedding_generate` 只对 queued/running open jobs 去重，历史 succeeded job 不会阻止内容变更后的重新 embedding。
 - `ranking_recalculate` 全量重算通过 cursor chunk payload 续跑，默认 chunk size 为 500；指定 `articleIds` 重算仍应用可见性过滤。
 - `vector_index_rebuild` payload 目前只接受 `{ "embeddingIndexId": "string" }`。
+- 推荐维护 job payload 目前只接受 `null` 或 `{}`；automatic maintenance 只负责入队，执行逻辑仍在对应 job handler。
+- `ranking_eval_run` 是诊断 job，成功或失败都不触发 ranking/profile/FTRL 更新。
 
 API 诊断约定：
 

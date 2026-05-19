@@ -18,6 +18,9 @@ const recommendationV2Path = fileURLToPath(
 const recommendationV2CompletionPath = fileURLToPath(
   new URL("../migrations/005_recommendation_v2_completion.sql", import.meta.url)
 );
+const recommendationMaintenanceSchedulePath = fileURLToPath(
+  new URL("../migrations/006_recommendation_maintenance_schedule.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -45,6 +48,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "005",
       name: "recommendation_v2_completion",
       sql: readFileSync(recommendationV2CompletionPath, "utf8")
+    },
+    {
+      version: "006",
+      name: "recommendation_maintenance_schedule",
+      sql: readFileSync(recommendationMaintenanceSchedulePath, "utf8")
     }
   ];
 }

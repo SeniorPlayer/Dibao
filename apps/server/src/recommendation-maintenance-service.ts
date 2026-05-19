@@ -11,6 +11,11 @@ export const RECENT_INTENT_REBUILD_JOB_TYPE = "recent_intent_rebuild" as const;
 export const RANKING_EVAL_RUN_JOB_TYPE = "ranking_eval_run" as const;
 export const FTRL_TRAIN_JOB_TYPE = "ftrl_train" as const;
 export const RECOMMENDATION_BACKFILL_JOB_TYPE = "recommendation_backfill" as const;
+export const FTRL_ACTIVE_ALPHA_CAP = 0.2;
+export const FTRL_ABSOLUTE_ALPHA_CAP = 0.25;
+export const FTRL_INITIAL_ACTIVE_ALPHA = 0.05;
+const FTRL_ALPHA_STEP = 0.05;
+const FTRL_ALPHA_ADJUST_INTERVAL_MS = 7 * 86_400_000;
 
 type MaintenanceJobType =
   | typeof ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE
@@ -26,10 +31,26 @@ export type RecommendationMaintenanceResult = {
   existing: boolean;
 };
 
+export type RecommendationMaintenanceEnqueueOptions = {
+  runAfter?: number;
+  payloadJson?: string | null;
+};
+
+export type RecommendationMaintenanceScheduleState = {
+  taskKey: string;
+  lastEnqueuedAt: number | null;
+  lastCompletedAt: number | null;
+  lastSkippedReason: string | null;
+  lastJobId: string | null;
+  updatedAt: number;
+};
+
 export type RecommendationMaintenanceServiceOptions = {
   db: DibaoDatabase;
   jobs: Pick<JobRepository, "enqueue" | "listOpenByType">;
   rankingJobs: Pick<RankingRecalculateJobService, "enqueueAll">;
+  getRankingSettings?: () => { localLearningEnabled: boolean; localLearningShadowMode: boolean };
+  getMaintenanceSettings?: () => { ftrlAutoPromoteEnabled: boolean };
   now?: () => number;
   jobIdFactory?: () => string;
 };
@@ -55,7 +76,7 @@ export class RecommendationMaintenanceService {
     this.jobIdFactory = options.jobIdFactory ?? randomJobId;
   }
 
-  enqueueRecalculate(): RecommendationMaintenanceResult {
+  enqueueRecalculate(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
     const existing = this.options.jobs.listOpenByType("ranking_recalculate").find((job) => {
       try {
         return job.payloadJson === null || JSON.stringify(JSON.parse(job.payloadJson)) === "{}";
@@ -67,24 +88,133 @@ export class RecommendationMaintenanceService {
     return { jobId: job.id, existing: existing !== undefined };
   }
 
-  enqueueFingerprintBackfill(): RecommendationMaintenanceResult {
-    return this.enqueueUnique(ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE);
+  enqueueFingerprintBackfill(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE, options);
   }
 
-  enqueueDuplicateRebuild(): RecommendationMaintenanceResult {
-    return this.enqueueUnique(DUPLICATE_GROUP_REBUILD_JOB_TYPE);
+  enqueueDuplicateRebuild(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(DUPLICATE_GROUP_REBUILD_JOB_TYPE, options);
   }
 
-  enqueueKeywordRebuild(): RecommendationMaintenanceResult {
-    return this.enqueueUnique(KEYWORD_PROFILE_REBUILD_JOB_TYPE);
+  enqueueKeywordRebuild(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(KEYWORD_PROFILE_REBUILD_JOB_TYPE, options);
   }
 
-  enqueueRecentIntentRebuild(): RecommendationMaintenanceResult {
-    return this.enqueueUnique(RECENT_INTENT_REBUILD_JOB_TYPE);
+  enqueueRecentIntentRebuild(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(RECENT_INTENT_REBUILD_JOB_TYPE, options);
   }
 
-  enqueueEvaluation(): RecommendationMaintenanceResult {
-    return this.enqueueUnique(RANKING_EVAL_RUN_JOB_TYPE);
+  enqueueEvaluation(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(RANKING_EVAL_RUN_JOB_TYPE, options);
+  }
+
+  enqueueFtrlTrain(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(FTRL_TRAIN_JOB_TYPE, options);
+  }
+
+  enqueueStrongActionMaintenance(now: number = this.now()): {
+    recentIntent: RecommendationMaintenanceResult;
+    ftrlTrain: RecommendationMaintenanceResult;
+  } {
+    return {
+      recentIntent: this.enqueueRecentIntentRebuild({ runAfter: now + 10 * 60_000 }),
+      ftrlTrain: this.enqueueFtrlTrain({ runAfter: now + 15 * 60_000 })
+    };
+  }
+
+  recordScheduleEnqueue(taskKey: string, result: RecommendationMaintenanceResult): void {
+    const now = this.now();
+    this.options.db
+      .prepare(
+        `
+          insert into recommendation_maintenance_schedule_state (
+            task_key,
+            last_enqueued_at,
+            last_completed_at,
+            last_skipped_reason,
+            last_job_id,
+            updated_at
+          )
+          values (?, ?, null, ?, ?, ?)
+          on conflict(task_key) do update set
+            last_enqueued_at = case
+              when ? = 1 then recommendation_maintenance_schedule_state.last_enqueued_at
+              else excluded.last_enqueued_at
+            end,
+            last_skipped_reason = excluded.last_skipped_reason,
+            last_job_id = excluded.last_job_id,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(
+        taskKey,
+        result.existing ? null : now,
+        result.existing ? "existing_job" : null,
+        result.jobId,
+        now,
+        result.existing ? 1 : 0
+      );
+  }
+
+  recordScheduleSkip(taskKey: string, reason: string): void {
+    const now = this.now();
+    this.options.db
+      .prepare(
+        `
+          insert into recommendation_maintenance_schedule_state (
+            task_key,
+            last_enqueued_at,
+            last_completed_at,
+            last_skipped_reason,
+            last_job_id,
+            updated_at
+          )
+          values (?, null, null, ?, null, ?)
+          on conflict(task_key) do update set
+            last_skipped_reason = excluded.last_skipped_reason,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(taskKey, reason, now);
+  }
+
+  listScheduleStates(): RecommendationMaintenanceScheduleState[] {
+    return (
+      this.options.db
+        .prepare(
+          `
+            select
+              task_key as taskKey,
+              last_enqueued_at as lastEnqueuedAt,
+              last_completed_at as lastCompletedAt,
+              last_skipped_reason as lastSkippedReason,
+              last_job_id as lastJobId,
+              updated_at as updatedAt
+            from recommendation_maintenance_schedule_state
+            order by task_key
+          `
+        )
+        .all() as RecommendationMaintenanceScheduleState[]
+    );
+  }
+
+  scheduleStateFor(taskKey: string): RecommendationMaintenanceScheduleState | null {
+    const row = this.options.db
+      .prepare(
+        `
+          select
+            task_key as taskKey,
+            last_enqueued_at as lastEnqueuedAt,
+            last_completed_at as lastCompletedAt,
+            last_skipped_reason as lastSkippedReason,
+            last_job_id as lastJobId,
+            updated_at as updatedAt
+          from recommendation_maintenance_schedule_state
+          where task_key = ?
+        `
+      )
+      .get(taskKey) as RecommendationMaintenanceScheduleState | undefined;
+    return row ?? null;
   }
 
   resetFtrl(): { ok: true } {
@@ -131,11 +261,11 @@ export class RecommendationMaintenanceService {
       | undefined;
 
     const highQualitySampleCount = highQualitySampleCountFor(model?.metricsJson ?? null);
-    if (!model || model.sampleCount < 50 || highQualitySampleCount < 50 || model.blendAlpha <= 0) {
+    if (!model || model.sampleCount < 100 || highQualitySampleCount < 100) {
       throw new RecommendationMaintenanceServiceError(
         409,
         "INSUFFICIENT_FTRL_SAMPLES",
-        "FTRL model cannot be promoted until it has at least 50 high-quality local samples.",
+        "FTRL model cannot be promoted until it has at least 100 high-quality local samples.",
         {
           sampleCount: model?.sampleCount ?? 0,
           highQualitySampleCount,
@@ -150,16 +280,38 @@ export class RecommendationMaintenanceService {
         .prepare("update rank_model_versions set status = 'retired', updated_at = ? where status = 'active' and id != ?")
         .run(now, model.id);
       this.options.db
-        .prepare("update rank_model_versions set status = 'active', updated_at = ? where id = ?")
-        .run(now, model.id);
+        .prepare(
+          `
+            update rank_model_versions
+            set
+              status = 'active',
+              blend_alpha = ?,
+              metrics_json = ?,
+              updated_at = ?
+            where id = ?
+          `
+        )
+        .run(
+          clamp(Math.max(model.blendAlpha, FTRL_INITIAL_ACTIVE_ALPHA), 0, FTRL_ACTIVE_ALPHA_CAP),
+          JSON.stringify({
+            ...parseMetricsJson(model.metricsJson),
+            highQualitySamples: highQualitySampleCount,
+            lifecycleStatus: "active_low_weight",
+            lastAlphaAdjustedAt: now,
+            autoPausedReason: null
+          }),
+          now,
+          model.id
+        );
     })();
+    const blendAlpha = clamp(Math.max(model.blendAlpha, FTRL_INITIAL_ACTIVE_ALPHA), 0, FTRL_ACTIVE_ALPHA_CAP);
 
     return {
       ok: true,
       modelVersionId: model.id,
       sampleCount: model.sampleCount,
       highQualitySampleCount,
-      blendAlpha: model.blendAlpha
+      blendAlpha
     };
   }
 
@@ -171,31 +323,60 @@ export class RecommendationMaintenanceService {
     switch (job.type) {
       case ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE:
         this.backfillFingerprints();
+        this.markScheduleCompleted(job.id);
         return;
       case DUPLICATE_GROUP_REBUILD_JOB_TYPE:
         this.rebuildDuplicateGroups();
+        this.options.rankingJobs.enqueueAll();
+        this.markScheduleCompleted(job.id);
         return;
       case KEYWORD_PROFILE_REBUILD_JOB_TYPE:
         this.rebuildKeywordProfile();
+        this.options.rankingJobs.enqueueAll();
+        this.markScheduleCompleted(job.id);
         return;
       case RECENT_INTENT_REBUILD_JOB_TYPE:
         this.rebuildRecentIntent();
+        this.options.rankingJobs.enqueueAll();
+        this.markScheduleCompleted(job.id);
         return;
       case RANKING_EVAL_RUN_JOB_TYPE:
         this.runReplayEvaluation();
+        this.markScheduleCompleted(job.id);
         return;
       case FTRL_TRAIN_JOB_TYPE:
         this.trainFtrl();
+        this.options.rankingJobs.enqueueAll();
+        this.markScheduleCompleted(job.id);
         return;
       case RECOMMENDATION_BACKFILL_JOB_TYPE:
         this.touchBackfillState(job.type, "succeeded", null);
+        this.markScheduleCompleted(job.id);
         return;
       default:
         throw new PermanentJobFailure(`Unsupported recommendation maintenance job: ${job.type}`);
     }
   }
 
-  private enqueueUnique(type: MaintenanceJobType): RecommendationMaintenanceResult {
+  private markScheduleCompleted(jobId: string): void {
+    const now = this.now();
+    this.options.db
+      .prepare(
+        `
+          update recommendation_maintenance_schedule_state
+          set
+            last_completed_at = ?,
+            updated_at = ?
+          where last_job_id = ?
+        `
+      )
+      .run(now, now, jobId);
+  }
+
+  private enqueueUnique(
+    type: MaintenanceJobType,
+    options: RecommendationMaintenanceEnqueueOptions = {}
+  ): RecommendationMaintenanceResult {
     const existing = this.options.jobs.listOpenByType(type)[0];
     if (existing) {
       return { jobId: existing.id, existing: true };
@@ -205,10 +386,10 @@ export class RecommendationMaintenanceService {
     const job = this.options.jobs.enqueue({
       id: this.jobIdFactory(),
       type,
-      payloadJson: null,
+      payloadJson: options.payloadJson ?? null,
       maxAttempts: 1,
       now,
-      runAfter: now
+      runAfter: options.runAfter ?? now
     });
     return { jobId: job.id, existing: false };
   }
@@ -698,6 +879,7 @@ export class RecommendationMaintenanceService {
             'favorite',
             'like',
             'read_later',
+            'mark_read',
             'read_complete',
             'read_progress',
             'open',
@@ -731,9 +913,17 @@ export class RecommendationMaintenanceService {
       .map((row) => trainingExampleFor(row))
       .filter((example): example is NonNullable<typeof example> => example !== null);
     const highQualitySamples = examples.filter((example) => example.sampleWeight >= 0.75).length;
-    const status = existingModelStatus(this.options.db, modelId) ?? "shadow";
-    const blendAlpha =
-      highQualitySamples >= 50 ? Math.min(0.25, ((highQualitySamples - 50) / 150) * 0.25) : 0;
+    const existingModel = existingModelFor(this.options.db, modelId);
+    const status = existingModel?.status === "active" ? "active" : "shadow";
+    const existingMetrics = parseMetricsJson(existingModel?.metricsJson ?? null);
+    const lifecycle = ftrlLifecycleFor({
+      db: this.options.db,
+      now,
+      status,
+      existingBlendAlpha: existingModel?.blendAlpha ?? 0,
+      existingMetrics,
+      highQualitySamples
+    });
 
     this.options.db.transaction(() => {
       this.options.db
@@ -760,10 +950,17 @@ export class RecommendationMaintenanceService {
         )
         .run(
           modelId,
-          status,
+          lifecycle.status,
           examples.length,
-          blendAlpha,
-          JSON.stringify({ highQualitySamples, mode: status }),
+          lifecycle.blendAlpha,
+          JSON.stringify({
+            ...existingMetrics,
+            highQualitySamples,
+            lifecycleStatus: lifecycle.lifecycleStatus,
+            mode: lifecycle.status,
+            lastAlphaAdjustedAt: lifecycle.lastAlphaAdjustedAt,
+            autoPausedReason: lifecycle.autoPausedReason
+          }),
           now,
           now
         );
@@ -827,6 +1024,47 @@ export class RecommendationMaintenanceService {
       }
       this.touchBackfillState("ftrl_train", "succeeded", examples.length);
     })();
+    this.maybeAutoPromoteFtrl(modelId, highQualitySamples);
+  }
+
+  private maybeAutoPromoteFtrl(modelId: string, highQualitySamples: number): void {
+    const maintenanceSettings = this.options.getMaintenanceSettings?.();
+    const rankingSettings = this.options.getRankingSettings?.();
+    if (
+      !maintenanceSettings?.ftrlAutoPromoteEnabled ||
+      !rankingSettings?.localLearningEnabled ||
+      rankingSettings.localLearningShadowMode ||
+      highQualitySamples < 150
+    ) {
+      return;
+    }
+
+    const latestEvaluation = this.options.db
+      .prepare(
+        `
+          select metrics_json as metricsJson
+          from ranking_eval_runs
+          where status = 'succeeded'
+          order by created_at desc
+          limit 1
+        `
+      )
+      .get() as { metricsJson: string | null } | undefined;
+    const metrics = parseMetricsJson(latestEvaluation?.metricsJson ?? null);
+    if (metrics.evaluationMode !== "lightweight_replay_diagnostic" || metrics.diagnosticOnly !== true) {
+      return;
+    }
+
+    if (hasElevatedNegativeFeedback(this.options.db, this.now())) {
+      return;
+    }
+
+    const model = existingModelFor(this.options.db, modelId);
+    if (!model || model.status !== "shadow" || model.blendAlpha <= 0) {
+      return;
+    }
+
+    this.promoteFtrl();
   }
 
   private runReplayEvaluation(): void {
@@ -1007,6 +1245,7 @@ function keywordPolarity(
     case "favorite":
     case "like":
     case "read_later":
+    case "mark_read":
     case "read_complete":
       return "positive";
     case "read_progress": {
@@ -1038,6 +1277,7 @@ function keywordEventWeight(
       return 2.6;
     case "read_later":
       return 2;
+    case "mark_read":
     case "read_complete":
       return 2.4;
     case "read_progress": {
@@ -1161,6 +1401,7 @@ function labelAndWeightForEvent(
       return { label: 1, sampleWeight: 1.5 };
     case "read_later":
       return { label: 0.9, sampleWeight: 1.3 };
+    case "mark_read":
     case "read_complete":
       return { label: 0.85, sampleWeight: 1.2 };
     case "read_progress":
@@ -1229,6 +1470,146 @@ function trainFtrlWeights(
   return states;
 }
 
+type FtrlLifecycleStatus =
+  | "shadow_no_samples"
+  | "insufficient_samples"
+  | "shadow_training"
+  | "ready_to_promote"
+  | "active_low_weight"
+  | "active"
+  | "auto_paused"
+  | "retired";
+
+type FtrlMetricsJson = {
+  highQualitySamples?: number;
+  lastAlphaAdjustedAt?: number | null;
+  autoPausedReason?: string | null;
+  lifecycleStatus?: FtrlLifecycleStatus;
+  [key: string]: unknown;
+};
+
+function ftrlLifecycleFor(input: {
+  db: DibaoDatabase;
+  now: number;
+  status: "shadow" | "active";
+  existingBlendAlpha: number;
+  existingMetrics: FtrlMetricsJson;
+  highQualitySamples: number;
+}): {
+  status: "shadow" | "active";
+  blendAlpha: number;
+  lifecycleStatus: FtrlLifecycleStatus;
+  lastAlphaAdjustedAt: number | null;
+  autoPausedReason: string | null;
+} {
+  if (input.highQualitySamples <= 0) {
+    return {
+      status: "shadow",
+      blendAlpha: 0,
+      lifecycleStatus: "shadow_no_samples",
+      lastAlphaAdjustedAt: null,
+      autoPausedReason: null
+    };
+  }
+
+  if (input.status !== "active") {
+    return {
+      status: "shadow",
+      blendAlpha: input.highQualitySamples >= 100 ? FTRL_INITIAL_ACTIVE_ALPHA : 0,
+      lifecycleStatus:
+        input.highQualitySamples >= 100
+          ? "ready_to_promote"
+          : input.highQualitySamples >= 50
+            ? "shadow_training"
+            : "insufficient_samples",
+      lastAlphaAdjustedAt: null,
+      autoPausedReason: null
+    };
+  }
+
+  const lastAlphaAdjustedAt =
+    typeof input.existingMetrics.lastAlphaAdjustedAt === "number"
+      ? input.existingMetrics.lastAlphaAdjustedAt
+      : null;
+  const negativeFeedbackIsHigh = hasElevatedNegativeFeedback(input.db, input.now);
+  let blendAlpha = clamp(
+    Math.max(input.existingBlendAlpha, FTRL_INITIAL_ACTIVE_ALPHA),
+    0,
+    FTRL_ACTIVE_ALPHA_CAP
+  );
+  let nextLastAlphaAdjustedAt = lastAlphaAdjustedAt;
+  let autoPausedReason: string | null =
+    typeof input.existingMetrics.autoPausedReason === "string"
+      ? input.existingMetrics.autoPausedReason
+      : null;
+
+  if (
+    lastAlphaAdjustedAt === null ||
+    input.now - lastAlphaAdjustedAt >= FTRL_ALPHA_ADJUST_INTERVAL_MS
+  ) {
+    if (negativeFeedbackIsHigh) {
+      blendAlpha = Math.max(0, Number((blendAlpha - FTRL_ALPHA_STEP).toFixed(4)));
+      autoPausedReason = "negative_feedback_elevated";
+      nextLastAlphaAdjustedAt = input.now;
+    } else if (autoPausedReason === null) {
+      blendAlpha = Math.min(
+        FTRL_ACTIVE_ALPHA_CAP,
+        Number((blendAlpha + FTRL_ALPHA_STEP).toFixed(4))
+      );
+      nextLastAlphaAdjustedAt = input.now;
+    }
+  }
+
+  if (blendAlpha <= 0 && negativeFeedbackIsHigh) {
+    return {
+      status: "shadow",
+      blendAlpha: 0,
+      lifecycleStatus: "auto_paused",
+      lastAlphaAdjustedAt: nextLastAlphaAdjustedAt,
+      autoPausedReason: "negative_feedback_elevated"
+    };
+  }
+
+  return {
+    status: "active",
+    blendAlpha: clamp(blendAlpha, 0, FTRL_ACTIVE_ALPHA_CAP),
+    lifecycleStatus: blendAlpha <= 0.05 ? "active_low_weight" : "active",
+    lastAlphaAdjustedAt: nextLastAlphaAdjustedAt,
+    autoPausedReason
+  };
+}
+
+function hasElevatedNegativeFeedback(db: DibaoDatabase, now: number): boolean {
+  const row = db
+    .prepare(
+      `
+        select
+          count(*) as total,
+          sum(case when event_type in ('hide', 'not_interested') then 1 else 0 end) as negative
+        from behavior_events
+        where created_at >= ?
+      `
+    )
+    .get(now - 7 * 86_400_000) as { total: number; negative: number | null } | undefined;
+  const total = row?.total ?? 0;
+  if (total < 20) {
+    return false;
+  }
+  return ((row?.negative ?? 0) / total) >= 0.35;
+}
+
+function existingModelFor(
+  db: DibaoDatabase,
+  modelId: string
+): { status: "shadow" | "active" | "retired" | "failed"; blendAlpha: number; metricsJson: string | null } | null {
+  const row = db
+    .prepare("select status, blend_alpha as blendAlpha, metrics_json as metricsJson from rank_model_versions where id = ?")
+    .get(modelId) as
+    | { status: "shadow" | "active" | "retired" | "failed"; blendAlpha: number; metricsJson: string | null }
+    | undefined;
+  return row ?? null;
+}
+
 function existingModelStatus(
   db: DibaoDatabase,
   modelId: string
@@ -1251,6 +1632,20 @@ function highQualitySampleCountFor(metricsJson: string | null): number {
   }
 }
 
+function parseMetricsJson(metricsJson: string | null): FtrlMetricsJson {
+  if (!metricsJson) {
+    return {};
+  }
+  try {
+    const metrics = JSON.parse(metricsJson) as unknown;
+    return typeof metrics === "object" && metrics !== null && !Array.isArray(metrics)
+      ? (metrics as FtrlMetricsJson)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function replayMetricsFor(
   db: DibaoDatabase,
   cutoffs: number[]
@@ -1268,7 +1663,7 @@ function replayMetricsFor(
           from behavior_events
           where created_at > ?
             and created_at <= ?
-            and event_type in ('favorite', 'like', 'read_later', 'read_complete')
+            and event_type in ('favorite', 'like', 'read_later', 'mark_read', 'read_complete')
           limit 50
         `
       )
@@ -1360,7 +1755,7 @@ function lightweightReplayTerms(db: DibaoDatabase, cutoff: number): Set<string> 
         from behavior_events be
         join articles a on a.id = be.article_id
         where be.created_at < ?
-          and be.event_type in ('favorite', 'like', 'read_later', 'read_complete', 'read_progress')
+          and be.event_type in ('favorite', 'like', 'read_later', 'mark_read', 'read_complete', 'read_progress')
         order by be.created_at desc
         limit 100
       `

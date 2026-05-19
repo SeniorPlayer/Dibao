@@ -2718,6 +2718,12 @@ export function AlgorithmTransparencyPage(props: {
                   <dd>{transparency.currentFormula}</dd>
                 </div>
               ) : null}
+              {transparency?.maintenance ? (
+                <div>
+                  <dt>{t.algorithmTransparency.fields.automaticMaintenance}</dt>
+                  <dd>{formatMaintenanceSchedule(transparency.maintenance)}</dd>
+                </div>
+              ) : null}
               {transparency ? (
                 <div>
                   <dt>{t.algorithmTransparency.fields.failureStates}</dt>
@@ -4778,6 +4784,27 @@ function embeddingCoverageText(index: EmbeddingIndex, t: Dictionary): string {
 
 function formatPercent(value: number): string {
   return `${Math.round(clampNumber(value, 0, 1) * 100)}%`;
+}
+
+function formatMaintenanceSchedule(
+  maintenance: RecommendationTransparency["transparency"]["maintenance"]
+): string {
+  const enabled = maintenance.automaticMaintenanceEnabled === false ? "off" : "on";
+  const schedule = maintenance.schedule ?? [];
+  if (schedule.length === 0) {
+    return `${enabled} · no schedule runs recorded`;
+  }
+
+  const latest = schedule
+    .slice()
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, 4)
+    .map((item) => {
+      const last =
+        item.lastCompletedAt ?? item.lastEnqueuedAt ?? item.lastSkippedReason ?? "pending";
+      return `${item.taskKey}: ${last}`;
+    });
+  return `${enabled} · ${latest.join(" · ")}`;
 }
 
 function plainTextSummary(value: string): string {

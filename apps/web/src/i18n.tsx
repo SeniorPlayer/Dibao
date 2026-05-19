@@ -403,6 +403,7 @@ export const zhCN = {
       cocoon: "信息茧房水平",
       exploration: "探索",
       formula: "当前公式",
+      automaticMaintenance: "自动维护",
       failureStates: "Fallback / 任务状态"
     },
     clusters: {
@@ -1161,6 +1162,7 @@ export const enUS = {
       cocoon: "Cocoon level",
       exploration: "Exploration",
       formula: "Current formula",
+      automaticMaintenance: "Automatic maintenance",
       failureStates: "Fallback / task states"
     },
     clusters: {

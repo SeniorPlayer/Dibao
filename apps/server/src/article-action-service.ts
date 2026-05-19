@@ -29,6 +29,7 @@ export type ArticleActionServiceOptions = {
   actions: ArticleActionRepository;
   profileJobs?: Pick<ProfileEventProcessJobService, "enqueueEvent">;
   rankingJobs?: Pick<RankingRecalculateJobService, "enqueueAll" | "enqueueArticles">;
+  maintenance?: { enqueueStrongActionMaintenance: (now?: number) => unknown };
   removeReadLaterOnReadComplete?: () => boolean;
   now?: () => number;
 };
@@ -71,6 +72,9 @@ export class ArticleActionService {
       articleId: input.articleId,
       actionType: input.type
     });
+    if (isStrongMaintenanceAction(input)) {
+      this.options.maintenance?.enqueueStrongActionMaintenance(this.now());
+    }
 
     return finalResult;
   }
@@ -85,5 +89,24 @@ function isReadCompleteAction(input: RecordArticleActionServiceInput): boolean {
     input.type === "read_progress" &&
     typeof input.progress === "number" &&
     input.progress >= 0.9
+  );
+}
+
+function isStrongMaintenanceAction(input: RecordArticleActionServiceInput): boolean {
+  if (
+    input.type === "favorite" ||
+    input.type === "like" ||
+    input.type === "read_later" ||
+    input.type === "mark_read" ||
+    input.type === "hide" ||
+    input.type === "not_interested"
+  ) {
+    return true;
+  }
+
+  return (
+    input.type === "read_progress" &&
+    typeof input.progress === "number" &&
+    input.progress >= 0.75
   );
 }

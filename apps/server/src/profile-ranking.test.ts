@@ -816,6 +816,35 @@ describe("profile algorithm and recommendation ranking", () => {
     }
   });
 
+  it("queues ranking recalculation after derived maintenance jobs but not after evaluation", () => {
+    const fixture = createProfileFixture();
+    const { db } = fixture;
+
+    try {
+      const maintenance = createMaintenanceService(db, 7000);
+      maintenance.handleJob(maintenanceJob(KEYWORD_PROFILE_REBUILD_JOB_TYPE));
+      expect(countQueuedJobs(db, RANKING_RECALCULATE_JOB_TYPE)).toBe(1);
+
+      db.prepare("delete from jobs where type = ?").run(RANKING_RECALCULATE_JOB_TYPE);
+      maintenance.handleJob(maintenanceJob(RECENT_INTENT_REBUILD_JOB_TYPE));
+      expect(countQueuedJobs(db, RANKING_RECALCULATE_JOB_TYPE)).toBe(1);
+
+      db.prepare("delete from jobs where type = ?").run(RANKING_RECALCULATE_JOB_TYPE);
+      maintenance.handleJob(maintenanceJob("duplicate_group_rebuild"));
+      expect(countQueuedJobs(db, RANKING_RECALCULATE_JOB_TYPE)).toBe(1);
+
+      db.prepare("delete from jobs where type = ?").run(RANKING_RECALCULATE_JOB_TYPE);
+      maintenance.handleJob(maintenanceJob(FTRL_TRAIN_JOB_TYPE));
+      expect(countQueuedJobs(db, RANKING_RECALCULATE_JOB_TYPE)).toBe(1);
+
+      db.prepare("delete from jobs where type = ?").run(RANKING_RECALCULATE_JOB_TYPE);
+      maintenance.handleJob(maintenanceJob(RANKING_EVAL_RUN_JOB_TYPE));
+      expect(countQueuedJobs(db, RANKING_RECALCULATE_JOB_TYPE)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses FTRL only after explicit active promotion conditions are met", () => {
     const fixture = createProfileFixture();
     const { actions, db, profile } = fixture;
@@ -1641,6 +1670,13 @@ function countRows(db: DibaoDatabase, tableName: string): number {
   const row = db.prepare(`select count(*) as count from ${tableName}`).get() as {
     count: number;
   };
+  return row.count;
+}
+
+function countQueuedJobs(db: DibaoDatabase, type: string): number {
+  const row = db
+    .prepare("select count(*) as count from jobs where type = ? and status = 'queued'")
+    .get(type) as { count: number };
   return row.count;
 }
 

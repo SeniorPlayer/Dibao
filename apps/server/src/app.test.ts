@@ -1833,6 +1833,17 @@ describe("server API vertical slice", () => {
             localLearningShadowMode: false,
             explorationEnabled: true,
             evaluationEnabled: false
+          },
+          recommendationMaintenance: {
+            maintenanceEnabled: true,
+            recentIntentAutoRebuildEnabled: true,
+            keywordAutoRebuildEnabled: true,
+            duplicateAutoRebuildEnabled: true,
+            ftrlAutoTrainEnabled: true,
+            ftrlAutoPromoteEnabled: false,
+            evaluationAutoRunEnabled: false,
+            evaluationAutoRunIntervalDays: 7,
+            embeddingHealthAutoBackfillEnabled: true
           }
         }
       });
@@ -2097,6 +2108,77 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("shows FTRL ready-to-promote and active-low-weight lifecycle states", async () => {
+    const db = createEmptyDatabase();
+    new SqliteAppSettingsRepository(db).setJson(
+      "recommendation.settings",
+      {
+        preferFreshness: 0.5,
+        preferSource: 0.5,
+        preferDiversity: 0.5,
+        cocoonLevel: 5,
+        localLearningEnabled: true,
+        localLearningShadowMode: false,
+        explorationEnabled: true,
+        evaluationEnabled: false
+      },
+      1000
+    );
+    db.prepare(
+      `
+        insert into rank_model_versions (
+          id,
+          algorithm_version,
+          feature_schema_version,
+          status,
+          sample_count,
+          blend_alpha,
+          metrics_json,
+          created_at,
+          updated_at
+        )
+        values ('ftrl_ready', 'rec_v2', 2, 'shadow', 120, 0.05, ?, 1000, 1000)
+      `
+    ).run(JSON.stringify({ highQualitySamples: 120 }));
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const ready = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency"
+      });
+      expect(ready.statusCode, ready.body).toBe(200);
+      expect(ready.json()).toMatchObject({
+        data: {
+          transparency: {
+            moduleStatus: {
+              ftrl: "ready_to_promote"
+            }
+          }
+        }
+      });
+
+      db.prepare("update rank_model_versions set status = 'active', updated_at = 2000 where id = 'ftrl_ready'").run();
+      const active = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency"
+      });
+      expect(active.statusCode, active.body).toBe(200);
+      expect(active.json()).toMatchObject({
+        data: {
+          transparency: {
+            moduleStatus: {
+              ftrl: "active_low_weight"
+            }
+          }
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("queues ranking recalculation only when ranking settings actually change", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({ db, logger: false, now: () => 5000 });
@@ -2172,6 +2254,59 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("queues delayed recommendation maintenance only for strong article actions", async () => {
+    const db = createEmptyDatabase();
+    const feeds = new SqliteFeedRepository(db);
+    const articles = new SqliteArticleRepository(db);
+    feeds.upsert({
+      id: "feed_action_maintenance",
+      title: "Action Feed",
+      feedUrl: "https://example.com/action.xml",
+      now: 1000
+    });
+    articles.upsert({
+      id: "article_action_maintenance",
+      feedId: "feed_action_maintenance",
+      url: "https://example.com/action",
+      title: "Action Article",
+      discoveredAt: 1000,
+      dedupeKey: "article_action_maintenance",
+      now: 1000
+    });
+    const jobs = new SqliteJobRepository(db);
+    const app = buildServer({ db, logger: false, now: () => 10_000 });
+
+    try {
+      const weak = await injectJson(app, "POST", "/api/articles/article_action_maintenance/actions", {
+        type: "open"
+      });
+      expect(weak.statusCode, weak.body).toBe(200);
+      expect(jobs.countByTypeAndStatus("recent_intent_rebuild", "queued")).toBe(0);
+      expect(jobs.countByTypeAndStatus("ftrl_train", "queued")).toBe(0);
+
+      const strong = await injectJson(app, "POST", "/api/articles/article_action_maintenance/actions", {
+        type: "read_progress",
+        progress: 0.8
+      });
+      expect(strong.statusCode, strong.body).toBe(200);
+
+      const recent = jobs.list({ type: "recent_intent_rebuild", status: "queued", limit: 1 })[0];
+      const ftrl = jobs.list({ type: "ftrl_train", status: "queued", limit: 1 })[0];
+      expect(recent?.runAfter).toBe(10_000 + 10 * 60_000);
+      expect(ftrl?.runAfter).toBe(10_000 + 15 * 60_000);
+
+      const repeatedStrong = await injectJson(app, "POST", "/api/articles/article_action_maintenance/actions", {
+        type: "favorite"
+      });
+      expect(repeatedStrong.statusCode, repeatedStrong.body).toBe(200);
+      expect(jobs.countByTypeAndStatus("recent_intent_rebuild", "queued")).toBe(1);
+      expect(jobs.countByTypeAndStatus("ftrl_train", "queued")).toBe(1);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("dedupes recommendation maintenance jobs and exposes safe FTRL promotion", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({ db, logger: false, now: () => 10_000 });
@@ -2218,9 +2353,9 @@ describe("server API vertical slice", () => {
             created_at,
             updated_at
           )
-          values ('ftrl_promote_test', 'rec_v2', 2, 'shadow', 60, 0.1, ?, 10_000, 10_000)
+          values ('ftrl_promote_test', 'rec_v2', 2, 'shadow', 120, 0.1, ?, 10_000, 10_000)
         `
-      ).run(JSON.stringify({ highQualitySamples: 55 }));
+      ).run(JSON.stringify({ highQualitySamples: 110 }));
 
       const promoted = await app.inject({ method: "POST", url: "/api/recommendation/ftrl/promote" });
       expect(promoted.statusCode, promoted.body).toBe(200);
@@ -2228,8 +2363,8 @@ describe("server API vertical slice", () => {
         data: {
           ok: true,
           modelVersionId: "ftrl_promote_test",
-          sampleCount: 60,
-          highQualitySampleCount: 55,
+          sampleCount: 120,
+          highQualitySampleCount: 110,
           blendAlpha: 0.1
         }
       });

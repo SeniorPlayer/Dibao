@@ -1000,6 +1000,7 @@ cursor
 - `behavior.markScrolledArticlesIgnored` 控制最新 / 推荐列表中“滚过未打开文章 -> 已忽略”的自动行为记录。
 - `behavior.removeReadLaterOnReadComplete` 控制稍后读文章触发完读后是否自动移出稍后读；当前完读阈值为 `read_progress >= 0.9` 或兼容 action `mark_read`。自动移出只更新文章状态，不额外写入 `remove_read_later` 行为事件。
 - `ranking.cocoonLevel`、`ranking.localLearningEnabled`、`ranking.localLearningShadowMode`、`ranking.explorationEnabled`、`ranking.evaluationEnabled` 实际变化时会 enqueue 一个 deduped `ranking_recalculate` job；reader/behavior/retention 变化不会触发 ranking job。
+- `recommendationMaintenance` 存储在 `recommendation.maintenanceSettings`，控制推荐自动维护调度；默认 `maintenanceEnabled=true`、`ftrlAutoPromoteEnabled=false`、`evaluationAutoRunEnabled=false`。
 - settings 变化不会触发 `embedding_generate`、FTS rebuild 或 vector index rebuild。
 
 请求：
@@ -1543,15 +1544,35 @@ PROFILE_WARMUP
       allowedRemoteDependency: "one embedding provider"
     }
     maintenance: {
-      schemaMigration: "005_recommendation_v2_completion"
+      schemaMigration: "006_recommendation_maintenance_schedule"
       backfillState: string
       explanationAuthority: "article_rank_explanations"
       scoreAuthority: "article_rank_scores"
+      automaticMaintenanceEnabled: boolean
+      settings: {
+        maintenanceEnabled: boolean
+        recentIntentAutoRebuildEnabled: boolean
+        keywordAutoRebuildEnabled: boolean
+        duplicateAutoRebuildEnabled: boolean
+        ftrlAutoTrainEnabled: boolean
+        ftrlAutoPromoteEnabled: boolean
+        evaluationAutoRunEnabled: boolean
+        evaluationAutoRunIntervalDays: number
+        embeddingHealthAutoBackfillEnabled: boolean
+      } | null
+      schedule: Array<{
+        taskKey: string
+        lastEnqueuedAt: string | null
+        lastCompletedAt: string | null
+        lastSkippedReason: string | null
+        lastJobId: string | null
+        updatedAt: string
+      }>
     }
     moduleStatus: {
       bm25ProfileTerms: "not_active" | "empty" | "stale" | "active"
       recentIntent: "missing" | "stale" | "active"
-      ftrl: "disabled" | "shadow_no_samples" | "insufficient_samples" | "shadow_trained" | "active" | "failed"
+      ftrl: "disabled" | "shadow_no_samples" | "insufficient_samples" | "shadow_training" | "ready_to_promote" | "active_low_weight" | "active" | "auto_paused" | "retired" | "failed"
       exploration: "disabled" | "enabled_bonus_only" | "enabled_slots_active"
       evaluation: "unavailable" | "diagnostic_only" | "lightweight_replay_diagnostic" | "strict_replay"
       duplicate: "not_built" | "exact_scaffold" | "near_duplicate_active"
@@ -1615,14 +1636,51 @@ POST /api/recommendation/ftrl/promote
   "data": {
     "ok": true,
     "modelVersionId": "ftrl_schema_2",
-    "sampleCount": 60,
-    "highQualitySampleCount": 55,
+    "sampleCount": 120,
+    "highQualitySampleCount": 110,
     "blendAlpha": 0.1
   }
 }
 ```
 
-如果高质量样本不足、`blendAlpha` 仍为 `0`，返回 `409` / `INSUFFICIENT_FTRL_SAMPLES`。该接口只切换本地 SQLite 中的模型状态，不调用外部服务。
+如果高质量样本不足 100，返回 `409` / `INSUFFICIENT_FTRL_SAMPLES`。该接口只切换本地 SQLite 中的模型状态，不调用外部服务，并把 active alpha 限制在安全上限内。
+
+### Recommendation Automatic Maintenance Cycle
+
+自动维护只在 `backgroundJobs=true` 的 server 进程启动，调度器只 enqueue job，不直接执行重任务。所有自动 enqueue 都检查 queued/running 同类 job；存在时返回/记录 existing，不重复创建。
+
+默认设置：
+
+```json
+{
+  "recommendationMaintenance": {
+    "maintenanceEnabled": true,
+    "recentIntentAutoRebuildEnabled": true,
+    "keywordAutoRebuildEnabled": true,
+    "duplicateAutoRebuildEnabled": true,
+    "ftrlAutoTrainEnabled": true,
+    "ftrlAutoPromoteEnabled": false,
+    "evaluationAutoRunEnabled": false,
+    "evaluationAutoRunIntervalDays": 7,
+    "embeddingHealthAutoBackfillEnabled": true
+  }
+}
+```
+
+周期：
+
+- 实时：RSS refresh 后保留 embedding enqueue，并延迟 duplicate rebuild；embedding 完成后保留 profile/ranking；强行为后延迟 recent intent 和 FTRL train。
+- 15 分钟：有强行为或未训练样本时 enqueue recent intent / FTRL。
+- 每小时：recent intent、duplicate、embedding health；ranking 只在维护输出变脏后 enqueue。
+- 每日：keyword profile、duplicate、recent intent、FTRL、ranking。
+- 每周：evaluation diagnostic，默认关闭。
+
+影响排序：
+
+- `recent_intent_rebuild`、`keyword_profile_rebuild`、`duplicate_group_rebuild`、`ftrl_train` 完成后会 enqueue deduped `ranking_recalculate`。
+- `ranking_eval_run` 是 `lightweight_replay_diagnostic`，不触发 ranking/profile/FTRL 更新。
+- FTRL active 是低权重渐进校准，alpha 起步 `0.05`，默认上限 `0.20`，不会替代基础公式。
+- `view=latest` 不读取推荐分数，仍只按 latest 时间排序。
 
 维护任务只操作本地 SQLite 派生数据，不调用远程 LLM、reranker、classifier 或外部搜索服务。
 
