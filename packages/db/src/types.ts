@@ -61,7 +61,8 @@ export type JobType =
   | "recent_intent_rebuild"
   | "ftrl_train"
   | "ranking_eval_run"
-  | "recommendation_backfill";
+  | "recommendation_backfill"
+  | "interest_cluster_label_rebuild";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -411,6 +412,26 @@ export type InterestClusterEvidenceRow = {
   title: string;
   vectorBlob: Buffer;
   createdAt: number;
+};
+
+export type InterestClusterLabelSource =
+  | "manual"
+  | "keywords"
+  | "representative_titles"
+  | "feeds"
+  | "fallback";
+
+export type InterestClusterLabelRow = {
+  clusterId: string;
+  autoLabel: string | null;
+  manualLabel: string | null;
+  labelSource: InterestClusterLabelSource;
+  labelTermsJson: string | null;
+  representativeArticlesJson: string | null;
+  feedTitlesJson: string | null;
+  confidence: number;
+  generatedAt: number | null;
+  updatedAt: number;
 };
 
 export type EmbeddingUsageWindow = {

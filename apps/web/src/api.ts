@@ -327,6 +327,7 @@ export type RecommendationMaintenanceTask =
   | "fingerprint_backfill"
   | "duplicate_rebuild"
   | "keyword_rebuild"
+  | "cluster_label_rebuild"
   | "recent_intent_rebuild"
   | "evaluation"
   | "ftrl_train"
@@ -485,6 +486,23 @@ export type RecommendationClusterItem = {
   id: string;
   polarity: "positive" | "negative";
   label: string | null;
+  displayLabel?: string;
+  labelSource?: "manual" | "keywords" | "representative_titles" | "feeds" | "fallback";
+  autoLabel?: string | null;
+  manualLabel?: string | null;
+  confidence?: number;
+  evidenceCount?: number;
+  topTerms?: string[];
+  representativeArticles?: Array<{
+    articleId: string;
+    title: string;
+    feedTitle: string;
+    eventType: string;
+    confidence: number;
+    similarity: number | null;
+  }>;
+  feedTitles?: string[];
+  lastGeneratedAt?: string | null;
   displayIndex?: number;
   weight: number;
   sampleCount: number;
@@ -508,6 +526,13 @@ export type RecommendationClusterListResponse = {
   activeIndex: RecommendationStatus["activeIndex"];
   total: number;
   items: RecommendationClusterItem[];
+};
+
+export type UpdateRecommendationClusterLabelResponse = {
+  ok: true;
+  clusterId: string;
+  displayLabel: string;
+  labelSource: RecommendationClusterItem["labelSource"];
 };
 
 export type AuthOkResponse = {
@@ -792,6 +817,21 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (
         await request<RecommendationClusterListResponse>(
           `/api/recommendation/clusters?${params.toString()}`
+        )
+      ).data;
+    },
+
+    async updateRecommendationClusterLabel(
+      clusterId: string,
+      manualLabel: string | null
+    ): Promise<UpdateRecommendationClusterLabelResponse> {
+      return (
+        await request<UpdateRecommendationClusterLabelResponse>(
+          `/api/recommendation/clusters/${encodeURIComponent(clusterId)}/label`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ manualLabel })
+          }
         )
       ).data;
     },

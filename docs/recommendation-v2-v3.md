@@ -13,7 +13,7 @@ This document records the phased V2/V3 recommendation architecture and the curre
 
 ### Implemented and active by default
 
-- `004_recommendation_v2`, append-only `005_recommendation_v2_completion`, and append-only `006_recommendation_maintenance_schedule`.
+- `004_recommendation_v2`, append-only `005_recommendation_v2_completion`, append-only `006_recommendation_maintenance_schedule`, existing `007_embedding_usage_and_profile_evidence_snapshots`, and append-only `008_interest_cluster_labels`.
 - Canonical rank context remains `article_rank_scores.rank_context`; there is no second `rank_context_id`.
 - Ranking jobs persist `rerank_position`, and `view=recommended` reads that canonical order before falling back to score.
 - Ranking setting changes enqueue a deduped `ranking_recalculate` job without enqueueing embedding, FTS, or vector rebuild jobs.
@@ -63,7 +63,7 @@ Periodic maintenance:
 
 - 15 minutes: if there are strong recent behaviors or untrained FTRL examples, enqueue deduped recent intent and FTRL train jobs.
 - Hourly: enqueue deduped recent intent and duplicate rebuilds; run embedding coverage health only when an active index exists and no embedding job is already open. Hourly ranking recalculation is only queued when a maintenance output completed since the last hourly ranking enqueue.
-- Daily: enqueue keyword profile rebuild, duplicate rebuild, recent intent rebuild, FTRL train, and ranking recalculation.
+- Daily: enqueue keyword profile rebuild, duplicate rebuild, recent intent rebuild, FTRL train, interest cluster label rebuild, and ranking recalculation.
 - Weekly diagnostic: `ranking_eval_run` is disabled by default. When enabled, it runs no more often than `evaluationAutoRunIntervalDays`.
 
 Sorting impact:
@@ -144,6 +144,31 @@ Implemented behavior:
 
 `interest_cluster_evidence` stores future cluster evidence. Reconstructed evidence must set `evidence_source = "reconstructed"` and a confidence value; live event evidence uses `live_event`.
 
+### Interest Cluster Labels
+
+Interest cluster labels are explainability metadata only. They do not change ranking, profile vectors, embedding, or user feedback.
+
+Implemented V1/V2 behavior:
+
+- automatic labels are generated locally from `interest_cluster_evidence`, article titles/summaries, feed titles, and same-polarity `profile_terms`;
+- generation does not call an LLM, reranker, classifier, external search service, or embedding API;
+- labels are stored in SQLite table `interest_cluster_labels`;
+- display priority is `manual_label > auto_label > interest_clusters.label > 兴趣簇 #N`;
+- manual labels only affect display and explanations, never cluster centroids or rank scores;
+- clearing a manual label restores the current automatic label fallback.
+
+`label_source` values:
+
+```text
+manual
+keywords
+representative_titles
+feeds
+fallback
+```
+
+The automatic label rebuild job is `interest_cluster_label_rebuild`. It updates `interest_cluster_labels` for the active embedding index, preserves `manual_label`, and does not enqueue `embedding_generate` or `ranking_recalculate`.
+
 ## FTS / BM25
 
 `article_fts` remains the local FTS5 index. Queries are sanitized before `MATCH`.
@@ -223,6 +248,8 @@ Migration `005_recommendation_v2_completion` is append-only and safe for databas
 
 Migration `006_recommendation_maintenance_schedule` is append-only. It adds only `recommendation_maintenance_schedule_state` for scheduler observability and does not rewrite derived recommendation data.
 
+Migration `008_interest_cluster_labels` is append-only. The repository already has an existing `007_embedding_usage_and_profile_evidence_snapshots`; `008` adds `interest_cluster_labels` and extends the `jobs.type` CHECK constraint with `interest_cluster_label_rebuild` without modifying migrations `001` through `007`.
+
 Live migration is gated. Use:
 
 ```bash
@@ -242,6 +269,7 @@ All endpoints require authentication and dedupe queued/running work:
 - `POST /api/recommendation/backfill/fingerprints`
 - `POST /api/recommendation/rebuild-duplicates`
 - `POST /api/recommendation/rebuild-keywords`
+- `POST /api/recommendation/rebuild-cluster-labels`
 - `POST /api/recommendation/evaluate`
 - `POST /api/recommendation/ftrl/reset`
 - `POST /api/recommendation/ftrl/promote`

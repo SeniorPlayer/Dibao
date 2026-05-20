@@ -1,6 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { fromVectorBlob, toVectorBlob, type DibaoDatabase, type JobRepository, type JobRow, type JobType } from "@dibao/db";
 import { clamp, cosineSimilarity, normalizeVector } from "@dibao/ranking";
+import {
+  INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE,
+  type InterestClusterLabelService
+} from "./interest-cluster-label-service.js";
 import { PermanentJobFailure } from "./job-runner.js";
 import type { RankingRecalculateJobService } from "./ranking-job-service.js";
 
@@ -24,7 +28,8 @@ type MaintenanceJobType =
   | typeof RECENT_INTENT_REBUILD_JOB_TYPE
   | typeof RANKING_EVAL_RUN_JOB_TYPE
   | typeof FTRL_TRAIN_JOB_TYPE
-  | typeof RECOMMENDATION_BACKFILL_JOB_TYPE;
+  | typeof RECOMMENDATION_BACKFILL_JOB_TYPE
+  | typeof INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE;
 
 export type RecommendationMaintenanceResult = {
   jobId: string;
@@ -49,6 +54,7 @@ export type RecommendationMaintenanceServiceOptions = {
   db: DibaoDatabase;
   jobs: Pick<JobRepository, "enqueue" | "listOpenByType">;
   rankingJobs: Pick<RankingRecalculateJobService, "enqueueAll">;
+  clusterLabels?: Pick<InterestClusterLabelService, "rebuildActiveIndexLabels">;
   getRankingSettings?: () => { localLearningEnabled: boolean; localLearningShadowMode: boolean };
   getMaintenanceSettings?: () => { ftrlAutoPromoteEnabled: boolean };
   now?: () => number;
@@ -110,6 +116,10 @@ export class RecommendationMaintenanceService {
 
   enqueueFtrlTrain(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
     return this.enqueueUnique(FTRL_TRAIN_JOB_TYPE, options);
+  }
+
+  enqueueClusterLabelRebuild(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
+    return this.enqueueUnique(INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE, options);
   }
 
   enqueueStrongActionMaintenance(now: number = this.now()): {
@@ -351,6 +361,13 @@ export class RecommendationMaintenanceService {
         return;
       case RECOMMENDATION_BACKFILL_JOB_TYPE:
         this.touchBackfillState(job.type, "succeeded", null);
+        this.markScheduleCompleted(job.id);
+        return;
+      case INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE:
+        if (!this.options.clusterLabels) {
+          throw new PermanentJobFailure("Interest cluster label service is not configured");
+        }
+        this.options.clusterLabels.rebuildActiveIndexLabels();
         this.markScheduleCompleted(job.id);
         return;
       default:

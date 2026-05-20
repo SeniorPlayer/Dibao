@@ -215,6 +215,7 @@ export function App() {
   const [allClustersError, setAllClustersError] = useState<string | null>(null);
   const [runningMaintenanceTask, setRunningMaintenanceTask] =
     useState<RecommendationMaintenanceTask | null>(null);
+  const [updatingClusterLabelId, setUpdatingClusterLabelId] = useState<string | null>(null);
   const [isRecommendationStatusLoading, setIsRecommendationStatusLoading] = useState(false);
   const [recommendationStatusError, setRecommendationStatusError] = useState<string | null>(null);
   const [feedUrl, setFeedUrl] = useState("");
@@ -1273,13 +1274,40 @@ export function App() {
         existing: maintenanceResultWasExisting(result)
       });
       await loadRecommendationStatus();
-      if (task === "keyword_rebuild" || task === "recent_intent_rebuild") {
+      if (
+        task === "keyword_rebuild" ||
+        task === "recent_intent_rebuild" ||
+        task === "cluster_label_rebuild"
+      ) {
         await loadAllRecommendationClusters();
       }
     } catch (error) {
       setRecommendationStatusError(userMessageForError(error, t.errors.api));
     } finally {
       setRunningMaintenanceTask(null);
+    }
+  }
+
+  async function handleUpdateRecommendationClusterLabel(
+    clusterId: string,
+    manualLabel: string | null
+  ) {
+    setUpdatingClusterLabelId(clusterId);
+    setRecommendationStatusError(null);
+    setAllClustersError(null);
+
+    try {
+      await dibaoApi.updateRecommendationClusterLabel(clusterId, manualLabel);
+      await loadRecommendationStatus();
+      if (appPageRef.current.type === "algorithm-clusters") {
+        await loadAllRecommendationClusters();
+      }
+    } catch (error) {
+      const message = userMessageForError(error, t.errors.api);
+      setRecommendationStatusError(message);
+      setAllClustersError(message);
+    } finally {
+      setUpdatingClusterLabelId(null);
     }
   }
 
@@ -1708,8 +1736,10 @@ export function App() {
             onBack={() => navigateToAppPage({ type: "settings" })}
             onOpenAllClusters={() => navigateToAppPage({ type: "algorithm-clusters" })}
             onRunMaintenanceTask={handleRunRecommendationMaintenanceTask}
+            onUpdateClusterLabel={handleUpdateRecommendationClusterLabel}
             runningMaintenanceTask={runningMaintenanceTask}
             status={recommendationStatus}
+            updatingClusterLabelId={updatingClusterLabelId}
           />
         ) : appPage.type === "algorithm-clusters" ? (
           <AlgorithmClustersPage
@@ -1717,7 +1747,9 @@ export function App() {
             error={allClustersError}
             isLoading={isAllClustersLoading}
             onBack={() => navigateToAppPage({ type: "algorithm-transparency" })}
+            onUpdateClusterLabel={handleUpdateRecommendationClusterLabel}
             total={allRecommendationClusterTotal}
+            updatingClusterLabelId={updatingClusterLabelId}
           />
         ) : (
           <div
@@ -2724,8 +2756,10 @@ export function AlgorithmTransparencyPage(props: {
   onBack: () => void;
   onOpenAllClusters: () => void;
   onRunMaintenanceTask: (task: RecommendationMaintenanceTask, label: string) => Promise<void>;
+  onUpdateClusterLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
   runningMaintenanceTask: RecommendationMaintenanceTask | null;
   status: RecommendationStatus | null;
+  updatingClusterLabelId: string | null;
 }) {
   const { t, formatDate } = useI18n();
   const transparency =
@@ -2900,45 +2934,13 @@ export function AlgorithmTransparencyPage(props: {
           {props.status?.clusters.items && props.status.clusters.items.length > 0 ? (
             <div className={styles.algorithmClusterGrid}>
               {props.status.clusters.items.map((cluster, index) => (
-                <article
-                  className={styles.algorithmClusterCard}
-                  data-polarity={cluster.polarity}
+                <ClusterCard
+                  cluster={cluster}
+                  index={index}
                   key={cluster.id}
-                >
-                  <span>
-                    {cluster.polarity === "positive"
-                      ? t.algorithmTransparency.clusters.positive
-                      : t.algorithmTransparency.clusters.negative}
-                  </span>
-                  <strong>{clusterDisplayName(cluster, index, t)}</strong>
-                  <p>
-                    {t.algorithmTransparency.clusters.details(
-                      formatCompactNumber(cluster.weight),
-                      cluster.sampleCount,
-                      formatDate(cluster.updatedAt)
-                    )}
-                  </p>
-                  {cluster.diagnostics ? (
-                    <p>
-                      <strong>
-                        {t.algorithmTransparency.clusters.risk[
-                          cluster.diagnostics.overfitRisk
-                        ]}
-                      </strong>
-                      <br />
-                      {t.algorithmTransparency.clusters.diagnostics(
-                        cluster.diagnostics.supportArticleCount,
-                        cluster.diagnostics.sourceCount,
-                        formatPercent(cluster.diagnostics.strongSignalRatio),
-                        formatPercent(cluster.diagnostics.topSourceShare),
-                        formatPercent(cluster.diagnostics.averageSimilarity)
-                      )}
-                      {cluster.diagnostics.warnings.length > 0
-                        ? ` · ${cluster.diagnostics.warnings.join(" / ")}`
-                        : ""}
-                    </p>
-                  ) : null}
-                </article>
+                  onUpdateLabel={props.onUpdateClusterLabel}
+                  updating={props.updatingClusterLabelId === cluster.id}
+                />
               ))}
             </div>
           ) : (
@@ -3091,9 +3093,11 @@ function AlgorithmClustersPage(props: {
   error: string | null;
   isLoading: boolean;
   onBack: () => void;
+  onUpdateClusterLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
   total: number;
+  updatingClusterLabelId: string | null;
 }) {
-  const { t, formatDate } = useI18n();
+  const { t } = useI18n();
 
   return (
     <section
@@ -3122,42 +3126,13 @@ function AlgorithmClustersPage(props: {
           {!props.isLoading && !props.error && props.clusters.length > 0 ? (
             <div className={styles.algorithmClusterGrid}>
               {props.clusters.map((cluster, index) => (
-                <article
-                  className={styles.algorithmClusterCard}
-                  data-polarity={cluster.polarity}
+                <ClusterCard
+                  cluster={cluster}
+                  index={index}
                   key={cluster.id}
-                >
-                  <span>
-                    {cluster.polarity === "positive"
-                      ? t.algorithmTransparency.clusters.positive
-                      : t.algorithmTransparency.clusters.negative}
-                  </span>
-                  <strong>{clusterDisplayName(cluster, index, t)}</strong>
-                  <p>
-                    {t.algorithmTransparency.clusters.details(
-                      formatCompactNumber(cluster.weight),
-                      cluster.sampleCount,
-                      formatDate(cluster.updatedAt)
-                    )}
-                  </p>
-                  {cluster.diagnostics ? (
-                    <p>
-                      <strong>
-                        {t.algorithmTransparency.clusters.risk[
-                          cluster.diagnostics.overfitRisk
-                        ]}
-                      </strong>
-                      <br />
-                      {t.algorithmTransparency.clusters.diagnostics(
-                        cluster.diagnostics.supportArticleCount,
-                        cluster.diagnostics.sourceCount,
-                        formatPercent(cluster.diagnostics.strongSignalRatio),
-                        formatPercent(cluster.diagnostics.topSourceShare),
-                        formatPercent(cluster.diagnostics.averageSimilarity)
-                      )}
-                    </p>
-                  ) : null}
-                </article>
+                  onUpdateLabel={props.onUpdateClusterLabel}
+                  updating={props.updatingClusterLabelId === cluster.id}
+                />
               ))}
             </div>
           ) : null}
@@ -3167,6 +3142,166 @@ function AlgorithmClustersPage(props: {
         </section>
       </div>
     </section>
+  );
+}
+
+function ClusterCard(props: {
+  cluster: RecommendationClusterItem;
+  index: number;
+  onUpdateLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
+  updating: boolean;
+}) {
+  const { t, formatDate } = useI18n();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(
+    props.cluster.manualLabel ?? props.cluster.displayLabel ?? props.cluster.label ?? ""
+  );
+  const source = props.cluster.labelSource ?? "fallback";
+  const confidence = props.cluster.confidence ?? 0;
+  const evidenceCount =
+    props.cluster.evidenceCount ?? props.cluster.diagnostics?.supportArticleCount ?? 0;
+  const topTerms = props.cluster.topTerms ?? [];
+  const representativeArticles = props.cluster.representativeArticles ?? [];
+  const feedTitles = props.cluster.feedTitles ?? [];
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftLabel(
+        props.cluster.manualLabel ?? props.cluster.displayLabel ?? props.cluster.label ?? ""
+      );
+    }
+  }, [isEditing, props.cluster.displayLabel, props.cluster.label, props.cluster.manualLabel]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await props.onUpdateLabel(props.cluster.id, draftLabel.trim() || null);
+    setIsEditing(false);
+  }
+
+  async function handleClearManualLabel() {
+    await props.onUpdateLabel(props.cluster.id, null);
+    setIsEditing(false);
+  }
+
+  return (
+    <article className={styles.algorithmClusterCard} data-polarity={props.cluster.polarity}>
+      <span>
+        {props.cluster.polarity === "positive"
+          ? t.algorithmTransparency.clusters.positive
+          : t.algorithmTransparency.clusters.negative}
+      </span>
+      <strong>{clusterDisplayName(props.cluster, props.index, t)}</strong>
+      <p>
+        {t.algorithmTransparency.clusters.sourceLabel}:{" "}
+        {t.algorithmTransparency.clusters.source[source]} ·{" "}
+        {t.algorithmTransparency.clusters.confidenceLabel}:{" "}
+        {t.algorithmTransparency.clusters.confidence[confidenceBucket(confidence)]}
+        {confidence < 0.4 ? ` · ${t.algorithmTransparency.clusters.lowConfidence}` : ""}
+      </p>
+      {props.cluster.manualLabel && props.cluster.autoLabel ? (
+        <p>{t.algorithmTransparency.clusters.autoInference(props.cluster.autoLabel)}</p>
+      ) : null}
+      <p>
+        {t.algorithmTransparency.clusters.details(
+          formatCompactNumber(props.cluster.weight),
+          props.cluster.sampleCount,
+          formatDate(props.cluster.updatedAt)
+        )}
+        {evidenceCount > 0 ? ` · ${t.algorithmTransparency.clusters.evidence(evidenceCount)}` : ""}
+        {props.cluster.lastGeneratedAt
+          ? ` · ${t.algorithmTransparency.clusters.generatedAt(formatDate(props.cluster.lastGeneratedAt))}`
+          : ""}
+      </p>
+      {topTerms.length > 0 ? (
+        <p>
+          <strong>{t.algorithmTransparency.clusters.topTerms}</strong>
+          <br />
+          {topTerms.slice(0, 5).join(" / ")}
+        </p>
+      ) : null}
+      {representativeArticles.length > 0 ? (
+        <div className={styles.clusterEvidenceList}>
+          <strong>{t.algorithmTransparency.clusters.representativeArticles}</strong>
+          <ul>
+            {representativeArticles.slice(0, 3).map((article) => (
+              <li key={article.articleId}>{article.title}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {feedTitles.length > 0 ? (
+        <p>
+          <strong>{t.algorithmTransparency.clusters.feedTitles}</strong>
+          <br />
+          {feedTitles.slice(0, 3).join(" / ")}
+        </p>
+      ) : null}
+      {props.cluster.diagnostics ? (
+        <p>
+          <strong>
+            {t.algorithmTransparency.clusters.risk[props.cluster.diagnostics.overfitRisk]}
+          </strong>
+          <br />
+          {t.algorithmTransparency.clusters.diagnostics(
+            props.cluster.diagnostics.supportArticleCount,
+            props.cluster.diagnostics.sourceCount,
+            formatPercent(props.cluster.diagnostics.strongSignalRatio),
+            formatPercent(props.cluster.diagnostics.topSourceShare),
+            formatPercent(props.cluster.diagnostics.averageSimilarity)
+          )}
+          {props.cluster.diagnostics.warnings.length > 0
+            ? ` · ${props.cluster.diagnostics.warnings.join(" / ")}`
+            : ""}
+        </p>
+      ) : null}
+      {isEditing ? (
+        <form className={styles.clusterLabelForm} onSubmit={handleSubmit}>
+          <label>
+            {t.algorithmTransparency.clusters.renameLabel}
+            <input
+              maxLength={30}
+              onChange={(event) => setDraftLabel(event.target.value)}
+              placeholder={t.algorithmTransparency.clusters.renamePlaceholder}
+              value={draftLabel}
+            />
+          </label>
+          <div className={styles.clusterLabelActions}>
+            <button className={styles.primaryButton} disabled={props.updating} type="submit">
+              {t.algorithmTransparency.clusters.saveLabel}
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={props.updating}
+              onClick={() => setIsEditing(false)}
+              type="button"
+            >
+              {t.algorithmTransparency.clusters.cancelRename}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className={styles.clusterLabelActions}>
+          <button
+            className={styles.secondaryButton}
+            disabled={props.updating}
+            onClick={() => setIsEditing(true)}
+            type="button"
+          >
+            {t.algorithmTransparency.clusters.rename}
+          </button>
+          {props.cluster.manualLabel ? (
+            <button
+              className={styles.secondaryButton}
+              disabled={props.updating}
+              onClick={() => void handleClearManualLabel()}
+              type="button"
+            >
+              {t.algorithmTransparency.clusters.clearManualLabel}
+            </button>
+          ) : null}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -5338,6 +5473,11 @@ function maintenanceTasks(t: Dictionary): Array<{
       ...copy.keyword_rebuild
     },
     {
+      key: "cluster_label_rebuild",
+      scheduleKey: "cluster_label_daily",
+      ...copy.cluster_label_rebuild
+    },
+    {
       key: "recent_intent_rebuild",
       scheduleKey: "recent_intent_daily",
       ...copy.recent_intent_rebuild
@@ -5495,6 +5635,7 @@ function explanationReasonText(reason: RankExplanationReason, t: Dictionary): st
 function clusterDisplayName(
   cluster: {
     label: string | null;
+    displayLabel?: string;
     polarity: "positive" | "negative";
     id: string;
     displayIndex?: number;
@@ -5502,7 +5643,23 @@ function clusterDisplayName(
   index: number,
   t: Dictionary
 ): string {
+  if (cluster.displayLabel) {
+    return cluster.displayLabel;
+  }
+  if (cluster.label) {
+    return cluster.label;
+  }
   return t.algorithmTransparency.clusters.fallbackName(cluster.displayIndex ?? index + 1);
+}
+
+function confidenceBucket(value: number): "high" | "medium" | "low" {
+  if (value >= 0.7) {
+    return "high";
+  }
+  if (value >= 0.4) {
+    return "medium";
+  }
+  return "low";
 }
 
 function formatCompactNumber(value: number): string {

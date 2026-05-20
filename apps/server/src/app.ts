@@ -82,6 +82,11 @@ import {
   FeedRefreshService,
   type FeedFetcher
 } from "./feed-refresh-service.js";
+import {
+  InterestClusterLabelService,
+  InterestClusterLabelServiceError,
+  INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE
+} from "./interest-cluster-label-service.js";
 import { JobRunner } from "./job-runner.js";
 import { OpmlService, OpmlServiceError } from "./opml-service.js";
 import {
@@ -209,6 +214,14 @@ type RecommendationClusterQuery = {
   limit?: string;
 };
 
+type RecommendationClusterParams = {
+  id: string;
+};
+
+type RecommendationClusterLabelBody = {
+  manualLabel?: unknown;
+};
+
 type CursorPayload = {
   offset: number;
 };
@@ -285,10 +298,15 @@ export function buildServer(options: BuildServerOptions = {}) {
     ranking: rankingService,
     now: options.now
   });
+  const clusterLabelService = new InterestClusterLabelService({
+    db,
+    now: options.now
+  });
   const recommendationMaintenanceService = new RecommendationMaintenanceService({
     db,
     jobs,
     rankingJobs: rankingJobService,
+    clusterLabels: clusterLabelService,
     getRankingSettings: () => settingsService.getSettings().ranking,
     getMaintenanceSettings: () => settingsService.getSettings().recommendationMaintenance,
     now: options.now
@@ -493,6 +511,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       [FTRL_TRAIN_JOB_TYPE]: (job) =>
         recommendationMaintenanceService.handleJob(job),
       [RECOMMENDATION_BACKFILL_JOB_TYPE]: (job) =>
+        recommendationMaintenanceService.handleJob(job),
+      [INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE]: (job) =>
         recommendationMaintenanceService.handleJob(job)
     },
     now: options.now,
@@ -720,6 +740,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       profiles,
       rankings,
       rankingService,
+      clusterLabels: clusterLabelService,
       settings: settingsService.getSettings().ranking
     })
   }));
@@ -731,6 +752,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       profiles,
       rankings,
       rankingService,
+      clusterLabels: clusterLabelService,
       settings: settingsService.getSettings().ranking,
       maintenanceSettings: settingsService.getSettings().recommendationMaintenance,
       maintenanceScheduleStates: recommendationMaintenanceService.listScheduleStates()
@@ -746,6 +768,7 @@ export function buildServer(options: BuildServerOptions = {}) {
         profiles,
         rankings,
         rankingService,
+        clusterLabels: clusterLabelService,
         settings: settingsService.getSettings().ranking,
         limit: request.query.limit === "all" ? null : parsePositiveInteger(request.query.limit, 12)
       })
@@ -787,6 +810,32 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.post("/api/recommendation/rebuild-recent-intent", async () => ({
     data: recommendationMaintenanceService.enqueueRecentIntentRebuild()
   }));
+
+  app.post("/api/recommendation/rebuild-cluster-labels", async () => ({
+    data: recommendationMaintenanceService.enqueueClusterLabelRebuild()
+  }));
+
+  app.patch<{ Params: RecommendationClusterParams; Body: RecommendationClusterLabelBody }>(
+    "/api/recommendation/clusters/:id/label",
+    async (request, reply) => {
+      try {
+        const result = clusterLabelService.setManualLabel(
+          request.params.id,
+          request.body?.manualLabel
+        );
+        return {
+          data: {
+            ok: true,
+            clusterId: result.clusterId,
+            displayLabel: result.displayLabel,
+            labelSource: result.labelSource
+          }
+        };
+      } catch (error) {
+        return sendInterestClusterLabelError(reply, error);
+      }
+    }
+  );
 
   app.post("/api/recommendation/evaluate", async () => ({
     data: recommendationMaintenanceService.enqueueEvaluation()
@@ -1140,7 +1189,28 @@ export function buildServer(options: BuildServerOptions = {}) {
     return {
       data: {
         articleId: explanation.articleId,
-        reasons: explanation.reasons,
+        reasons: explanation.reasons.map((reason) => {
+          if (!reason.cluster) {
+            return reason;
+          }
+          const label = clusterLabelService.displayLabelForCluster(
+            {
+              id: reason.cluster.id,
+              label: reason.cluster.label,
+              polarity: reason.cluster.polarity,
+              displayIndex: reason.cluster.displayIndex
+            },
+            reason.cluster.displayIndex
+          );
+          return {
+            ...reason,
+            cluster: {
+              ...reason.cluster,
+              ...label,
+              label: label.displayLabel
+            }
+          };
+        }),
         generatedAt: timestampToIsoValue(explanation.generatedAt)
       }
     };
@@ -1437,6 +1507,7 @@ function getRecommendationStatus(options: {
   profiles: SqliteProfileRepository;
   rankings: SqliteRankingRepository;
   rankingService: RecommendationRankingService;
+  clusterLabels: InterestClusterLabelService;
   settings: ReturnType<SettingsService["getSettings"]>["ranking"];
 }) {
   const activeProvider = options.embeddings.findActiveProvider();
@@ -1458,7 +1529,9 @@ function getRecommendationStatus(options: {
       ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
     })
     .slice(0, 12)
-    .map((cluster, index) => mapRecommendationCluster(cluster, index + 1, clusterEvidence));
+    .map((cluster, index) =>
+      mapRecommendationCluster(cluster, index + 1, clusterEvidence, options.clusterLabels)
+    );
   const rankedArticles = options.rankings.countRankedArticles({ activeRankContext });
   const lastProfileUpdate = options.profiles.getLastProfileUpdate({
     ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
@@ -1529,7 +1602,7 @@ function getRecommendationClusters(
     activeIndex: activeIndex ? mapRecommendationIndex(activeIndex) : null,
     total: clusters.length,
     items: limitedClusters.map((cluster, index) =>
-      mapRecommendationCluster(cluster, index + 1, clusterEvidence)
+      mapRecommendationCluster(cluster, index + 1, clusterEvidence, options.clusterLabels)
     )
   };
 }
@@ -1549,6 +1622,8 @@ function enqueueRecommendationMaintenanceTask(
       return service.enqueueKeywordRebuild();
     case "recent_intent_rebuild":
       return service.enqueueRecentIntentRebuild();
+    case "cluster_label_rebuild":
+      return service.enqueueClusterLabelRebuild();
     case "evaluation":
       return service.enqueueEvaluation();
     case "ftrl_train":
@@ -1585,6 +1660,7 @@ function getRecommendationTransparency(options: {
   profiles: SqliteProfileRepository;
   rankings: SqliteRankingRepository;
   rankingService: RecommendationRankingService;
+  clusterLabels: InterestClusterLabelService;
   settings: ReturnType<SettingsService["getSettings"]>["ranking"];
   maintenanceSettings?: ReturnType<SettingsService["getSettings"]>["recommendationMaintenance"];
   maintenanceScheduleStates?: Array<{
@@ -1839,13 +1915,36 @@ function recommendationAlgorithmModules(
 function mapRecommendationCluster(
   cluster: InterestClusterRow,
   displayIndex: number,
-  evidence: InterestClusterEvidenceRow[]
+  evidence: InterestClusterEvidenceRow[],
+  clusterLabels: InterestClusterLabelService
 ) {
   const diagnostics = clusterDiagnostics(cluster, evidence);
+  const label = clusterLabels.displayLabelForCluster(
+    {
+      id: cluster.id,
+      label: cluster.label,
+      polarity: cluster.polarity,
+      displayIndex
+    },
+    displayIndex
+  );
   return {
     id: cluster.id,
     polarity: cluster.polarity,
-    label: null,
+    label: label.displayLabel,
+    displayLabel: label.displayLabel,
+    labelSource: label.labelSource,
+    autoLabel: label.autoLabel,
+    manualLabel: label.manualLabel,
+    confidence: label.confidence,
+    evidenceCount: Math.max(
+      diagnostics.supportArticleCount,
+      label.representativeArticles.length
+    ),
+    topTerms: label.topTerms,
+    representativeArticles: label.representativeArticles,
+    feedTitles: label.feedTitles,
+    lastGeneratedAt: timestampToIso(label.generatedAt),
     displayIndex,
     weight: cluster.weight,
     sampleCount: cluster.sampleCount,
@@ -2942,7 +3041,8 @@ function parseJobType(value: string | undefined): JobType | undefined | null {
     value === RECENT_INTENT_REBUILD_JOB_TYPE ||
     value === RANKING_EVAL_RUN_JOB_TYPE ||
     value === FTRL_TRAIN_JOB_TYPE ||
-    value === RECOMMENDATION_BACKFILL_JOB_TYPE
+    value === RECOMMENDATION_BACKFILL_JOB_TYPE ||
+    value === INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE
   ) {
     return value;
   }
@@ -3229,6 +3329,14 @@ function sendSettingsError(reply: FastifyReply, error: unknown) {
 
 function sendRecommendationMaintenanceError(reply: FastifyReply, error: unknown) {
   if (error instanceof RecommendationMaintenanceServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendInterestClusterLabelError(reply: FastifyReply, error: unknown) {
+  if (error instanceof InterestClusterLabelServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

@@ -233,6 +233,12 @@ type RankExplanation = {
       id: string;
       polarity: "positive" | "negative";
       label: string | null;
+      displayLabel?: string;
+      labelSource?: "manual" | "keywords" | "representative_titles" | "feeds" | "fallback";
+      autoLabel?: string | null;
+      manualLabel?: string | null;
+      confidence?: number;
+      topTerms?: string[];
       displayIndex: number;
       weight: number;
       sampleCount: number;
@@ -249,7 +255,8 @@ type RankExplanation = {
 
 - `label` 是后端提供的轻量调试/辅助文本，不作为最终 UI 文案。
 - 前端应优先按 `type` 和 `impact` 使用本地化 dictionary 展示推荐理由。
-- `cluster.displayIndex` 是 v0 推荐解释中展示兴趣簇编号的稳定来源；当前不使用文章标题自动命名兴趣簇。
+- 推荐解释中的 `cluster.label` / `cluster.displayLabel` 使用兴趣簇显示标签，优先级为 `manualLabel > autoLabel > interest_clusters.label > 兴趣簇 #N`。
+- `cluster.displayIndex` 是 fallback 编号的稳定来源。
 
 ## Auth
 
@@ -866,7 +873,13 @@ read_progress
         "cluster": {
           "id": "cluster_01",
           "polarity": "positive",
-          "label": null,
+          "label": "AI 编程代理",
+          "displayLabel": "AI 编程代理",
+          "labelSource": "manual",
+          "autoLabel": "AI Agent / CLI / 本地模型",
+          "manualLabel": "AI 编程代理",
+          "confidence": 0.74,
+          "topTerms": ["AI", "Agent", "CLI"],
           "displayIndex": 1,
           "weight": 8,
           "sampleCount": 3,
@@ -890,6 +903,8 @@ read_progress
   }
 }
 ```
+
+当推荐解释返回 cluster match 时，文案应使用 `displayLabel`。示例：`与你的兴趣簇「AI 编程代理」相似`。如果没有可用标签，前端可回退为 `与你的一个正向兴趣簇相似`。该接口不调用 LLM。
 
 如果文章尚未精排：
 
@@ -1446,7 +1461,26 @@ Planned / not implemented. 当前版本不提供 retry API。
         {
           "id": "cluster_01",
           "polarity": "positive",
-          "label": null,
+          "label": "AI Agent / CLI / 本地模型",
+          "displayLabel": "AI Agent / CLI / 本地模型",
+          "labelSource": "keywords",
+          "autoLabel": "AI Agent / CLI / 本地模型",
+          "manualLabel": null,
+          "confidence": 0.74,
+          "evidenceCount": 8,
+          "topTerms": ["AI", "Agent", "CLI"],
+          "representativeArticles": [
+            {
+              "articleId": "article_01",
+              "title": "AI Agent CLI for local model workflows",
+              "feedTitle": "AI Engineering Notes",
+              "eventType": "favorite",
+              "confidence": 0.95,
+              "similarity": 0.98
+            }
+          ],
+          "feedTitles": ["AI Engineering Notes"],
+          "lastGeneratedAt": "2026-05-14T08:07:00.000Z",
           "displayIndex": 1,
           "weight": 8,
           "sampleCount": 3,
@@ -1503,6 +1537,77 @@ degraded
 - `warnings`: 机器码数组，可能包含 `OVERFIT_RISK_HIGH`、`HIGH_WEIGHT_LOW_SUPPORT`、`SINGLE_SOURCE_DOMINANT`、`TOP_SOURCE_DOMINANT`、`WEAK_SIGNAL_HEAVY`、`LOW_INTERNAL_SIMILARITY`。
 
 诊断字段只用于解释与 QA，不直接修改兴趣簇。实际推荐命中仍要求文章与正向簇达到算法文档中的 `positive_interest_match_threshold`。
+
+### Interest Cluster Labels
+
+兴趣簇标签是 explainability metadata only。Cluster label generation is explainability metadata only. It does not change ranking, profile vectors, embedding, or user feedback.
+
+自动标签来源：
+
+- `interest_cluster_evidence` 中的 evidence articles。
+- 同 polarity 的 `profile_terms`。
+- article title / summary。
+- feed title。
+
+自动标签不使用 LLM、reranker、classifier、外部搜索服务或 embedding API。所有标签、关键词、代表文章和来源标题都存 SQLite `interest_cluster_labels`。
+
+展示优先级：
+
+```text
+manual_label
+> auto_label
+> interest_clusters.label
+> 兴趣簇 #N
+```
+
+`labelSource` 可选值：
+
+```text
+manual
+keywords
+representative_titles
+feeds
+fallback
+```
+
+### PATCH /api/recommendation/clusters/:id/label
+
+手动设置或清除兴趣簇显示名称。该接口需要认证，只写 SQLite 标签表，不触发 embedding、ranking recalculation、cluster merge 或 centroid 更新。
+
+请求：
+
+```json
+{
+  "manualLabel": "AI 编程代理"
+}
+```
+
+清除手动名称：
+
+```json
+{
+  "manualLabel": null
+}
+```
+
+验证：
+
+- cluster 不存在返回 `404 NOT_FOUND`。
+- `manualLabel` trim 后必须为 `1..30` 字符，或为 `null`。
+- 空字符串按 `null` 处理，恢复自动标签。
+
+响应：
+
+```json
+{
+  "data": {
+    "ok": true,
+    "clusterId": "cluster_01",
+    "displayLabel": "AI 编程代理",
+    "labelSource": "manual"
+  }
+}
+```
 
 判定顺序：
 
@@ -1603,6 +1708,7 @@ POST /api/recommendation/backfill/fingerprints
 POST /api/recommendation/rebuild-duplicates
 POST /api/recommendation/rebuild-keywords
 POST /api/recommendation/rebuild-recent-intent
+POST /api/recommendation/rebuild-cluster-labels
 POST /api/recommendation/evaluate
 POST /api/recommendation/ftrl/reset
 POST /api/recommendation/ftrl/promote
@@ -1618,6 +1724,8 @@ POST /api/recommendation/ftrl/promote
   }
 }
 ```
+
+`POST /api/recommendation/rebuild-cluster-labels` enqueue `interest_cluster_label_rebuild`。该 job 遍历 active embedding index 下的兴趣簇，重建 `auto_label`、`label_terms_json`、`representative_articles_json`、`feed_titles_json` 和 `confidence`，并保留已有 `manual_label`。它不调用 provider，不创建 `embedding_generate`，不创建 `ranking_recalculate`，不写 `article_rank_scores`。
 
 `POST /api/recommendation/ftrl/reset` 响应：
 
@@ -1672,7 +1780,7 @@ POST /api/recommendation/ftrl/promote
 - 实时：RSS refresh 后保留 embedding enqueue，并延迟 duplicate rebuild；embedding 完成后保留 profile/ranking；强行为后延迟 recent intent 和 FTRL train。
 - 15 分钟：有强行为或未训练样本时 enqueue recent intent / FTRL。
 - 每小时：recent intent、duplicate、embedding health；ranking 只在维护输出变脏后 enqueue。
-- 每日：keyword profile、duplicate、recent intent、FTRL、ranking。
+- 每日：keyword profile、duplicate、recent intent、FTRL、cluster_label_daily、ranking。
 - 每周：evaluation diagnostic，默认关闭。
 
 影响排序：

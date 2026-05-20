@@ -2318,6 +2318,7 @@ describe("server API vertical slice", () => {
         "/api/recommendation/rebuild-duplicates",
         "/api/recommendation/rebuild-keywords",
         "/api/recommendation/rebuild-recent-intent",
+        "/api/recommendation/rebuild-cluster-labels",
         "/api/recommendation/evaluate"
       ]) {
         const first = await app.inject({ method: "POST", url });
@@ -2372,6 +2373,195 @@ describe("server API vertical slice", () => {
         .prepare("select status from rank_model_versions where id = 'ftrl_promote_test'")
         .get() as { status: string } | undefined;
       expect(model?.status).toBe("active");
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("requires authentication for manual interest cluster label updates", async () => {
+    const db = createEmptyDatabase();
+    const app = buildRealServer({ db, logger: false, cookieSecure: false });
+
+    try {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/recommendation/clusters/cluster_missing/label",
+        payload: {
+          manualLabel: "AI 编程代理"
+        }
+      });
+
+      expect(response.statusCode, response.body).toBe(401);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("sets and clears manual interest cluster labels in transparency", async () => {
+    const db = createFixtureDatabase();
+    const { index } = createActiveEmbeddingDiagnosticsFixture(db, {
+      providerTestStatus: "success"
+    });
+    insertApiClusterLabelFixture(db, index.id);
+    const app = buildServer({ db, logger: false, now: () => 20_000 });
+
+    try {
+      const missing = await app.inject({
+        method: "PATCH",
+        url: "/api/recommendation/clusters/missing/label",
+        payload: {
+          manualLabel: "Missing"
+        }
+      });
+      expect(missing.statusCode, missing.body).toBe(404);
+
+      const tooLong = await app.inject({
+        method: "PATCH",
+        url: "/api/recommendation/clusters/cluster_label_api/label",
+        payload: {
+          manualLabel: "x".repeat(31)
+        }
+      });
+      expect(tooLong.statusCode, tooLong.body).toBe(400);
+
+      const set = await app.inject({
+        method: "PATCH",
+        url: "/api/recommendation/clusters/cluster_label_api/label",
+        payload: {
+          manualLabel: "AI 编程代理"
+        }
+      });
+      expect(set.statusCode, set.body).toBe(200);
+      expect(set.json()).toMatchObject({
+        data: {
+          ok: true,
+          clusterId: "cluster_label_api",
+          displayLabel: "AI 编程代理",
+          labelSource: "manual"
+        }
+      });
+
+      const transparency = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency"
+      });
+      expect(transparency.statusCode, transparency.body).toBe(200);
+      expect(transparency.json()).toMatchObject({
+        data: {
+          clusters: {
+            items: [
+              {
+                id: "cluster_label_api",
+                label: "AI 编程代理",
+                displayLabel: "AI 编程代理",
+                labelSource: "manual",
+                autoLabel: expect.stringMatching(/AI|Agent|CLI/i),
+                manualLabel: "AI 编程代理",
+                topTerms: expect.arrayContaining([expect.stringMatching(/AI|Agent|CLI/i)])
+              }
+            ]
+          }
+        }
+      });
+
+      insertSemanticRankForContext(db, {
+        articleId: "article_cluster_label_api",
+        rankContext: "rec_v2:embedding:cocoon_5:schema_2",
+        embeddingIndexId: index.id,
+        score: 1.4,
+        calculatedAt: 21_000
+      });
+      new SqliteRankingRepository(db).upsertRankContext({
+        id: "rec_v2:embedding:cocoon_5:schema_2",
+        algorithmVersion: "rec_v2",
+        featureSchemaVersion: 2,
+        embeddingIndexId: index.id,
+        cocoonLevel: 5,
+        now: 21_000
+      });
+      const explanation = await app.inject({
+        method: "GET",
+        url: "/api/articles/article_cluster_label_api/explanation"
+      });
+      expect(explanation.statusCode, explanation.body).toBe(200);
+      expect(explanation.json()).toMatchObject({
+        data: {
+          reasons: expect.arrayContaining([
+            expect.objectContaining({
+              type: "interest",
+              cluster: expect.objectContaining({
+                id: "cluster_label_api",
+                label: "AI 编程代理",
+                displayLabel: "AI 编程代理",
+                labelSource: "manual"
+              })
+            })
+          ])
+        }
+      });
+
+      const cleared = await app.inject({
+        method: "PATCH",
+        url: "/api/recommendation/clusters/cluster_label_api/label",
+        payload: {
+          manualLabel: null
+        }
+      });
+      expect(cleared.statusCode, cleared.body).toBe(200);
+      expect(cleared.json().data).toMatchObject({
+        clusterId: "cluster_label_api",
+        labelSource: "keywords"
+      });
+      expect(cleared.json().data.displayLabel).toMatch(/AI|Agent|CLI/i);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("dedupes interest cluster label rebuild jobs", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false, now: () => 30_000 });
+
+    try {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/recommendation/rebuild-cluster-labels"
+      });
+      const second = await app.inject({
+        method: "POST",
+        url: "/api/recommendation/rebuild-cluster-labels"
+      });
+
+      expect(first.statusCode, first.body).toBe(200);
+      expect(second.statusCode, second.body).toBe(200);
+      expect(second.json()).toMatchObject({
+        data: {
+          jobId: first.json().data.jobId,
+          existing: true
+        }
+      });
+      expect(
+        db
+          .prepare(
+            "select count(*) as count from jobs where type = 'interest_cluster_label_rebuild'"
+          )
+          .get()
+      ).toEqual({ count: 1 });
+      expect(
+        db
+          .prepare(
+            "select count(*) as count from jobs where type in ('embedding_generate', 'ranking_recalculate')"
+          )
+          .get()
+      ).toEqual({ count: 0 });
     } finally {
       await app.close();
       db.close();
@@ -4605,6 +4795,83 @@ function createActiveEmbeddingDiagnosticsFixture(
   };
 }
 
+function insertApiClusterLabelFixture(db: DibaoDatabase, embeddingIndexId: string): void {
+  const feeds = new SqliteFeedRepository(db);
+  const articles = new SqliteArticleRepository(db);
+  const profiles = new SqliteProfileRepository(db);
+  feeds.upsert({
+    id: "feed_cluster_label_api",
+    title: "AI Engineering Notes",
+    feedUrl: "https://example.com/cluster-label.xml",
+    now: 6000
+  });
+  articles.upsert({
+    id: "article_cluster_label_api",
+    feedId: "feed_cluster_label_api",
+    url: "https://example.com/cluster-label",
+    canonicalUrl: "https://example.com/cluster-label",
+    title: "AI Agent CLI for local model workflows",
+    summary: "OpenAI and Gemini agents can run from a command line interface.",
+    publishedAt: 6100,
+    discoveredAt: 6100,
+    dedupeKey: "article_cluster_label_api",
+    now: 6100
+  });
+  new SqliteVecVectorStore(db).upsertArticleVector({
+    articleId: "article_cluster_label_api",
+    embeddingIndexId,
+    vector: [1, 0, 0],
+    contentHash: "article_cluster_label_api:6100",
+    now: 6200
+  });
+  profiles.upsertCluster({
+    id: "cluster_label_api",
+    embeddingIndexId,
+    polarity: "positive",
+    centroidVectorBlob: toVectorBlob([1, 0, 0]),
+    weight: 8,
+    sampleCount: 3,
+    now: 6300
+  });
+  db.prepare(
+    `
+      insert into behavior_events (
+        id,
+        article_id,
+        event_type,
+        event_weight,
+        created_at
+      )
+      values ('event_cluster_label_api', 'article_cluster_label_api', 'favorite', 5, 6400)
+    `
+  ).run();
+  profiles.insertClusterEvidence({
+    id: "evidence_cluster_label_api",
+    clusterId: "cluster_label_api",
+    articleId: "article_cluster_label_api",
+    behaviorEventId: "event_cluster_label_api",
+    evidenceSource: "live_event",
+    confidence: 0.95,
+    similarity: 0.98,
+    weightDelta: 5,
+    createdAt: 6500
+  });
+  db.prepare(
+    `
+      insert into profile_terms (
+        term,
+        polarity,
+        scope,
+        weight,
+        evidence_count,
+        last_event_at,
+        updated_at
+      )
+      values ('AI Agent', 'positive', 'long', 3, 3, 6500, 6500)
+    `
+  ).run();
+}
+
 function insertRank(
   db: DibaoDatabase,
   articleId: string,
@@ -4692,6 +4959,47 @@ function insertRankForContext(
     input.articleId,
     input.rankContext,
     input.embeddingIndexId ?? null,
+    input.score,
+    input.calculatedAt
+  );
+}
+
+function insertSemanticRankForContext(
+  db: DibaoDatabase,
+  input: {
+    articleId: string;
+    rankContext: string;
+    embeddingIndexId: string;
+    score: number;
+    calculatedAt: number;
+  }
+): void {
+  db.prepare(
+    `
+      insert into article_rank_scores (
+        article_id,
+        rank_context,
+        embedding_index_id,
+        score,
+        interest_score,
+        semantic_score,
+        source_score,
+        freshness_score,
+        state_score,
+        diversity_score,
+        penalty_score,
+        calculated_at
+      )
+      values (?, ?, ?, ?, 0.8, 0.8, 0, 0, 0, 0, 0, ?)
+      on conflict(article_id, rank_context) do update set
+        score = excluded.score,
+        semantic_score = excluded.semantic_score,
+        calculated_at = excluded.calculated_at
+    `
+  ).run(
+    input.articleId,
+    input.rankContext,
+    input.embeddingIndexId,
     input.score,
     input.calculatedAt
   );

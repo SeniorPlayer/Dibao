@@ -418,10 +418,37 @@ export const zhCN = {
     clusters: {
       empty: "还没有形成兴趣簇。继续点赞、收藏、稍后读或读完文章后，系统会自动生成。",
       generated:
-        "兴趣簇不是系统预设的，而是根据你的行为自动生成和更新。当前先用编号展示，避免把单篇文章标题误当成主题名。",
+        "兴趣簇不是系统预设的，而是根据你的行为自动生成和更新。标签来自本地关键词、代表文章和来源标题，也可以手动重命名。",
       positive: "正向",
       negative: "负向",
-      fallbackName: (index: number) => `兴趣簇 ${index}`,
+      fallbackName: (index: number) => `兴趣簇 #${index}`,
+      sourceLabel: "来源",
+      source: {
+        manual: "用户命名",
+        keywords: "关键词自动生成",
+        representative_titles: "代表文章自动推断",
+        feeds: "来源标题自动推断",
+        fallback: "自动 fallback"
+      },
+      confidenceLabel: "置信度",
+      confidence: {
+        high: "高",
+        medium: "中",
+        low: "低"
+      },
+      lowConfidence: "自动推断，可能不准",
+      autoInference: (label: string) => `自动推断：${label}`,
+      evidence: (count: number) => `证据：${count} 篇文章`,
+      generatedAt: (value: string) => `生成：${value}`,
+      topTerms: "关键词",
+      representativeArticles: "代表文章",
+      feedTitles: "来源",
+      rename: "重命名",
+      renameLabel: "兴趣簇显示名称",
+      renamePlaceholder: "例如：AI 编程代理",
+      saveLabel: "保存名称",
+      clearManualLabel: "恢复自动标签",
+      cancelRename: "取消",
       details: (weight: string, sampleCount: number, updatedAt: string) =>
         `权重 ${weight} · 样本 ${sampleCount} · 更新 ${updatedAt}`,
       diagnostics: (
@@ -438,7 +465,7 @@ export const zhCN = {
         high: "过拟合风险高"
       },
       matched: (name: string, similarity: string, weight: string, sampleCount: number) =>
-        `命中「${name}」，相似度 ${similarity}，簇权重 ${weight}，样本 ${sampleCount}。`,
+        `与你的兴趣簇「${name}」相似，相似度 ${similarity}，簇权重 ${weight}，样本 ${sampleCount}。`,
       openAll: "查看全部兴趣簇",
       allTitle: "全部兴趣簇",
       allSummary: (count: number) => `完整显示 ${count} 个兴趣簇，按权重从高到低排序。`,
@@ -474,6 +501,11 @@ export const zhCN = {
         keyword_rebuild: {
           label: "重建关键词画像",
           description: "从本地行为和文章文本重建关键词画像，文章已清理时尽量使用快照。",
+          remoteUse: "不会调用 provider"
+        },
+        cluster_label_rebuild: {
+          label: "重建兴趣簇标签",
+          description: "用本地证据文章、画像关键词和来源标题刷新兴趣簇显示标签。",
           remoteUse: "不会调用 provider"
         },
         recent_intent_rebuild: {
@@ -1249,10 +1281,37 @@ export const enUS = {
     clusters: {
       empty: "No interest clusters have formed yet. Likes, favorites, read-later saves, and completed reads will generate them automatically.",
       generated:
-        "Interest clusters are not preset by the system. They are generated and updated from your behavior. They are numbered for now so a single article title is not mistaken for a topic name.",
+        "Interest clusters are not preset by the system. Labels come from local keywords, representative articles, and feed titles, and can be renamed manually.",
       positive: "Positive",
       negative: "Negative",
-      fallbackName: (index: number) => `Interest cluster ${index}`,
+      fallbackName: (index: number) => `Interest cluster #${index}`,
+      sourceLabel: "Source",
+      source: {
+        manual: "User named",
+        keywords: "Keyword inference",
+        representative_titles: "Representative-title inference",
+        feeds: "Feed-title inference",
+        fallback: "Automatic fallback"
+      },
+      confidenceLabel: "Confidence",
+      confidence: {
+        high: "High",
+        medium: "Medium",
+        low: "Low"
+      },
+      lowConfidence: "Automatic inference, may be inaccurate",
+      autoInference: (label: string) => `Auto inference: ${label}`,
+      evidence: (count: number) => `Evidence: ${count} articles`,
+      generatedAt: (value: string) => `Generated: ${value}`,
+      topTerms: "Keywords",
+      representativeArticles: "Representative articles",
+      feedTitles: "Feeds",
+      rename: "Rename",
+      renameLabel: "Cluster display name",
+      renamePlaceholder: "For example: AI coding agents",
+      saveLabel: "Save name",
+      clearManualLabel: "Restore automatic label",
+      cancelRename: "Cancel",
       details: (weight: string, sampleCount: number, updatedAt: string) =>
         `Weight ${weight} · samples ${sampleCount} · updated ${updatedAt}`,
       diagnostics: (
@@ -1269,7 +1328,7 @@ export const enUS = {
         high: "High overfit risk"
       },
       matched: (name: string, similarity: string, weight: string, sampleCount: number) =>
-        `Matched "${name}" with similarity ${similarity}, cluster weight ${weight}, samples ${sampleCount}.`,
+        `Similar to your interest cluster "${name}", similarity ${similarity}, cluster weight ${weight}, samples ${sampleCount}.`,
       openAll: "View all interest clusters",
       allTitle: "All interest clusters",
       allSummary: (count: number) => `Showing all ${count} interest clusters, sorted by weight.`,
@@ -1305,6 +1364,11 @@ export const enUS = {
         keyword_rebuild: {
           label: "Rebuild keyword profile",
           description: "Rebuilds the keyword profile from local behavior and article text, using snapshots when articles were cleaned up.",
+          remoteUse: "Does not call provider"
+        },
+        cluster_label_rebuild: {
+          label: "Rebuild cluster labels",
+          description: "Refreshes cluster display labels from local evidence articles, profile keywords, and feed titles.",
           remoteUse: "Does not call provider"
         },
         recent_intent_rebuild: {

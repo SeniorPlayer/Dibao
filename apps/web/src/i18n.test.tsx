@@ -646,6 +646,7 @@ describe("web i18n", () => {
           onBack={() => undefined}
           onOpenAllClusters={() => undefined}
           onRunMaintenanceTask={() => Promise.resolve()}
+          onUpdateClusterLabel={() => Promise.resolve()}
           runningMaintenanceTask={null}
           status={{
             mode: "personalized",
@@ -718,6 +719,7 @@ describe("web i18n", () => {
               }
             ]
           }}
+          updatingClusterLabelId={null}
         />
       </DibaoI18nProvider>
     );
@@ -729,7 +731,7 @@ describe("web i18n", () => {
     expect(html).toContain("like: 2");
     expect(html).toContain("LOW_COVERAGE");
     expect(html).toContain("当前兴趣簇");
-    expect(html).toContain("兴趣簇 1");
+    expect(html).toContain("兴趣簇 #1");
     expect(html).toContain("权重 8");
     expect(html).toContain("过拟合风险高");
     expect(html).toContain("支撑文章 2");

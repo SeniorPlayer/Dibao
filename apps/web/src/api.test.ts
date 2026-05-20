@@ -773,6 +773,52 @@ describe("web API client", () => {
     expect(calls).toEqual(["/api/articles/article%2Fone/explanation"]);
   });
 
+  it("updates manual recommendation cluster labels", async () => {
+    const calls: Array<{ path: string; body: unknown; method: string | undefined }> = [];
+    const api = createDibaoApi(async (input, init) => {
+      calls.push({
+        path: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: init?.method
+      });
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            ok: true,
+            clusterId: "cluster/one",
+            displayLabel: "AI 编程代理",
+            labelSource: "manual"
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await expect(
+      api.updateRecommendationClusterLabel("cluster/one", "AI 编程代理")
+    ).resolves.toMatchObject({
+      ok: true,
+      clusterId: "cluster/one",
+      displayLabel: "AI 编程代理",
+      labelSource: "manual"
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/recommendation/clusters/cluster%2Fone/label",
+        method: "PATCH",
+        body: {
+          manualLabel: "AI 编程代理"
+        }
+      }
+    ]);
+  });
+
   it("posts article actions using the contract-shaped body", async () => {
     const calls: Array<{ path: string; body: unknown; method: string | undefined }> = [];
     const api = createDibaoApi(async (input, init) => {

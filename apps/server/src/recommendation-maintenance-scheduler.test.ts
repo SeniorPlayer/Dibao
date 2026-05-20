@@ -86,7 +86,7 @@ describe("RecommendationMaintenanceScheduler", () => {
     }
   });
 
-  it("enqueues daily keyword, duplicate, recent intent, FTRL, and ranking work when due", async () => {
+  it("enqueues daily keyword, duplicate, recent intent, FTRL, cluster-label, and ranking work when due", async () => {
     const fixture = createFixture(10 * 86_400_000);
     try {
       const scheduler = createScheduler(fixture);
@@ -96,7 +96,9 @@ describe("RecommendationMaintenanceScheduler", () => {
       expect(fixture.maintenance.scheduleStateFor("duplicate_daily")?.lastJobId).toEqual(expect.any(String));
       expect(fixture.maintenance.scheduleStateFor("recent_intent_daily")?.lastJobId).toEqual(expect.any(String));
       expect(fixture.maintenance.scheduleStateFor("ftrl_train_daily")?.lastJobId).toEqual(expect.any(String));
+      expect(fixture.maintenance.scheduleStateFor("cluster_label_daily")?.lastJobId).toEqual(expect.any(String));
       expect(fixture.maintenance.scheduleStateFor("ranking_recalculate_daily")?.lastJobId).toEqual(expect.any(String));
+      expect(fixture.jobs.countByTypeAndStatus("interest_cluster_label_rebuild", "queued")).toBe(1);
     } finally {
       fixture.db.close();
     }

@@ -24,6 +24,9 @@ const recommendationMaintenanceSchedulePath = fileURLToPath(
 const embeddingUsageAndProfileEvidenceSnapshotsPath = fileURLToPath(
   new URL("../migrations/007_embedding_usage_and_profile_evidence_snapshots.sql", import.meta.url)
 );
+const interestClusterLabelsPath = fileURLToPath(
+  new URL("../migrations/008_interest_cluster_labels.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -61,6 +64,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "007",
       name: "embedding_usage_and_profile_evidence_snapshots",
       sql: readFileSync(embeddingUsageAndProfileEvidenceSnapshotsPath, "utf8")
+    },
+    {
+      version: "008",
+      name: "interest_cluster_labels",
+      sql: readFileSync(interestClusterLabelsPath, "utf8")
     }
   ];
 }

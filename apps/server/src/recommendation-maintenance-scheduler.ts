@@ -23,6 +23,7 @@ export type RecommendationMaintenanceSchedulerService = Pick<
   | "enqueueDuplicateRebuild"
   | "enqueueKeywordRebuild"
   | "enqueueFtrlTrain"
+  | "enqueueClusterLabelRebuild"
   | "enqueueRecalculate"
   | "enqueueEvaluation"
   | "recordScheduleEnqueue"
@@ -161,6 +162,13 @@ export class RecommendationMaintenanceScheduler {
     }
     if (settings.ftrlAutoTrainEnabled && this.isDue("ftrl_train_daily", ONE_DAY_MS)) {
       this.enqueue("ftrl_train_daily", () => this.options.maintenance.enqueueFtrlTrain(), enqueued);
+    }
+    if (this.isDue("cluster_label_daily", ONE_DAY_MS)) {
+      this.enqueue(
+        "cluster_label_daily",
+        () => this.options.maintenance.enqueueClusterLabelRebuild(),
+        enqueued
+      );
     }
     if (this.isDue("ranking_recalculate_daily", ONE_DAY_MS)) {
       this.enqueue("ranking_recalculate_daily", () => this.options.maintenance.enqueueRecalculate(), enqueued);
@@ -303,6 +311,7 @@ const ALL_TASK_KEYS = [
   "duplicate_daily",
   "ftrl_train_periodic",
   "ftrl_train_daily",
+  "cluster_label_daily",
   "ranking_recalculate_hourly",
   "ranking_recalculate_daily",
   "evaluation_weekly",
@@ -334,6 +343,8 @@ export function maintenanceJobTypeForTaskKey(taskKey: string): string | null {
     case "ftrl_train_periodic":
     case "ftrl_train_daily":
       return FTRL_TRAIN_JOB_TYPE;
+    case "cluster_label_daily":
+      return "interest_cluster_label_rebuild";
     default:
       return null;
   }

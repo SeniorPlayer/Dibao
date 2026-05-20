@@ -13,6 +13,8 @@ packages/db/migrations/003_profile_event_jobs.sql
 packages/db/migrations/004_recommendation_v2.sql
 packages/db/migrations/005_recommendation_v2_completion.sql
 packages/db/migrations/006_recommendation_maintenance_schedule.sql
+packages/db/migrations/007_embedding_usage_and_profile_evidence_snapshots.sql
+packages/db/migrations/008_interest_cluster_labels.sql
 ```
 
 实现时可以根据具体库和 sqlite-vec 版本调整语法，但不得改变这里定义的数据边界和所有权原则。
@@ -686,7 +688,49 @@ idx_interest_clusters_last_matched_at(last_matched_at)
 说明：
 
 - centroid 使用同一 `embedding_index` 的向量空间。
-- label 初期可为空，由用户或后续模型生成。
+- `label` 保留兼容旧语义；当前对外展示优先使用 `interest_cluster_labels` 中的 `manual_label` / `auto_label`。
+
+### interest_cluster_labels
+
+`008_interest_cluster_labels` 新增。兴趣簇标签缓存表，只用于算法透明页和推荐解释，不参与排序、画像向量、cluster centroid、embedding 生成或用户反馈计算。
+
+```text
+cluster_id TEXT PRIMARY KEY REFERENCES interest_clusters(id) ON DELETE CASCADE
+auto_label TEXT
+manual_label TEXT
+label_source TEXT NOT NULL DEFAULT 'fallback'
+label_terms_json TEXT
+representative_articles_json TEXT
+feed_titles_json TEXT
+confidence REAL NOT NULL DEFAULT 0
+generated_at INTEGER
+updated_at INTEGER NOT NULL
+```
+
+`label_source` 可选值：
+
+```text
+manual
+keywords
+representative_titles
+feeds
+fallback
+```
+
+索引：
+
+```text
+idx_interest_cluster_labels_source(label_source, updated_at)
+```
+
+说明：
+
+- 自动标签由本地 evidence articles、`profile_terms`、article title/summary、feed title 生成。
+- 不调用 LLM、外部分类/摘要服务、外部搜索服务或 embedding API。
+- `manual_label` 优先级最高；清除后恢复 `auto_label`。
+- 展示优先级：`manual_label > auto_label > interest_clusters.label > 兴趣簇 #N`。
+- `confidence` 是 0..1 的解释置信度，只影响 UI 文案，不影响推荐分数。
+- `representative_articles_json`、`feed_titles_json` 和 `label_terms_json` 是透明页解释数据。
 
 ### feed_stats
 
@@ -894,6 +938,7 @@ recent_intent_rebuild
 ftrl_train
 ranking_eval_run
 recommendation_backfill
+interest_cluster_label_rebuild
 ```
 
 `status` 可选值：
@@ -919,6 +964,7 @@ MVP runner 约定：
 - `ranking_recalculate` 全量重算通过 cursor chunk payload 续跑，默认 chunk size 为 500；指定 `articleIds` 重算仍应用可见性过滤。
 - `vector_index_rebuild` payload 目前只接受 `{ "embeddingIndexId": "string" }`。
 - 推荐维护 job payload 目前只接受 `null` 或 `{}`；automatic maintenance 只负责入队，执行逻辑仍在对应 job handler。
+- `interest_cluster_label_rebuild` 只写 `interest_cluster_labels`，不写 `article_rank_scores`，不创建 `embedding_generate` 或 `ranking_recalculate` job。
 - `ranking_eval_run` 是诊断 job，成功或失败都不触发 ranking/profile/FTRL 更新。
 
 API 诊断约定：
@@ -1033,6 +1079,7 @@ packages/db/src/migration-runner.ts
 002_*
 003_*
 ...
+008_*
 ```
 
 ## Schema 验收标准
