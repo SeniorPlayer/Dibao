@@ -303,7 +303,7 @@ def main() -> int:
         token_pattern=None,
         lowercase=False,
         ngram_range=(1, 2),
-        min_df=2,
+        min_df=1,
         max_df=0.6,
     )
     model = BERTopic(
