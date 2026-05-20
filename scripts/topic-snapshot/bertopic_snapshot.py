@@ -87,6 +87,12 @@ HTML_NOISE_TOKENS = {
     "url",
     "yahei",
 }
+HTML_NOISE_FRAGMENT_RE = re.compile(
+    r"nbsp|ldquo|rdquo|strong|span|xiumi|mpa|template|width|height|pstrong|"
+    r"ptspan|arial39|relnoopener|targetblank|noreferrer|pimg|pnbspp|pnbsp|"
+    r"h[1-6]strong|strongh[1-6]|particle|pcomments|ppoints",
+    re.IGNORECASE,
+)
 EN_STOPWORDS = {
     "about",
     "after",
@@ -527,6 +533,8 @@ def is_useful_token(token: str, cjk_re, stopwords: set[str]) -> bool:
         return False
     if any(lower.startswith(prefix) for prefix in HTML_NOISE_PREFIXES):
         return False
+    if HTML_NOISE_FRAGMENT_RE.search(token):
+        return False
     if REPEATED_SHORT_LATIN_RE.fullmatch(token):
         return False
     if LETTER_DIGIT_RE.fullmatch(token):
@@ -600,11 +608,20 @@ def document_text(row) -> str:
     parts = []
     if title:
         parts.extend([title, title])
-    if summary:
+    if summary and not looks_like_template_residue(summary):
         parts.append(summary)
     if not parts and row["content_text"]:
         parts.append(row["content_text"][:800])
     return "\n\n".join(parts)
+
+
+def looks_like_template_residue(text: str) -> bool:
+    cleaned = clean_tokenizer_text(text)
+    latin_tokens = LATIN_TOKEN_RE.findall(cleaned)
+    if not latin_tokens:
+        return False
+    noisy = sum(1 for token in latin_tokens if HTML_NOISE_FRAGMENT_RE.search(token))
+    return noisy >= 2 or noisy / max(len(latin_tokens), 1) >= 0.2
 
 
 def assignment_scores_for(topic_key: int, topics, probabilities):
