@@ -602,7 +602,7 @@ def document_text(row) -> str:
         parts.extend([title, title])
     if summary:
         parts.append(summary)
-    if len(" ".join(parts)) < 80 and row["content_text"]:
+    if not parts and row["content_text"]:
         parts.append(row["content_text"][:800])
     return "\n\n".join(parts)
 
