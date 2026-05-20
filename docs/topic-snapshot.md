@@ -37,7 +37,7 @@ Migration `010_corpus_topic_snapshots` 新增：
 
 BERTopic 是可选 Python runner，不是主 server runtime 依赖。未安装 Python / BERTopic，或未配置 `DIBAO_TOPIC_SNAPSHOT_COMMAND` 时，主服务仍正常启动。
 
-Runner 默认使用 jieba 做中文分词，以改善 BERTopic c-TF-IDF / topic terms。jieba 只影响主题词抽取，不参与 embedding，不生成向量，不调用 embedding provider，也不下载模型。BERTopic 仍然通过 `embedding_model=None` 和 `model.fit_transform(docs, embeddings)` 消费已有 `article_embeddings.vector_blob`。
+Runner 默认使用 `mixed` tokenizer 支持中、日、英三语 topic terms：中文文本使用 jieba，日文文本使用 Janome，英文/技术词使用 regex 保留。jieba / Janome 只影响 BERTopic c-TF-IDF / topic terms，不参与 embedding，不生成向量，不调用 embedding provider，也不下载模型。BERTopic 仍然通过 `embedding_model=None` 和 `model.fit_transform(docs, embeddings)` 消费已有 `article_embeddings.vector_blob`。
 
 手动安装与运行见：
 
@@ -49,7 +49,14 @@ scripts/topic-snapshot/README.md
 
 ```bash
 DIBAO_TOPIC_SNAPSHOT_COMMAND="python scripts/topic-snapshot/bertopic_snapshot.py"
+DIBAO_TOPIC_SNAPSHOT_TOKENIZER=mixed
 ```
+
+`DIBAO_TOPIC_SNAPSHOT_TOKENIZER` 可选值：
+
+- `mixed`: 默认值。出现平假名/片假名时优先 Janome，否则汉字文本使用 jieba；英文/技术词始终用 regex 保留。
+- `zh`: 中文优先，使用 jieba + 英文/技术词 regex。
+- `ja`: 日文优先，使用 Janome + 英文/技术词 regex。
 
 可选传入用户词典：
 
@@ -60,7 +67,21 @@ python scripts/topic-snapshot/bertopic_snapshot.py \
   --max-articles 3000 \
   --scope-days 60 \
   --min-topic-size 15 \
+  --tokenizer zh \
   --jieba-userdict /path/to/userdict.txt \
+  --output /tmp/dibao-topic-snapshot.json
+```
+
+日文优先手动运行示例：
+
+```bash
+python scripts/topic-snapshot/bertopic_snapshot.py \
+  --db /data/dibao.sqlite \
+  --embedding-index-id <active-index-id> \
+  --max-articles 3000 \
+  --scope-days 60 \
+  --min-topic-size 15 \
+  --tokenizer ja \
   --output /tmp/dibao-topic-snapshot.json
 ```
 

@@ -24,6 +24,8 @@ const TOPIC_SNAPSHOT_CANDIDATE_QUERY = "active_enabled_feeds_with_current_embedd
 
 type TopicSnapshotAlgorithm = "bertopic_precomputed_embeddings" | "fixture" | "local_fallback";
 
+export type TopicSnapshotTokenizer = "mixed" | "zh" | "ja";
+
 type TopicSnapshotRunStatus = "running" | "succeeded" | "failed";
 
 type TopicSnapshotRunRow = {
@@ -85,6 +87,7 @@ export type TopicSnapshotRunnerInput = Required<
 > & {
   dbPath: string;
   embeddingIndexId: string;
+  tokenizer: TopicSnapshotTokenizer;
   outputPath?: string;
 };
 
@@ -199,6 +202,7 @@ export type TopicSnapshotServiceOptions = {
   databasePath?: string;
   runner?: TopicSnapshotRunner;
   runnerCommand?: string | null;
+  runnerTokenizer?: string | null;
   now?: () => number;
   runIdFactory?: () => string;
 };
@@ -207,6 +211,7 @@ export class TopicSnapshotService {
   private readonly now: () => number;
   private readonly runIdFactory: () => string;
   private readonly runnerCommand: string | null;
+  private readonly runnerTokenizer: TopicSnapshotTokenizer;
 
   constructor(private readonly options: TopicSnapshotServiceOptions) {
     this.now = options.now ?? Date.now;
@@ -215,6 +220,11 @@ export class TopicSnapshotService {
       options.runnerCommand === undefined
         ? process.env.DIBAO_TOPIC_SNAPSHOT_COMMAND?.trim() || null
         : options.runnerCommand?.trim() || null;
+    this.runnerTokenizer = normalizeTopicSnapshotTokenizer(
+      options.runnerTokenizer === undefined
+        ? process.env.DIBAO_TOPIC_SNAPSHOT_TOKENIZER
+        : options.runnerTokenizer
+    );
   }
 
   isRunnerConfigured(): boolean {
@@ -253,7 +263,8 @@ export class TopicSnapshotService {
       maxArticles: normalized.maxArticles,
       scopeDays: normalized.scopeDays,
       minTopicSize: normalized.minTopicSize,
-      minArticles: normalized.minArticles
+      minArticles: normalized.minArticles,
+      tokenizer: this.runnerTokenizer
     });
 
     if (!this.isRunnerConfigured()) {
@@ -839,12 +850,14 @@ export class TopicSnapshotService {
       if (!this.options.databasePath) {
         return this.options.runner({
           ...input,
-          dbPath: ":memory:"
+          dbPath: ":memory:",
+          tokenizer: this.runnerTokenizer
         });
       }
       return this.options.runner({
         ...input,
-        dbPath: this.options.databasePath
+        dbPath: this.options.databasePath,
+        tokenizer: this.runnerTokenizer
       });
     }
 
@@ -869,6 +882,8 @@ export class TopicSnapshotService {
         String(input.scopeDays),
         "--min-topic-size",
         String(input.minTopicSize),
+        "--tokenizer",
+        this.runnerTokenizer,
         "--output",
         outputPath
       ]);
@@ -1199,6 +1214,13 @@ function isTopicSnapshotAlgorithm(value: unknown): value is TopicSnapshotAlgorit
     value === "fixture" ||
     value === "local_fallback"
   );
+}
+
+function normalizeTopicSnapshotTokenizer(value: string | null | undefined): TopicSnapshotTokenizer {
+  const normalized = value?.trim();
+  return normalized === "zh" || normalized === "ja" || normalized === "mixed"
+    ? normalized
+    : "mixed";
 }
 
 function runSelect(): string {

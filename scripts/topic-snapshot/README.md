@@ -21,6 +21,7 @@ python scripts/topic-snapshot/bertopic_snapshot.py \
   --max-articles 3000 \
   --scope-days 60 \
   --min-topic-size 15 \
+  --tokenizer mixed \
   --output /tmp/dibao-topic-snapshot.json
 ```
 
@@ -33,6 +34,7 @@ python scripts/topic-snapshot/bertopic_snapshot.py \
   --max-articles 3000 \
   --scope-days 60 \
   --min-topic-size 15 \
+  --tokenizer zh \
   --jieba-userdict /path/to/userdict.txt \
   --output /tmp/dibao-topic-snapshot.json
 ```
@@ -56,14 +58,26 @@ To let the server enqueue and run this through the job system, set:
 
 ```bash
 DIBAO_TOPIC_SNAPSHOT_COMMAND="python scripts/topic-snapshot/bertopic_snapshot.py"
+DIBAO_TOPIC_SNAPSHOT_TOKENIZER=mixed
+```
+
+Tokenizer mode can also be pinned:
+
+```bash
+DIBAO_TOPIC_SNAPSHOT_TOKENIZER=zh
+DIBAO_TOPIC_SNAPSHOT_TOKENIZER=ja
 ```
 
 Topic term extraction:
 
-- The runner uses jieba by default for Chinese-friendly topic terms.
+- The runner supports Chinese, Japanese, and English/technical topic terms.
+- `--tokenizer mixed` is the default. It uses Janome for text with visible Japanese kana, jieba for Chinese Han text, and regex for English/technical tokens.
+- `--tokenizer zh` uses jieba plus English/technical regex tokens.
+- `--tokenizer ja` uses Janome plus English/technical regex tokens.
 - Chinese text is tokenized with `jieba.cut_for_search(text, HMM=True)`.
+- Japanese text is tokenized with Janome, keeping nouns, verb stems, adjective stems, and unknown words.
 - Common mixed technical terms such as `RSS`, `SQLite`, `sqlite-vec`, `BERTopic`, `OpenAI`, `Ollama`, `API`, and `FTRL` are preserved by a regex tokenizer.
-- jieba only affects BERTopic c-TF-IDF / topic terms. It does not participate in embedding generation.
+- jieba and Janome only affect BERTopic c-TF-IDF / topic terms. They do not participate in embedding generation.
 - If `--jieba-userdict` is provided and cannot be loaded, the runner writes a clear error to stderr and exits non-zero.
 
 Safety constraints:
@@ -87,7 +101,9 @@ path = "scripts/topic-snapshot/bertopic_snapshot.py"
 spec = importlib.util.spec_from_file_location("bertopic_snapshot", path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-module.configure_jieba(None)
-print(module.mixed_zh_en_tokenizer("邸报正在用 BERTopic 改善中文 RSS 主题词，sqlite-vec 仍只复用已有向量。"))
+module.configure_tokenizers(None)
+print("ZH:", module.tokenizer_for("zh")("邸报正在用 BERTopic 改善中文 RSS 主题词，sqlite-vec 仍只复用已有向量。"))
+print("JA:", module.tokenizer_for("ja")("生成AIと推薦システムがニュース配信を変える。ローカルモデルとベクトル検索も重要です。"))
+print("MIXED:", module.tokenizer_for("mixed")("邸报と生成AI、SQLite、BERTopic を使ったRSS推薦システム。"))
 PY
 ```

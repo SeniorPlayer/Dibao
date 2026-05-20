@@ -31,6 +31,7 @@ docker compose up --build -d
 | `DIBAO_WEB_DIST_DIR` | `apps/web/dist` | 可选，覆盖 Web 静态资源目录。 |
 | `DIBAO_BACKGROUND_JOBS` | `true` | 可设为 `false` 关闭后台 job runner，主要用于测试。 |
 | `DIBAO_TOPIC_SNAPSHOT_COMMAND` | 未配置 | 可选 BERTopic 语料主题快照 runner 命令；未配置时主服务照常启动。 |
+| `DIBAO_TOPIC_SNAPSHOT_TOKENIZER` | `mixed` | 可选 topic terms tokenizer：`mixed` / `zh` / `ja`；只影响可选 runner 的主题词抽取，不影响 embedding 或排序。 |
 
 健康检查使用匿名接口：
 

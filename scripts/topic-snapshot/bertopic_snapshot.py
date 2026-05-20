@@ -8,6 +8,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 try:
+    from janome.tokenizer import Tokenizer as JanomeTokenizer
     import jieba
     import numpy as np
     from bertopic import BERTopic
@@ -20,11 +21,15 @@ except Exception as exc:  # pragma: no cover - documented manual runner path
 DAY_MS = 24 * 60 * 60 * 1000
 CONTENT_TEXT_LIMIT = 3000
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+HIRAGANA_RE = re.compile(r"[\u3040-\u309f]")
+KATAKANA_RE = re.compile(r"[\u30a0-\u30ff]")
+JAPANESE_RE = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff]")
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.#-]{1,}")
 URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z]+|#\d+);")
 TOKEN_EDGE_RE = re.compile(r"^[^\w\u4e00-\u9fff+.#-]+|[^\w\u4e00-\u9fff+.#-]+$")
+TOKENIZER_MODES = {"mixed", "zh", "ja"}
 
 CUSTOM_TERMS = [
     "邸报",
@@ -47,6 +52,21 @@ CUSTOM_TERMS = [
     "Ollama",
     "API",
     "FTRL",
+]
+
+JA_CUSTOM_TERMS = [
+    "人工知能",
+    "生成AI",
+    "大規模言語モデル",
+    "機械学習",
+    "深層学習",
+    "推薦システム",
+    "検索エンジン",
+    "自然言語処理",
+    "オープンソース",
+    "ローカルモデル",
+    "ベクトル検索",
+    "意味検索",
 ]
 
 STOPWORDS = {
@@ -82,11 +102,47 @@ STOPWORDS = {
     "src",
 }
 
+JA_STOPWORDS = {
+    "これ",
+    "それ",
+    "あれ",
+    "この",
+    "その",
+    "あの",
+    "ここ",
+    "そこ",
+    "ため",
+    "もの",
+    "こと",
+    "よう",
+    "さん",
+    "する",
+    "ある",
+    "いる",
+    "なる",
+    "できる",
+    "ない",
+    "れる",
+    "られる",
+    "について",
+    "として",
+    "など",
+    "また",
+    "そして",
+    "ニュース",
+    "記事",
+    "発表",
+    "今回",
+    "現在",
+}
+
+_janome_tokenizer = None
+
 
 def main() -> int:
     args = parse_args()
     try:
-        configure_jieba(args.jieba_userdict)
+        configure_tokenizers(args.jieba_userdict)
     except Exception as exc:
         print(f"Failed to load jieba user dictionary: {exc}", file=sys.stderr)
         return 2
@@ -119,7 +175,7 @@ def main() -> int:
     docs = [document_text(row) for row in rows]
     embeddings = np.vstack([row["vector"] for row in rows]).astype(np.float32)
     vectorizer = CountVectorizer(
-        tokenizer=mixed_zh_en_tokenizer,
+        tokenizer=tokenizer_for(args.tokenizer),
         token_pattern=None,
         lowercase=False,
         ngram_range=(1, 2),
@@ -194,7 +250,12 @@ def parse_args():
     parser.add_argument("--min-topic-size", type=int, required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--jieba-userdict")
+    parser.add_argument("--tokenizer", choices=sorted(TOKENIZER_MODES), default="mixed")
     return parser.parse_args()
+
+
+def configure_tokenizers(userdict: str | None) -> None:
+    configure_jieba(userdict)
 
 
 def configure_jieba(userdict: str | None) -> None:
@@ -204,18 +265,95 @@ def configure_jieba(userdict: str | None) -> None:
         jieba.load_userdict(userdict)
 
 
-def mixed_zh_en_tokenizer(text: str) -> list[str]:
+def tokenizer_for(mode: str):
+    if mode == "zh":
+        return zh_tokenizer
+    if mode == "ja":
+        return ja_tokenizer
+    return mixed_cjk_en_tokenizer
+
+
+def zh_tokenizer(text: str) -> list[str]:
+    cleaned = clean_tokenizer_text(text)
+    return zh_tokens_from_cleaned_text(cleaned) + latin_tokens_from_cleaned_text(cleaned)
+
+
+def ja_tokenizer(text: str) -> list[str]:
+    cleaned = clean_tokenizer_text(text)
+    return ja_tokens_from_cleaned_text(cleaned) + latin_tokens_from_cleaned_text(cleaned)
+
+
+def mixed_cjk_en_tokenizer(text: str) -> list[str]:
     cleaned = clean_tokenizer_text(text)
     tokens = []
+    if HIRAGANA_RE.search(cleaned) or KATAKANA_RE.search(cleaned):
+        tokens.extend(ja_tokens_from_cleaned_text(cleaned))
+    elif CJK_RE.search(cleaned):
+        tokens.extend(zh_tokens_from_cleaned_text(cleaned))
+    tokens.extend(latin_tokens_from_cleaned_text(cleaned))
+    return tokens
+
+
+def mixed_zh_en_tokenizer(text: str) -> list[str]:
+    return zh_tokenizer(text)
+
+
+def zh_tokens_from_cleaned_text(cleaned: str) -> list[str]:
+    tokens = []
+    tokens.extend(
+        term
+        for term in custom_terms_from_cleaned_text(CUSTOM_TERMS + JA_CUSTOM_TERMS, cleaned)
+        if is_useful_zh_token(term)
+    )
     for token in jieba.cut_for_search(cleaned, HMM=True):
         normalized = normalize_token(token)
-        if is_useful_token(normalized):
-            tokens.append(normalized)
-    for token in LATIN_TOKEN_RE.findall(cleaned):
-        normalized = normalize_token(token)
-        if is_useful_token(normalized):
+        if is_useful_zh_token(normalized):
             tokens.append(normalized)
     return tokens
+
+
+def ja_tokens_from_cleaned_text(cleaned: str) -> list[str]:
+    tokens = []
+    tokens.extend(
+        term
+        for term in custom_terms_from_cleaned_text(CUSTOM_TERMS + JA_CUSTOM_TERMS, cleaned)
+        if is_useful_ja_token(term)
+    )
+    for token in janome_tokenizer().tokenize(cleaned):
+        surface = token.surface.strip()
+        base = token.base_form.strip() if token.base_form and token.base_form != "*" else surface
+        part = token.part_of_speech.split(",")[0]
+        if part not in {"名詞", "動詞", "形容詞", "未知語"}:
+            continue
+        normalized = normalize_token(base)
+        if is_useful_ja_token(normalized):
+            tokens.append(normalized)
+    return tokens
+
+
+def latin_tokens_from_cleaned_text(cleaned: str) -> list[str]:
+    tokens = []
+    for token in LATIN_TOKEN_RE.findall(cleaned):
+        normalized = normalize_token(token)
+        if is_useful_latin_token(normalized):
+            tokens.append(normalized)
+    return tokens
+
+
+def custom_terms_from_cleaned_text(terms: list[str], cleaned: str) -> list[str]:
+    tokens = []
+    for term in terms:
+        count = cleaned.count(term)
+        if count > 0:
+            tokens.extend([term] * count)
+    return tokens
+
+
+def janome_tokenizer():
+    global _janome_tokenizer
+    if _janome_tokenizer is None:
+        _janome_tokenizer = JanomeTokenizer()
+    return _janome_tokenizer
 
 
 def clean_tokenizer_text(text: str) -> str:
@@ -228,12 +366,24 @@ def normalize_token(token: str) -> str:
     return TOKEN_EDGE_RE.sub("", token.strip())
 
 
-def is_useful_token(token: str) -> bool:
+def is_useful_zh_token(token: str) -> bool:
+    return is_useful_token(token, cjk_re=CJK_RE, stopwords=STOPWORDS)
+
+
+def is_useful_ja_token(token: str) -> bool:
+    return is_useful_token(token, cjk_re=JAPANESE_RE, stopwords=STOPWORDS | JA_STOPWORDS)
+
+
+def is_useful_latin_token(token: str) -> bool:
+    return is_useful_token(token, cjk_re=JAPANESE_RE, stopwords=STOPWORDS | JA_STOPWORDS)
+
+
+def is_useful_token(token: str, cjk_re, stopwords: set[str]) -> bool:
     if not token or len(token) > 32:
         return False
-    if token.lower() in STOPWORDS or token in STOPWORDS:
+    if token.lower() in stopwords or token in stopwords:
         return False
-    if CJK_RE.search(token):
+    if cjk_re.search(token):
         return len(token) >= 2
     return LATIN_TOKEN_RE.fullmatch(token) is not None
 
@@ -365,6 +515,8 @@ def params(args):
         "maxArticles": args.max_articles,
         "scopeDays": args.scope_days,
         "minTopicSize": args.min_topic_size,
+        "tokenizer": args.tokenizer,
+        "jiebaUserdict": bool(args.jieba_userdict),
     }
 
 

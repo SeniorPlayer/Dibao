@@ -18,6 +18,7 @@ import {
   TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE,
   TopicSnapshotService,
   TopicSnapshotServiceError,
+  type TopicSnapshotRunnerInput,
   type TopicSnapshotRunnerOutput
 } from "./topic-snapshot-service.js";
 
@@ -32,10 +33,15 @@ afterEach(() => {
 describe("TopicSnapshotService", () => {
   it("imports fixture output, writes topics and centroids, and never enqueues embeddings or ranking", async () => {
     const db = createTopicFixtureDatabase();
+    let runnerInput: TopicSnapshotRunnerInput | null = null;
     try {
       const service = new TopicSnapshotService({
         db,
-        runner: () => fixtureRunnerOutput(),
+        runner: (input) => {
+          runnerInput = input;
+          return fixtureRunnerOutput();
+        },
+        runnerTokenizer: "ja",
         now: () => 10_000,
         runIdFactory: () => "run_fixture"
       });
@@ -56,6 +62,13 @@ describe("TopicSnapshotService", () => {
         skippedMissingEmbeddingCount: 1,
         skippedStaleEmbeddingCount: 1,
         error: null
+      });
+      expect(runnerInput).toMatchObject({
+        tokenizer: "ja",
+        embeddingIndexId: "index_topic",
+        maxArticles: 20,
+        scopeDays: 60,
+        minTopicSize: 2
       });
       expect(db.prepare("select count(*) as count from corpus_topics").get()).toEqual({
         count: 1
