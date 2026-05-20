@@ -321,9 +321,52 @@ export function parseEmbeddingGeneratePayload(
 
 function textForEmbedding(article: ArticleEmbeddingCandidateRow): string {
   return [article.title, article.summary, article.contentText]
+    .map(plainTextForEmbedding)
     .filter(Boolean)
     .join("\n\n")
     .slice(0, EMBEDDING_TEXT_MAX_CHARS);
+}
+
+function plainTextForEmbedding(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const text = decodeHtmlEntities(value)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text || null;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (_, entity: string) => {
+    const normalized = entity.toLowerCase();
+    if (normalized === "amp") return "&";
+    if (normalized === "lt") return "<";
+    if (normalized === "gt") return ">";
+    if (normalized === "quot") return "\"";
+    if (normalized === "apos") return "'";
+    if (normalized === "nbsp") return " ";
+    if (normalized.startsWith("#x")) {
+      const codePoint = Number.parseInt(normalized.slice(2), 16);
+      return decodeCodePoint(codePoint);
+    }
+    if (normalized.startsWith("#")) {
+      const codePoint = Number.parseInt(normalized.slice(1), 10);
+      return decodeCodePoint(codePoint);
+    }
+    return "";
+  });
+}
+
+function decodeCodePoint(codePoint: number): string {
+  return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+    ? String.fromCodePoint(codePoint)
+    : "";
 }
 
 export function estimateEmbeddingTokens(text: string): number {

@@ -639,6 +639,64 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("strips HTML from embedding provider input text", async () => {
+    const fixture = createEmbeddingPipelineFixture();
+    const { db, articles, jobs, embeddingJobs } = fixture;
+
+    try {
+      insertEmbeddingArticleFixture(db, articles, "article_html_embedding", "HTML embedding article");
+      db.prepare("update articles set title = ?, summary = ? where id = ?").run(
+        "Plain <em>title</em>",
+        "<p>Summary &amp; <strong>context</strong><script>discard()</script></p>",
+        "article_html_embedding"
+      );
+      articles.upsertContent({
+        articleId: "article_html_embedding",
+        contentHtml: "<article><p>Body <b>HTML</b></p></article>",
+        contentText: "Body <b>HTML</b> &nbsp; text<style>.hidden{}</style>",
+        extractionStatus: "success",
+        extractedAt: 1000,
+        now: 1000
+      });
+      jobs.enqueue({
+        id: "job_embedding_html",
+        type: EMBEDDING_GENERATE_JOB_TYPE,
+        payloadJson: JSON.stringify({
+          embeddingIndexId: "index_openai",
+          articleIds: ["article_html_embedding"]
+        }),
+        maxAttempts: 1,
+        runAfter: 1000,
+        now: 1000
+      });
+      const seenTexts: string[] = [];
+      fixture.adapter.embedBatch = async ({ items }) => {
+        seenTexts.push(...items.map((input) => input.text));
+        return items.map((input) => ({
+          id: input.id,
+          vector: [0.1, 0.2, 0.3]
+        }));
+      };
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          embedding_generate: (job) => embeddingJobs.handleEmbeddingGenerateJob(job)
+        },
+        now: () => 2000
+      });
+
+      await expect(runner.runDueOnce()).resolves.toMatchObject({
+        id: "job_embedding_html"
+      });
+      expect(seenTexts).toEqual([
+        "Plain title\n\nSummary & context\n\nBody HTML text"
+      ]);
+      expect(seenTexts[0]).not.toMatch(/<[^>]+>|discard|hidden/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("does not let old succeeded embedding jobs block future enqueue", () => {
     const fixture = createEmbeddingPipelineFixture();
     const { db, articles, jobs, embeddingJobs } = fixture;
