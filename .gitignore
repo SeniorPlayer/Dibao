@@ -7,8 +7,6 @@ build/
 .env.*
 !.env.example
 *.log
-__pycache__/
-*.pyc
 playwright-report/
 test-results/
 data/

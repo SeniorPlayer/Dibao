@@ -148,9 +148,6 @@ describe("db package", () => {
         "recommendation_maintenance_schedule_state",
         "embedding_usage_events",
         "interest_cluster_merge_candidates",
-        "corpus_topic_runs",
-        "corpus_topics",
-        "corpus_topic_articles",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -169,9 +166,6 @@ describe("db package", () => {
       expect(hasColumn(db, "interest_cluster_labels", "label_diagnostics_json")).toBe(true);
       expect(hasIndex(db, "idx_interest_cluster_labels_source")).toBe(true);
       expect(hasIndex(db, "idx_interest_cluster_merge_candidates_status")).toBe(true);
-      expect(hasIndex(db, "idx_corpus_topic_runs_index_status")).toBe(true);
-      expect(hasIndex(db, "idx_corpus_topics_run_id")).toBe(true);
-      expect(hasIndex(db, "idx_corpus_topic_articles_article_id")).toBe(true);
       expect(hasIndex(db, "idx_profile_terms_polarity_scope_weight")).toBe(true);
     } finally {
       db.close();
@@ -196,7 +190,7 @@ describe("db package", () => {
         "007",
         "008",
         "009",
-        "010"
+        "011"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
@@ -207,9 +201,6 @@ describe("db package", () => {
       expect(hasColumn(db, "interest_cluster_evidence", "feed_title_snapshot")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_labels")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_merge_candidates")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topic_runs")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topics")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topic_articles")).toBe(true);
 
       db.prepare(
         `
@@ -348,56 +339,78 @@ describe("db package", () => {
       expect(
         db.prepare("select count(*) as count from jobs where type like 'interest_cluster_%'").get()
       ).toEqual({ count: 3 });
-      db.prepare(
-        `
-          insert into jobs (
-            id,
-            type,
-            status,
-            attempts,
-            max_attempts,
-            run_after,
-            created_at,
-            updated_at
-          )
-          values ('job_topic_snapshot', 'topic_snapshot_rebuild', 'queued', 0, 1, 2000, 2000, 2000)
-        `
-      ).run();
-      expect(
-        db.prepare("select type from jobs where id = 'job_topic_snapshot'").get()
-      ).toEqual({
-        type: "topic_snapshot_rebuild"
-      });
     } finally {
       db.close();
     }
   });
 
-  it("creates corpus topic snapshot tables with foreign keys and uniqueness constraints", () => {
-    const db = openDatabase(tempDatabasePath(), { migrate: true, loadSqliteVec: false });
+  it("removes legacy corpus topic snapshot artifacts from databases that had the retired migration applied", () => {
+    const db = openDatabase(":memory:", { loadSqliteVec: false });
     try {
-      db.prepare(
-        `
-          insert into feeds (id, title, feed_url, created_at, updated_at)
-          values ('feed_topic', 'Topic Feed', 'https://example.com/topic.xml', 1000, 1000)
-        `
-      ).run();
-      db.prepare(
-        `
-          insert into articles (
-            id,
-            feed_id,
-            url,
-            title,
-            content_hash,
-            discovered_at,
-            dedupe_key,
-            created_at,
-            updated_at
-          )
-          values ('article_topic', 'feed_topic', 'https://example.com/topic', 'Topic article', 'hash_topic', 1000, 'topic', 1000, 1000)
-        `
-      ).run();
+      const migrationsBeforeCleanup = loadDefaultMigrations().filter((migration) => migration.version !== "011");
+      runMigrations(db, migrationsBeforeCleanup, () => 1000);
+
+      db.exec(`
+        create table corpus_topic_runs (id text primary key);
+        create table corpus_topics (id text primary key);
+        create table corpus_topic_articles (id text primary key);
+
+        drop table jobs;
+        create table jobs (
+          id text primary key,
+          type text not null check (
+            type in (
+              'feed_refresh',
+              'content_extract',
+              'embedding_generate',
+              'profile_event_process',
+              'ranking_recalculate',
+              'profile_decay',
+              'retention_cleanup',
+              'vector_index_rebuild',
+              'article_fingerprint_backfill',
+              'duplicate_group_rebuild',
+              'keyword_profile_rebuild',
+              'recent_intent_rebuild',
+              'ftrl_train',
+              'ranking_eval_run',
+              'recommendation_backfill',
+              'interest_cluster_label_rebuild',
+              'interest_cluster_merge_diagnostics',
+              'interest_cluster_auto_merge',
+              'topic_snapshot_rebuild'
+            )
+          ),
+          status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+          payload_json text,
+          error text,
+          attempts integer not null default 0,
+          max_attempts integer not null default 3,
+          run_after integer not null,
+          started_at integer,
+          finished_at integer,
+          created_at integer not null,
+          updated_at integer not null
+        );
+
+        drop table interest_cluster_labels;
+        create table interest_cluster_labels (
+          cluster_id text primary key references interest_clusters(id) on delete cascade,
+          auto_label text,
+          manual_label text,
+          label_source text not null default 'fallback' check (
+            label_source in ('manual', 'keywords', 'representative_titles', 'feeds', 'corpus_topic', 'fallback')
+          ),
+          label_terms_json text,
+          representative_articles_json text,
+          feed_titles_json text,
+          label_diagnostics_json text,
+          confidence real not null default 0,
+          generated_at integer,
+          updated_at integer not null
+        );
+      `);
+
       db.prepare(
         `
           insert into embedding_providers (
@@ -411,7 +424,7 @@ describe("db package", () => {
             created_at,
             updated_at
           )
-          values ('provider_topic', 'openai_compatible', 'Provider', 'https://api.example.com/v1', 'fixture', 3, 1, 1000, 1000)
+          values ('provider_cleanup', 'openai_compatible', 'Provider', 'https://api.example.com/v1', 'fixture', 3, 1, 1000, 1000)
         `
       ).run();
       db.prepare(
@@ -427,85 +440,83 @@ describe("db package", () => {
             created_at,
             updated_at
           )
-          values ('index_topic', 'provider_topic', 'fixture', 3, 'cosine', 'vec_topic', 'active', 1000, 1000)
+          values ('index_cleanup', 'provider_cleanup', 'fixture', 3, 'cosine', 'vec_cleanup', 'active', 1000, 1000)
         `
       ).run();
       db.prepare(
         `
-          insert into corpus_topic_runs (
+          insert into interest_clusters (
             id,
             embedding_index_id,
-            status,
-            algorithm,
-            scope_json,
+            polarity,
+            centroid_vector_blob,
+            weight,
+            sample_count,
             created_at,
             updated_at
           )
-          values ('run_topic', 'index_topic', 'succeeded', 'fixture', '{}', 1000, 1000)
+          values ('cluster_cleanup', 'index_cleanup', 'positive', ?, 1, 1, 1000, 1000)
+        `
+      ).run(float32VectorToBuffer([1, 0, 0]));
+      db.prepare(
+        `
+          insert into interest_cluster_labels (
+            cluster_id,
+            auto_label,
+            label_source,
+            updated_at
+          )
+          values ('cluster_cleanup', 'Legacy Topic', 'corpus_topic', 1000)
         `
       ).run();
       db.prepare(
         `
-          insert into corpus_topics (
+          insert into jobs (
             id,
-            run_id,
-            topic_key,
-            top_terms_json,
-            representative_articles_json,
+            type,
+            status,
+            attempts,
+            max_attempts,
+            run_after,
             created_at,
             updated_at
           )
-          values ('topic_1', 'run_topic', '0', '[{"term":"AI","weight":1}]', '[]', 1000, 1000)
+          values ('job_topic_cleanup', 'topic_snapshot_rebuild', 'queued', 0, 1, 1000, 1000, 1000)
         `
       ).run();
-      expect(() =>
-        db
-          .prepare(
-            `
-              insert into corpus_topics (
-                id,
-                run_id,
-                topic_key,
-                top_terms_json,
-                representative_articles_json,
-                created_at,
-                updated_at
-              )
-              values ('topic_duplicate', 'run_topic', '0', '[]', '[]', 1000, 1000)
-            `
-          )
-          .run()
-      ).toThrow();
-      db.prepare(
-        `
-          insert into corpus_topic_articles (
-            run_id,
-            topic_id,
-            article_id,
-            created_at
-          )
-          values ('run_topic', 'topic_1', 'article_topic', 1000)
-        `
-      ).run();
-      expect(() =>
-        db
-          .prepare(
-            `
-              insert into corpus_topic_articles (
-                run_id,
-                topic_id,
-                article_id,
-                created_at
-              )
-              values ('run_topic', 'topic_1', 'article_topic', 1000)
-            `
-          )
-          .run()
-      ).toThrow();
 
-      db.prepare("delete from corpus_topic_runs where id = 'run_topic'").run();
-      expect(countTable(db, "corpus_topics")).toBe(0);
-      expect(countTable(db, "corpus_topic_articles")).toBe(0);
+      const cleanupMigration = loadDefaultMigrations().find((migration) => migration.version === "011");
+      expect(cleanupMigration).toBeDefined();
+      expect(runMigrations(db, [cleanupMigration!], () => 2000).map((migration) => migration.version)).toEqual([
+        "011"
+      ]);
+
+      expect(hasTableOrView(db, "corpus_topic_runs")).toBe(false);
+      expect(hasTableOrView(db, "corpus_topics")).toBe(false);
+      expect(hasTableOrView(db, "corpus_topic_articles")).toBe(false);
+      expect(
+        db.prepare("select count(*) as count from jobs where type = 'topic_snapshot_rebuild'").get()
+      ).toEqual({ count: 0 });
+      expect(db.prepare("select label_source as labelSource from interest_cluster_labels").get()).toEqual({
+        labelSource: "fallback"
+      });
+      expect(() =>
+        db.prepare(
+          `
+            insert into jobs (
+              id,
+              type,
+              status,
+              attempts,
+              max_attempts,
+              run_after,
+              created_at,
+              updated_at
+            )
+            values ('job_topic_rejected', 'topic_snapshot_rebuild', 'queued', 0, 1, 1000, 1000, 1000)
+          `
+        ).run()
+      ).toThrow();
     } finally {
       db.close();
     }
@@ -569,7 +580,7 @@ describe("db package", () => {
         "007",
         "008",
         "009",
-        "010"
+        "011"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -585,9 +596,6 @@ describe("db package", () => {
       expect(hasTableOrView(db, "embedding_usage_events")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_labels")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_merge_candidates")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topic_runs")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topics")).toBe(true);
-      expect(hasTableOrView(db, "corpus_topic_articles")).toBe(true);
     } finally {
       db.close();
     }

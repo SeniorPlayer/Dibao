@@ -64,14 +64,7 @@ type ProfileTerm = {
   evidenceCount: number;
 };
 
-type TermSource =
-  | "title"
-  | "summary"
-  | "feed"
-  | "profile"
-  | "representative"
-  | "event"
-  | "corpus_topic";
+type TermSource = "title" | "summary" | "feed" | "profile" | "representative" | "event";
 
 type TermCandidate = {
   term: string;
@@ -89,10 +82,6 @@ type LabelGenerationSettings = {
   summaryTermWeight: number;
   representativeTitleWeight: number;
   feedTitleWeight: number;
-  corpusTopicTermWeight: number;
-  corpusTopicCentroidSimilarityThreshold: number;
-  maxCorpusTopicsPerCluster: number;
-  maxCorpusTopicTerms: number;
   commonTermClusterRatioPenalty: number;
   commonTermClusterRatioDrop: number;
 };
@@ -158,12 +147,6 @@ type ClusterLabelDraft = {
   representativeArticles: ClusterDisplayLabel["representativeArticles"];
   feedTitles: string[];
   generatedAt: number;
-};
-
-type CorpusTopicTerm = {
-  term: string;
-  weight: number;
-  topicConfidence: number;
 };
 
 export type ClusterDisplayLabel = {
@@ -578,23 +561,6 @@ export class InterestClusterLabelService {
       addTextCandidates(candidates, term.term, weight, "profile", lexicon);
     }
 
-    const corpusTopicTerms = this.listCorpusTopicTermsForCluster(
-      cluster,
-      evidence,
-      lexicon
-    );
-    for (const term of corpusTopicTerms) {
-      addTermCandidate(
-        candidates,
-        term.term,
-        settings.corpusTopicTermWeight *
-          clamp(term.topicConfidence || 0.5, 0.3, 1) *
-          clamp(Math.abs(term.weight) || 1, 0.5, 2.5),
-        "corpus_topic",
-        lexicon
-      );
-    }
-
     const feedTitles = uniqueNonEmpty(evidence.map((item) => item.feedTitle)).slice(
       0,
       settings.maxFeedTitles
@@ -628,12 +594,8 @@ export class InterestClusterLabelService {
       const clusterRatio = clusterCount / Math.max(input.totalClusters, 1);
       const idf = Math.log(1 + input.totalClusters / (1 + clusterCount));
       const protectedTerm = isProtectedTerm(candidate.key, input.lexicon);
-      const corpusTopicOnly =
-        candidate.sources.has("corpus_topic") && candidate.sources.size === 1;
       const commonPenalty =
-        !protectedTerm &&
-        !corpusTopicOnly &&
-        clusterRatio > settings.commonTermClusterRatioPenalty
+        !protectedTerm && clusterRatio > settings.commonTermClusterRatioPenalty
           ? 0.3
           : 1;
       return {
@@ -646,7 +608,7 @@ export class InterestClusterLabelService {
     const hasAlternatives = candidateRows.some(
       (candidate) => candidate.clusterRatio <= settings.commonTermClusterRatioDrop || candidate.protectedTerm
     );
-    const selectedCandidates = dedupeSubsumedTerms(
+    const labelTerms = dedupeSubsumedTerms(
       candidateRows
         .filter((candidate) => {
           if (
@@ -660,11 +622,12 @@ export class InterestClusterLabelService {
         })
         .sort((left, right) => right.weight - left.weight || left.term.localeCompare(right.term)),
       input.lexicon
-    ).slice(0, settings.maxTerms);
-    const labelTerms = selectedCandidates.map((candidate) => ({
-      term: candidate.term,
-      weight: Number(candidate.weight.toFixed(4))
-    }));
+    )
+      .slice(0, settings.maxTerms)
+      .map((candidate) => ({
+        term: candidate.term,
+        weight: Number(candidate.weight.toFixed(4))
+      }));
 
     const confidence = confidenceFor({
       evidence: draft.evidence,
@@ -672,39 +635,16 @@ export class InterestClusterLabelService {
       sourceCount: draft.feedTitles.length
     });
     const diagnostics = defaultLabelDiagnostics(confidence);
-    const topCandidate = selectedCandidates[0] ?? null;
 
     if (labelTerms.length > 0 && labelTerms[0]!.weight >= 1.4) {
       return {
         autoLabel: labelTerms.slice(0, 3).map((term) => term.term).join(" / "),
-        labelSource:
-          topCandidate?.sources.has("corpus_topic") &&
-          topCandidate.sources.size === 1
-            ? "corpus_topic"
-            : "keywords",
+        labelSource: "keywords",
         labelTerms,
         representativeArticles: draft.representativeArticles,
         feedTitles: draft.feedTitles,
         confidence,
         labelDiagnostics: diagnostics,
-        generatedAt: draft.generatedAt
-      };
-    }
-
-    if (
-      topCandidate?.sources.has("corpus_topic") &&
-      labelTerms.length > 0 &&
-      labelTerms[0]!.weight >= 0.35
-    ) {
-      const boostedConfidence = Math.max(confidence, 0.35);
-      return {
-        autoLabel: labelTerms.slice(0, 3).map((term) => term.term).join(" / "),
-        labelSource: "corpus_topic",
-        labelTerms,
-        representativeArticles: draft.representativeArticles,
-        feedTitles: draft.feedTitles,
-        confidence: boostedConfidence,
-        labelDiagnostics: defaultLabelDiagnostics(boostedConfidence),
         generatedAt: draft.generatedAt
       };
     }
@@ -970,128 +910,6 @@ export class InterestClusterLabelService {
       .all(polarity) as ProfileTerm[];
   }
 
-  private listCorpusTopicTermsForCluster(
-    cluster: ClusterDbRow,
-    evidence: EvidenceArticle[],
-    lexicon: EffectiveLabelLexicon
-  ): CorpusTopicTerm[] {
-    const runId = this.latestSuccessfulTopicRunId(cluster.embeddingIndexId);
-    if (!runId) {
-      return [];
-    }
-
-    const settings = lexicon.labelGeneration;
-    const topics = new Map<string, { termsJson: string; confidence: number; score: number }>();
-    const evidenceArticleIds = uniqueNonEmpty(evidence.map((item) => item.articleId));
-
-    if (evidenceArticleIds.length > 0) {
-      for (const chunk of chunks(evidenceArticleIds, 200)) {
-        const placeholders = chunk.map(() => "?").join(", ");
-        const rows = this.options.db
-          .prepare(
-            `
-              select
-                ct.id,
-                ct.top_terms_json as topTermsJson,
-                ct.confidence,
-                count(*) as overlapCount
-              from corpus_topic_articles cta
-              join corpus_topics ct on ct.id = cta.topic_id
-              where cta.run_id = ?
-                and cta.article_id in (${placeholders})
-              group by ct.id
-              order by overlapCount desc, ct.article_count desc, ct.confidence desc
-              limit ?
-            `
-          )
-          .all(runId, ...chunk, settings.maxCorpusTopicsPerCluster) as Array<{
-          id: string;
-          topTermsJson: string;
-          confidence: number;
-          overlapCount: number;
-        }>;
-        for (const row of rows) {
-          topics.set(row.id, {
-            termsJson: row.topTermsJson,
-            confidence: row.confidence,
-            score: row.overlapCount
-          });
-        }
-      }
-    }
-
-    if (topics.size < settings.maxCorpusTopicsPerCluster) {
-      const centroid = fromVectorBlob(cluster.centroidVectorBlob);
-      const rows = this.options.db
-        .prepare(
-          `
-            select
-              id,
-              top_terms_json as topTermsJson,
-              centroid_vector_blob as centroidVectorBlob,
-              confidence,
-              article_count as articleCount
-            from corpus_topics
-            where run_id = ?
-              and centroid_vector_blob is not null
-            order by article_count desc, confidence desc
-            limit 100
-          `
-        )
-        .all(runId) as Array<{
-        id: string;
-        topTermsJson: string;
-        centroidVectorBlob: Buffer;
-        confidence: number;
-        articleCount: number;
-      }>;
-      for (const row of rows
-        .map((topic) => ({
-          ...topic,
-          similarity: cosineSimilarity(centroid, fromVectorBlob(topic.centroidVectorBlob))
-        }))
-        .filter(
-          (topic) =>
-            topic.similarity >= settings.corpusTopicCentroidSimilarityThreshold &&
-            !topics.has(topic.id)
-        )
-        .sort((left, right) => right.similarity - left.similarity || right.articleCount - left.articleCount)
-        .slice(0, settings.maxCorpusTopicsPerCluster - topics.size)) {
-        topics.set(row.id, {
-          termsJson: row.topTermsJson,
-          confidence: Math.max(row.confidence, row.similarity),
-          score: row.similarity
-        });
-      }
-    }
-
-    return Array.from(topics.values())
-      .sort((left, right) => right.score - left.score)
-      .flatMap((topic) =>
-        parseCorpusTopicTerms(topic.termsJson).map((term) => ({
-          ...term,
-          topicConfidence: topic.confidence
-        }))
-      )
-      .slice(0, settings.maxCorpusTopicTerms);
-  }
-
-  private latestSuccessfulTopicRunId(embeddingIndexId: string): string | null {
-    const row = this.options.db
-      .prepare(
-        `
-          select id
-          from corpus_topic_runs
-          where embedding_index_id = ?
-            and status = 'succeeded'
-          order by finished_at desc, created_at desc, id
-          limit 1
-        `
-      )
-      .get(embeddingIndexId) as { id: string } | undefined;
-    return row?.id ?? null;
-  }
-
   private effectiveLexicon(): EffectiveLabelLexicon {
     const defaultStopwords = [
       ...rawDefaultLexicon.stopwords.en,
@@ -1204,35 +1022,22 @@ function addTextCandidates(
   }
 
   for (const term of tokenizeLabelText(text, lexicon)) {
-    addTermCandidate(candidates, term, weight, source, lexicon);
-  }
-}
-
-function addTermCandidate(
-  candidates: Map<string, TermCandidate>,
-  term: string,
-  weight: number,
-  source: TermSource,
-  lexicon: EffectiveLabelLexicon
-): void {
-  if (!term || weight <= 0 || !isUsefulTerm(term, lexicon)) {
-    return;
-  }
-  const key = normalizeTermKey(term);
-  if (!key) {
-    return;
-  }
-  const existing = candidates.get(key);
-  if (existing) {
-    existing.weight += weight;
-    existing.sources.add(source);
-  } else {
-    candidates.set(key, {
-      term: formatTerm(term, lexicon),
-      key,
-      weight,
-      sources: new Set([source])
-    });
+    const key = normalizeTermKey(term);
+    if (!key) {
+      continue;
+    }
+    const existing = candidates.get(key);
+    if (existing) {
+      existing.weight += weight;
+      existing.sources.add(source);
+    } else {
+      candidates.set(key, {
+        term: formatTerm(term, lexicon),
+        key,
+        weight,
+        sources: new Set([source])
+      });
+    }
   }
 }
 
@@ -1555,14 +1360,6 @@ function uniqueNonEmpty(values: string[]): string[] {
   return result;
 }
 
-function chunks<T>(values: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size));
-  }
-  return result;
-}
-
 function parseManualLabel(
   value: unknown
 ): { ok: true; value: string | null } | { ok: false; message: string; details?: unknown } {
@@ -1654,27 +1451,6 @@ function parseLabelTerms(value: string | null): string[] {
       return null;
     })
     .filter((item): item is string => Boolean(item));
-}
-
-function parseCorpusTopicTerms(value: string | null): Array<{ term: string; weight: number }> {
-  return parseJsonArray(value)
-    .map((item) => {
-      if (typeof item !== "object" || item === null || Array.isArray(item)) {
-        return null;
-      }
-      const row = item as Record<string, unknown>;
-      if (typeof row.term !== "string" || row.term.trim() === "") {
-        return null;
-      }
-      return {
-        term: row.term.trim(),
-        weight:
-          typeof row.weight === "number" && Number.isFinite(row.weight)
-            ? row.weight
-            : 1
-      };
-    })
-    .filter((item): item is { term: string; weight: number } => item !== null);
 }
 
 function parseRepresentativeArticles(

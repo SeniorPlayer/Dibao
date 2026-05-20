@@ -132,13 +132,6 @@ import {
 } from "./retention-cleanup-job-service.js";
 import { SettingsService, SettingsServiceError } from "./settings-service.js";
 import {
-  TOPIC_SNAPSHOT_REBUILD_JOB_TYPE,
-  TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE,
-  TopicSnapshotService,
-  TopicSnapshotServiceError,
-  type TopicSnapshotRunner
-} from "./topic-snapshot-service.js";
-import {
   VectorIndexRebuildJobService,
   VECTOR_INDEX_REBUILD_JOB_TYPE
 } from "./vector-index-rebuild-job-service.js";
@@ -270,18 +263,11 @@ type BuildServerOptions = {
   jobRunnerIntervalMs?: number;
   jobRetryDelayMs?: number;
   embeddingFetcher?: typeof fetch;
-  topicSnapshotRunner?: TopicSnapshotRunner;
-  topicSnapshotRunnerCommand?: string | null;
   webDistDir?: string | false;
 };
 
 export function buildServer(options: BuildServerOptions = {}) {
-  const configuredDatabasePath = options.db
-    ? options.databasePath
-      ? resolveDatabasePath(options.databasePath)
-      : undefined
-    : resolveDatabasePath(options.databasePath);
-  const db = options.db ?? openConfiguredDatabase({ ...options, databasePath: configuredDatabasePath });
+  const db = options.db ?? openConfiguredDatabase(options);
   const closeDatabaseOnClose = options.closeDatabaseOnClose ?? !options.db;
   const settings = new SqliteAppSettingsRepository(db);
   const credentials = new SqliteAuthCredentialRepository(db);
@@ -336,13 +322,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     settings,
     now: options.now
   });
-  const topicSnapshotService = new TopicSnapshotService({
-    db,
-    databasePath: configuredDatabasePath,
-    runner: options.topicSnapshotRunner,
-    runnerCommand: options.topicSnapshotRunnerCommand,
-    now: options.now
-  });
   const clusterMergeService = new InterestClusterMergeService({
     db,
     clusterLabels: clusterLabelService,
@@ -354,7 +333,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     rankingJobs: rankingJobService,
     clusterLabels: clusterLabelService,
     clusterMerge: clusterMergeService,
-    topicSnapshots: topicSnapshotService,
     getRankingSettings: () => settingsService.getSettings().ranking,
     getMaintenanceSettings: () => settingsService.getSettings().recommendationMaintenance,
     now: options.now
@@ -565,8 +543,6 @@ export function buildServer(options: BuildServerOptions = {}) {
       [INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE]: (job) =>
         recommendationMaintenanceService.handleJob(job),
       [INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE]: (job) =>
-        recommendationMaintenanceService.handleJob(job),
-      [TOPIC_SNAPSHOT_REBUILD_JOB_TYPE]: (job) =>
         recommendationMaintenanceService.handleJob(job)
     },
     now: options.now,
@@ -885,28 +861,6 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.post("/api/recommendation/rebuild-cluster-labels", async () => ({
     data: recommendationMaintenanceService.enqueueClusterLabelRebuild()
   }));
-
-  app.get("/api/recommendation/topic-snapshot/latest", async () => ({
-    data: topicSnapshotService.getLatestSnapshotForActiveIndex()
-  }));
-
-  app.post("/api/recommendation/topic-snapshot/rebuild", async (_request, reply) => {
-    try {
-      if (!topicSnapshotService.isRunnerConfigured()) {
-        return sendApiError(
-          reply,
-          409,
-          TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE,
-          "Topic snapshot runner is not configured"
-        );
-      }
-      return {
-        data: recommendationMaintenanceService.enqueueTopicSnapshotRebuild()
-      };
-    } catch (error) {
-      return sendTopicSnapshotError(reply, error);
-    }
-  });
 
   app.get("/api/recommendation/cluster-label-lexicon", async () => ({
     data: clusterLabelService.getClusterLabelLexicon()
@@ -1814,8 +1768,6 @@ function enqueueRecommendationMaintenanceTask(
       return service.enqueueClusterMergeDiagnostics();
     case "cluster_auto_merge":
       return service.enqueueClusterAutoMerge();
-    case "topic_snapshot_rebuild":
-      return service.enqueueTopicSnapshotRebuild();
     case "evaluation":
       return service.enqueueEvaluation();
     case "ftrl_train":
@@ -1940,7 +1892,7 @@ function getRecommendationTransparency(options: {
       moduleStatus,
       algorithmModules: recommendationAlgorithmModules(status, moduleStatus),
       maintenance: {
-        schemaMigration: "010_corpus_topic_snapshots",
+        schemaMigration: "009_interest_cluster_merge_candidates",
         backfillState: "tracked in recommendation_backfill_state",
         explanationAuthority: "article_rank_explanations",
         scoreAuthority: "article_rank_scores",
@@ -3419,8 +3371,7 @@ function parseJobType(value: string | undefined): JobType | undefined | null {
     value === RECOMMENDATION_BACKFILL_JOB_TYPE ||
     value === INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE ||
     value === INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE ||
-    value === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE ||
-    value === TOPIC_SNAPSHOT_REBUILD_JOB_TYPE
+    value === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE
   ) {
     return value;
   }
@@ -3708,19 +3659,6 @@ function sendSettingsError(reply: FastifyReply, error: unknown) {
 function sendRecommendationMaintenanceError(reply: FastifyReply, error: unknown) {
   if (error instanceof RecommendationMaintenanceServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
-  }
-
-  throw error;
-}
-
-function sendTopicSnapshotError(reply: FastifyReply, error: unknown) {
-  if (error instanceof TopicSnapshotServiceError) {
-    const statusCode =
-      error.code === TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE ||
-      error.code === "NO_ACTIVE_EMBEDDING_INDEX"
-        ? 409
-        : 400;
-    return sendApiError(reply, statusCode, error.code, error.message, error.details);
   }
 
   throw error;

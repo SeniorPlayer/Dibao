@@ -2,7 +2,6 @@ import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent, RefObject } fro
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dibaoVersion } from "@dibao/shared";
 import {
-  ApiRequestError,
   defaultAppSettings,
   dibaoApi,
   userMessageForError,
@@ -28,7 +27,6 @@ import {
   type RecommendationStatus,
   type RecommendationClusterItem,
   type RecommendationClusterMergeCandidate,
-  type RecommendationTopicSnapshot,
   type RecommendationTransparency,
   type RecommendationMaintenanceTask,
   type RecommendationMaintenanceTaskResponse,
@@ -225,10 +223,8 @@ export function App() {
   const [mergeCandidates, setMergeCandidates] = useState<RecommendationClusterMergeCandidate[]>(
     []
   );
-  const [topicSnapshot, setTopicSnapshot] = useState<RecommendationTopicSnapshot | null>(null);
   const [runningMaintenanceTask, setRunningMaintenanceTask] =
     useState<RecommendationMaintenanceTask | null>(null);
-  const [isTopicSnapshotRebuilding, setIsTopicSnapshotRebuilding] = useState(false);
   const [updatingClusterLabelId, setUpdatingClusterLabelId] = useState<string | null>(null);
   const [updatingClusterLexicon, setUpdatingClusterLexicon] = useState(false);
   const [updatingMergeCandidateId, setUpdatingMergeCandidateId] = useState<string | null>(null);
@@ -407,9 +403,7 @@ export function App() {
     setAllClustersError(null);
     setClusterLabelLexicon(null);
     setMergeCandidates([]);
-    setTopicSnapshot(null);
     setRunningMaintenanceTask(null);
-    setIsTopicSnapshotRebuilding(false);
     setUpdatingClusterLexicon(false);
     setUpdatingMergeCandidateId(null);
     setIsRecommendationStatusLoading(false);
@@ -630,21 +624,18 @@ export function App() {
     setRecommendationStatusError(null);
 
     try {
-      const [status, lexicon, candidates, snapshot] = await Promise.all([
+      const [status, lexicon, candidates] = await Promise.all([
         dibaoApi.getRecommendationTransparency(),
         dibaoApi.getClusterLabelLexicon(),
-        dibaoApi.listRecommendationClusterMergeCandidates("all"),
-        dibaoApi.getRecommendationTopicSnapshot()
+        dibaoApi.listRecommendationClusterMergeCandidates("all")
       ]);
       setRecommendationStatus(status);
       setClusterLabelLexicon(lexicon);
       setMergeCandidates(candidates.candidates);
-      setTopicSnapshot(snapshot);
     } catch (error) {
       setRecommendationStatus(null);
       setClusterLabelLexicon(null);
       setMergeCandidates([]);
-      setTopicSnapshot(null);
       setRecommendationStatusError(userMessageForError(error, t.errors.api));
     } finally {
       setIsRecommendationStatusLoading(false);
@@ -1370,30 +1361,6 @@ export function App() {
     }
   }
 
-  async function handleRebuildTopicSnapshot() {
-    setIsTopicSnapshotRebuilding(true);
-    setRecommendationStatusError(null);
-    setNotice(null);
-
-    try {
-      const result = await dibaoApi.rebuildRecommendationTopicSnapshot();
-      setNotice({
-        type: "recommendationMaintenanceQueued",
-        label: t.algorithmTransparency.topicSnapshot.rebuild,
-        existing: maintenanceResultWasExisting(result)
-      });
-      await loadRecommendationStatus();
-    } catch (error) {
-      setRecommendationStatusError(
-        error instanceof ApiRequestError && error.code === "TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE"
-          ? t.algorithmTransparency.topicSnapshot.runnerUnavailable
-          : userMessageForError(error, t.errors.api)
-      );
-    } finally {
-      setIsTopicSnapshotRebuilding(false);
-    }
-  }
-
   async function handleUpdateRecommendationClusterLabel(
     clusterId: string,
     manualLabel: string | null
@@ -1740,7 +1707,6 @@ export function App() {
           (isSettingsLoading || isEmbeddingLoading ? t.settings.loading : t.settings.status)
         : appPage.type === "algorithm-transparency"
           ? recommendationStatusError ??
-            noticeText ??
             (isRecommendationStatusLoading
               ? t.recommendationStatus.loading
               : t.algorithmTransparency.status)
@@ -1912,10 +1878,8 @@ export function App() {
           <AlgorithmTransparencyPage
             error={recommendationStatusError}
             isLoading={isRecommendationStatusLoading}
-            notice={noticeText}
             onBack={() => navigateToAppPage({ type: "settings" })}
             onOpenAllClusters={() => navigateToAppPage({ type: "algorithm-clusters" })}
-            onRebuildTopicSnapshot={handleRebuildTopicSnapshot}
             onRunMaintenanceTask={handleRunRecommendationMaintenanceTask}
             onUpdateClusterLabelLexicon={handleUpdateClusterLabelLexicon}
             onUpdateClusterLabel={handleUpdateRecommendationClusterLabel}
@@ -1925,8 +1889,6 @@ export function App() {
             mergeCandidates={mergeCandidates}
             runningMaintenanceTask={runningMaintenanceTask}
             status={recommendationStatus}
-            topicSnapshot={topicSnapshot}
-            isTopicSnapshotRebuilding={isTopicSnapshotRebuilding}
             updatingClusterLexicon={updatingClusterLexicon}
             updatingClusterLabelId={updatingClusterLabelId}
             updatingMergeCandidateId={updatingMergeCandidateId}
@@ -2944,13 +2906,11 @@ export function AlgorithmTransparencyPage(props: {
   clusterLabelLexicon: ClusterLabelLexiconResponse | null;
   error: string | null;
   isLoading: boolean;
-  notice: string | null;
   mergeCandidates: RecommendationClusterMergeCandidate[];
   onBack: () => void;
   onIgnoreCandidate: (candidateId: string) => Promise<void>;
   onMergeCandidate: (candidateId: string) => Promise<void>;
   onOpenAllClusters: () => void;
-  onRebuildTopicSnapshot: () => Promise<void>;
   onRunMaintenanceTask: (task: RecommendationMaintenanceTask, label: string) => Promise<void>;
   onUpdateClusterLabelLexicon: (
     overrides: Partial<ClusterLabelLexiconOverrides>
@@ -2958,8 +2918,6 @@ export function AlgorithmTransparencyPage(props: {
   onUpdateClusterLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
   runningMaintenanceTask: RecommendationMaintenanceTask | null;
   status: RecommendationStatus | null;
-  topicSnapshot: RecommendationTopicSnapshot | null;
-  isTopicSnapshotRebuilding: boolean;
   updatingClusterLexicon: boolean;
   updatingClusterLabelId: string | null;
   updatingMergeCandidateId: string | null;
@@ -3092,7 +3050,6 @@ export function AlgorithmTransparencyPage(props: {
         {props.isLoading ? (
           <p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>
         ) : null}
-        {props.notice ? <p className={styles.settingsNotice}>{props.notice}</p> : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
 
         <section className={classNames(styles.settingsSection, "algorithm-card", "diagnostics-card")}>
@@ -3141,12 +3098,6 @@ export function AlgorithmTransparencyPage(props: {
             </div>
           ) : null}
         </section>
-
-        <TopicSnapshotPanel
-          isRebuilding={props.isTopicSnapshotRebuilding}
-          onRebuild={props.onRebuildTopicSnapshot}
-          snapshot={props.topicSnapshot}
-        />
 
         <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
@@ -3326,92 +3277,6 @@ export function AlgorithmTransparencyPage(props: {
           </section>
         ) : null}
       </div>
-    </section>
-  );
-}
-
-function TopicSnapshotPanel(props: {
-  snapshot: RecommendationTopicSnapshot | null;
-  isRebuilding: boolean;
-  onRebuild: () => Promise<void>;
-}) {
-  const { t, formatDate } = useI18n();
-  const snapshot = props.snapshot;
-  const availableSnapshot = snapshot?.available === true ? snapshot : null;
-  const available = availableSnapshot !== null;
-  const run = availableSnapshot?.run ?? null;
-  const topics = availableSnapshot?.topics.slice(0, 6) ?? [];
-  const unavailableReason =
-    snapshot?.available === false ? snapshot.reason : "NO_TOPIC_SNAPSHOT";
-  const generatedAt = run?.finishedAt ?? run?.createdAt ?? null;
-
-  return (
-    <section className={classNames(styles.settingsSection, "algorithm-card")}>
-      <div>
-        <h3>{t.algorithmTransparency.topicSnapshot.title}</h3>
-        <p>{t.algorithmTransparency.topicSnapshot.body}</p>
-        <p>
-          {run
-            ? t.algorithmTransparency.topicSnapshot.available(
-                run.articleCount,
-                run.topicCount
-              )
-            : t.algorithmTransparency.topicSnapshot.unavailable(
-                unavailableReason
-              )}
-        </p>
-      </div>
-      {run ? (
-        <dl className={styles.algorithmTermList}>
-          <div>
-            <dt>{t.algorithmTransparency.topicSnapshot.generatedAt}</dt>
-            <dd>{generatedAt ? formatDate(new Date(generatedAt).toISOString()) : t.algorithmTransparency.maintenance.neverRun}</dd>
-          </div>
-          <div>
-            <dt>{t.algorithmTransparency.topicSnapshot.embeddingIndex}</dt>
-            <dd>{run.embeddingIndexId}</dd>
-          </div>
-          <div>
-            <dt>{t.algorithmTransparency.topicSnapshot.algorithm}</dt>
-            <dd>{run.algorithm}</dd>
-          </div>
-        </dl>
-      ) : null}
-      {topics.length > 0 ? (
-        <div className={styles.algorithmExplanationList}>
-          {topics.map((topic) => (
-            <article key={topic.id}>
-              <strong>{topic.label ?? t.algorithmTransparency.topicSnapshot.topicName(topic.topicKey)}</strong>
-              <p>
-                {t.algorithmTransparency.topicSnapshot.topicMeta(
-                  topic.articleCount,
-                  topic.topTerms.slice(0, 6).join(" / ")
-                )}
-              </p>
-              {topic.representativeArticles.length > 0 ? (
-                <p>
-                  {t.algorithmTransparency.topicSnapshot.representatives(
-                    topic.representativeArticles
-                      .slice(0, 2)
-                      .map((article) => article.title)
-                      .join(" / ")
-                  )}
-                </p>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      ) : null}
-      <button
-        className={styles.secondaryButton}
-        disabled={props.isRebuilding}
-        onClick={() => void props.onRebuild()}
-        type="button"
-      >
-        {props.isRebuilding
-          ? t.algorithmTransparency.maintenance.running
-          : t.algorithmTransparency.topicSnapshot.rebuild}
-      </button>
     </section>
   );
 }

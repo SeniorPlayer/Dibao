@@ -64,8 +64,7 @@ export type JobType =
   | "recommendation_backfill"
   | "interest_cluster_label_rebuild"
   | "interest_cluster_merge_diagnostics"
-  | "interest_cluster_auto_merge"
-  | "topic_snapshot_rebuild";
+  | "interest_cluster_auto_merge";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -422,7 +421,6 @@ export type InterestClusterLabelSource =
   | "keywords"
   | "representative_titles"
   | "feeds"
-  | "corpus_topic"
   | "fallback";
 
 export type InterestClusterLabelRow = {

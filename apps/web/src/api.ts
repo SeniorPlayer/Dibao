@@ -564,7 +564,7 @@ export type RecommendationClusterItem = {
   polarity: "positive" | "negative";
   label: string | null;
   displayLabel?: string;
-  labelSource?: "manual" | "keywords" | "representative_titles" | "feeds" | "corpus_topic" | "fallback";
+  labelSource?: "manual" | "keywords" | "representative_titles" | "feeds" | "fallback";
   autoLabel?: string | null;
   manualLabel?: string | null;
   confidence?: number;
@@ -623,38 +623,6 @@ export type RecommendationClusterListResponse = {
   total: number;
   items: RecommendationClusterItem[];
 };
-
-export type RecommendationTopicSnapshot =
-  | {
-      available: true;
-      run: {
-        id: string;
-        embeddingIndexId: string;
-        status: "succeeded";
-        algorithm: "bertopic_precomputed_embeddings" | "fixture" | "local_fallback";
-        articleCount: number;
-        topicCount: number;
-        createdAt: number;
-        finishedAt: number | null;
-      };
-      topics: Array<{
-        id: string;
-        topicKey: string;
-        label: string | null;
-        topTerms: string[];
-        articleCount: number;
-        representativeArticles: Array<{
-          articleId: string;
-          title: string;
-          feedTitle: string;
-          score: number | null;
-        }>;
-      }>;
-    }
-  | {
-      available: false;
-      reason: "NO_ACTIVE_EMBEDDING_INDEX" | "NO_TOPIC_SNAPSHOT";
-    };
 
 export type UpdateRecommendationClusterLabelResponse = {
   ok: true;
@@ -948,25 +916,6 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
 
     async getRecommendationTransparency(): Promise<RecommendationTransparency> {
       return (await request<RecommendationTransparency>("/api/recommendation/transparency")).data;
-    },
-
-    async getRecommendationTopicSnapshot(): Promise<RecommendationTopicSnapshot> {
-      return (
-        await request<RecommendationTopicSnapshot>(
-          "/api/recommendation/topic-snapshot/latest"
-        )
-      ).data;
-    },
-
-    async rebuildRecommendationTopicSnapshot(): Promise<RecommendationMaintenanceTaskResponse> {
-      return (
-        await request<RecommendationMaintenanceTaskResponse>(
-          "/api/recommendation/topic-snapshot/rebuild",
-          {
-            method: "POST"
-          }
-        )
-      ).data;
     },
 
     async listRecommendationClusters(

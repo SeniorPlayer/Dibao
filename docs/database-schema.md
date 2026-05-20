@@ -16,7 +16,7 @@ packages/db/migrations/006_recommendation_maintenance_schedule.sql
 packages/db/migrations/007_embedding_usage_and_profile_evidence_snapshots.sql
 packages/db/migrations/008_interest_cluster_labels.sql
 packages/db/migrations/009_interest_cluster_merge_candidates.sql
-packages/db/migrations/010_corpus_topic_snapshots.sql
+packages/db/migrations/011_remove_corpus_topic_snapshots.sql
 ```
 
 实现时可以根据具体库和 sqlite-vec 版本调整语法，但不得改变这里定义的数据边界和所有权原则。
@@ -162,8 +162,6 @@ system.instance_id
 retention cleanup 会跳过清理。`retention.settings` 预留给后续更完整的保留策略对象。
 
 `recommendation.clusterLabelLexicon` 存储兴趣簇标签词典覆盖项，不是排序设置。更新该 key 后可以 enqueue `interest_cluster_label_rebuild`，但不得触发 `ranking_recalculate`、`embedding_generate`、FTS rebuild 或 vector rebuild。
-
-Topic Snapshot 配置通过环境变量 `DIBAO_TOPIC_SNAPSHOT_COMMAND` 指定可选 Python runner。未配置时主服务正常启动，API 会返回明确不可用状态。
 
 ### auth_credentials
 
@@ -722,7 +720,6 @@ manual
 keywords
 representative_titles
 feeds
-corpus_topic
 fallback
 ```
 
@@ -734,96 +731,13 @@ idx_interest_cluster_labels_source(label_source, updated_at)
 
 说明：
 
-- 自动标签由本地 evidence articles、`profile_terms`、article title/summary、feed title 生成；`010` 后可额外读取最新成功的 corpus topic snapshot top terms 作为辅助候选。
+- 自动标签由本地 evidence articles、`profile_terms`、article title/summary、feed title 生成。
 - 不调用 LLM、外部分类/摘要服务、外部搜索服务或 embedding API。
 - `manual_label` 优先级最高；清除后恢复 `auto_label`。
 - 展示优先级：`manual_label > auto_label > interest_clusters.label > 兴趣簇 #N`。
 - `confidence` 是 0..1 的解释置信度，只影响 UI 文案，不影响推荐分数。
 - `representative_articles_json`、`feed_titles_json` 和 `label_terms_json` 是透明页解释数据。
 - `label_diagnostics_json` 由 `009_interest_cluster_merge_candidates` 追加，存储 `{ collision, collisionGroupSize, lowConfidence }`，只用于透明页提示。
-
-### corpus_topic_runs
-
-`010_corpus_topic_snapshots` 新增。一次语料主题快照运行的状态表，只用于 explainability / diagnostics。
-
-```text
-id TEXT PRIMARY KEY
-embedding_index_id TEXT NOT NULL REFERENCES embedding_indexes(id) ON DELETE CASCADE
-status TEXT NOT NULL                    -- running | succeeded | failed
-algorithm TEXT NOT NULL                 -- bertopic_precomputed_embeddings | fixture | local_fallback
-algorithm_version TEXT
-scope_json TEXT NOT NULL
-params_json TEXT
-article_count INTEGER NOT NULL DEFAULT 0
-topic_count INTEGER NOT NULL DEFAULT 0
-skipped_missing_embedding_count INTEGER NOT NULL DEFAULT 0
-skipped_stale_embedding_count INTEGER NOT NULL DEFAULT 0
-started_at INTEGER
-finished_at INTEGER
-error TEXT
-created_at INTEGER NOT NULL
-updated_at INTEGER NOT NULL
-```
-
-索引：
-
-```text
-idx_corpus_topic_runs_index_status(embedding_index_id, status, created_at)
-idx_corpus_topic_runs_created_at(created_at)
-```
-
-### corpus_topics
-
-一次 run 中生成的主题。`centroid_vector_blob` 是对该主题已有文章向量取平均并 normalize 的派生数据，不是新 embedding。
-
-```text
-id TEXT PRIMARY KEY
-run_id TEXT NOT NULL REFERENCES corpus_topic_runs(id) ON DELETE CASCADE
-topic_key TEXT NOT NULL
-label TEXT
-top_terms_json TEXT NOT NULL
-representative_articles_json TEXT NOT NULL
-article_count INTEGER NOT NULL DEFAULT 0
-centroid_vector_blob BLOB
-confidence REAL NOT NULL DEFAULT 0
-created_at INTEGER NOT NULL
-updated_at INTEGER NOT NULL
-UNIQUE(run_id, topic_key)
-```
-
-索引：
-
-```text
-idx_corpus_topics_run_id(run_id)
-idx_corpus_topics_article_count(article_count)
-```
-
-### corpus_topic_articles
-
-文章到 snapshot topic 的 assignment。每个 run 中一篇文章只能归属一个 topic。
-
-```text
-run_id TEXT NOT NULL REFERENCES corpus_topic_runs(id) ON DELETE CASCADE
-topic_id TEXT NOT NULL REFERENCES corpus_topics(id) ON DELETE CASCADE
-article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE
-assignment_score REAL
-is_representative INTEGER NOT NULL DEFAULT 0
-created_at INTEGER NOT NULL
-PRIMARY KEY(run_id, article_id)
-```
-
-索引：
-
-```text
-idx_corpus_topic_articles_topic_id(topic_id)
-idx_corpus_topic_articles_article_id(article_id)
-```
-
-说明：
-
-- Topic Snapshot 只读取 active embedding index 下已有且 content hash 当前的 `article_embeddings.vector_blob`。
-- 缺失或 stale embedding 会跳过，不会 enqueue `embedding_generate`。
-- 该层不写 `article_rank_scores`、不更新 `interest_clusters`、不触发排序重算。
 
 ### interest_cluster_merge_candidates
 
@@ -1098,7 +1012,6 @@ recommendation_backfill
 interest_cluster_label_rebuild
 interest_cluster_merge_diagnostics
 interest_cluster_auto_merge
-topic_snapshot_rebuild
 ```
 
 `status` 可选值：
@@ -1123,11 +1036,10 @@ MVP runner 约定：
 - `embedding_generate` 只对 queued/running open jobs 去重，历史 succeeded job 不会阻止内容变更后的重新 embedding。
 - `ranking_recalculate` 全量重算通过 cursor chunk payload 续跑，默认 chunk size 为 500；指定 `articleIds` 重算仍应用可见性过滤。
 - `vector_index_rebuild` payload 目前只接受 `{ "embeddingIndexId": "string" }`。
-- 推荐维护 job payload 默认只接受 `null` 或 `{}`；`topic_snapshot_rebuild` 可接受 `{ "maxArticles": number, "scopeDays": number, "minTopicSize": number }`。
+- 推荐维护 job payload 目前只接受 `null` 或 `{}`；automatic maintenance 只负责入队，执行逻辑仍在对应 job handler。
 - `interest_cluster_label_rebuild` 只写 `interest_cluster_labels`，不写 `article_rank_scores`，不创建 `embedding_generate` 或 `ranking_recalculate` job。
 - `interest_cluster_merge_diagnostics` 只写 `interest_cluster_merge_candidates`，不改 `interest_clusters`，不创建 `embedding_generate` 或 `ranking_recalculate` job。
 - `interest_cluster_auto_merge` 默认由设置关闭；开启后只合并高置信 open candidates。成功合并后会创建 `interest_cluster_label_rebuild` 和 `ranking_recalculate` job。
-- `topic_snapshot_rebuild` 只写 `corpus_topic_runs` / `corpus_topics` / `corpus_topic_articles`，成功后可创建 `interest_cluster_label_rebuild`；不创建 `embedding_generate`、`ranking_recalculate`、`vector_index_rebuild` 或 FTS rebuild job。
 - `ranking_eval_run` 是诊断 job，成功或失败都不触发 ranking/profile/FTRL 更新。
 
 API 诊断约定：
@@ -1243,6 +1155,8 @@ packages/db/src/migration-runner.ts
 003_*
 ...
 008_*
+009_*
+011_*
 ```
 
 ## Schema 验收标准

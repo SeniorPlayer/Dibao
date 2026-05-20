@@ -12,11 +12,6 @@ import {
 } from "./interest-cluster-merge-service.js";
 import { PermanentJobFailure } from "./job-runner.js";
 import type { RankingRecalculateJobService } from "./ranking-job-service.js";
-import {
-  TOPIC_SNAPSHOT_REBUILD_JOB_TYPE,
-  parseTopicSnapshotRebuildPayload,
-  type TopicSnapshotService
-} from "./topic-snapshot-service.js";
 
 export {
   INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE,
@@ -46,8 +41,7 @@ type MaintenanceJobType =
   | typeof RECOMMENDATION_BACKFILL_JOB_TYPE
   | typeof INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE
   | typeof INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE
-  | typeof INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE
-  | typeof TOPIC_SNAPSHOT_REBUILD_JOB_TYPE;
+  | typeof INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE;
 
 export type RecommendationMaintenanceResult = {
   jobId: string;
@@ -77,7 +71,6 @@ export type RecommendationMaintenanceServiceOptions = {
     InterestClusterMergeService,
     "rebuildActiveIndexCandidates" | "autoMergeOpenCandidates"
   >;
-  topicSnapshots?: Pick<TopicSnapshotService, "handleTopicSnapshotRebuildJob">;
   getRankingSettings?: () => { localLearningEnabled: boolean; localLearningShadowMode: boolean };
   getMaintenanceSettings?: () => { ftrlAutoPromoteEnabled: boolean; clusterAutoMergeEnabled?: boolean };
   now?: () => number;
@@ -151,10 +144,6 @@ export class RecommendationMaintenanceService {
 
   enqueueClusterAutoMerge(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
     return this.enqueueUnique(INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE, options);
-  }
-
-  enqueueTopicSnapshotRebuild(options: RecommendationMaintenanceEnqueueOptions = {}): RecommendationMaintenanceResult {
-    return this.enqueueUnique(TOPIC_SNAPSHOT_REBUILD_JOB_TYPE, options);
   }
 
   enqueueStrongActionMaintenance(now: number = this.now()): {
@@ -360,12 +349,8 @@ export class RecommendationMaintenanceService {
     };
   }
 
-  async handleJob(job: JobRow): Promise<void> {
-    if (
-      job.type !== TOPIC_SNAPSHOT_REBUILD_JOB_TYPE &&
-      job.payloadJson !== null &&
-      job.payloadJson !== "{}"
-    ) {
+  handleJob(job: JobRow): void {
+    if (job.payloadJson !== null && job.payloadJson !== "{}") {
       throw new PermanentJobFailure(`Invalid ${job.type} job payload`);
     }
 
@@ -427,21 +412,6 @@ export class RecommendationMaintenanceService {
         if (this.options.clusterMerge.autoMergeOpenCandidates().mergedCount > 0) {
           this.enqueueClusterLabelRebuild();
           this.options.rankingJobs.enqueueAll();
-        }
-        this.markScheduleCompleted(job.id);
-        return;
-      case TOPIC_SNAPSHOT_REBUILD_JOB_TYPE:
-        if (!this.options.topicSnapshots) {
-          throw new PermanentJobFailure("Topic snapshot service is not configured");
-        }
-        if (!parseTopicSnapshotRebuildPayload(job.payloadJson)) {
-          throw new PermanentJobFailure("Invalid topic_snapshot_rebuild job payload");
-        }
-        {
-          const result = await this.options.topicSnapshots.handleTopicSnapshotRebuildJob(job);
-          if (result.status === "succeeded") {
-            this.enqueueClusterLabelRebuild();
-          }
         }
         this.markScheduleCompleted(job.id);
         return;

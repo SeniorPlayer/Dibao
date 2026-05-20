@@ -143,10 +143,6 @@
     "summaryTermWeight": 1.5,
     "representativeTitleWeight": 4.0,
     "feedTitleWeight": 0.3,
-    "corpusTopicTermWeight": 0.8,
-    "corpusTopicCentroidSimilarityThreshold": 0.55,
-    "maxCorpusTopicsPerCluster": 3,
-    "maxCorpusTopicTerms": 12,
     "commonTermClusterRatioPenalty": 0.3,
     "commonTermClusterRatioDrop": 0.5
   }

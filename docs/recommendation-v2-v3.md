@@ -13,7 +13,7 @@ This document records the phased V2/V3 recommendation architecture and the curre
 
 ### Implemented and active by default
 
-- `004_recommendation_v2`, append-only `005_recommendation_v2_completion`, append-only `006_recommendation_maintenance_schedule`, existing `007_embedding_usage_and_profile_evidence_snapshots`, append-only `008_interest_cluster_labels`, append-only `009_interest_cluster_merge_candidates`, and append-only `010_corpus_topic_snapshots`.
+- `004_recommendation_v2`, append-only `005_recommendation_v2_completion`, append-only `006_recommendation_maintenance_schedule`, existing `007_embedding_usage_and_profile_evidence_snapshots`, append-only `008_interest_cluster_labels`, append-only `009_interest_cluster_merge_candidates`, and cleanup migration `011_remove_corpus_topic_snapshots`.
 - Canonical rank context remains `article_rank_scores.rank_context`; there is no second `rank_context_id`.
 - Ranking jobs persist `rerank_position`, and `view=recommended` reads that canonical order before falling back to score.
 - Ranking setting changes enqueue a deduped `ranking_recalculate` job without enqueueing embedding, FTS, or vector rebuild jobs.
@@ -26,7 +26,6 @@ This document records the phased V2/V3 recommendation architecture and the curre
 - Recent intent rebuild uses existing embeddings only and does not call an embedding provider.
 - Offline evaluation writes `lightweight_replay_diagnostic` metrics from sampled cutoffs and labels; it is not full strict replay and not causal A/B evidence.
 - `RecommendationMaintenanceScheduler` organizes existing maintenance jobs with local due logic, SQLite schedule state, and queued/running dedupe.
-- Corpus Topic Snapshot stores an offline topic map from existing active-index article embeddings only. It is explainability/diagnostics metadata and does not affect ranking or profile state.
 
 ### Implemented but shadow or disabled
 
@@ -72,7 +71,6 @@ Sorting impact:
 - Recent intent, keyword profile, duplicate groups, and FTRL train can affect `view=recommended` after a deduped `ranking_recalculate`.
 - Evaluation is diagnostic only. It does not update profile, FTRL, or ranking scores.
 - Interest cluster label rebuild is explainability metadata only. It does not update ranking, embeddings, centroids, or profile vectors.
-- Topic snapshot rebuild is explainability metadata only. It reads existing current `article_embeddings.vector_blob` rows, skips missing/stale embeddings, and does not enqueue embedding generation, ranking recalculation, vector rebuild, FTS rebuild, or profile updates.
 - Interest cluster merge diagnostics is read-only. It writes SQLite diagnostics rows and does not update ranking, embeddings, centroids, or profile vectors.
 - Interest cluster merge changes the user profile and therefore recalculates ranking. Auto merge is disabled by default.
 - Embedding health may enqueue small active-index embedding backfill when coverage is missing/stale; it does not run on settings changes.
@@ -156,7 +154,6 @@ Interest cluster labels are explainability metadata only. They do not change ran
 Implemented V1/V2 behavior:
 
 - automatic labels are generated locally from `interest_cluster_evidence`, article titles/summaries, representative article titles, feed titles, and same-polarity `profile_terms`;
-- when a successful active-index corpus topic snapshot exists, related `corpus_topics.top_terms_json` terms can assist automatic labels with source `corpus_topic`;
 - generation does not call an LLM, reranker, classifier, external search service, or embedding API;
 - labels are stored in SQLite table `interest_cluster_labels`;
 - display priority is `manual_label > auto_label > interest_clusters.label > 兴趣簇 #N`;
@@ -170,7 +167,7 @@ Label generation rules:
 
 - URL, domain, HTML, tracking, and metadata residue such as `article`, `affiliation`, `strong`, `https`, `www`, `com`, `html`, `utm`, `href`, and `src` is filtered by the effective lexicon and bad-term patterns.
 - Protected technical terms such as `AI`, `LLM`, `API`, `RSS`, `SQLite`, and `FTRL` can remain labels when they appear as semantic terms; domain fragments such as `.ai` are filtered by context and pattern.
-- Cluster-local evidence dominates label scoring. Title terms, evidence event terms, representative titles, and summaries carry higher weight than same-polarity global `profile_terms`; corpus topic terms are auxiliary; feed titles are fallback evidence.
+- Cluster-local evidence dominates label scoring. Title terms, evidence event terms, representative titles, and summaries carry higher weight than same-polarity global `profile_terms`; feed titles are fallback evidence.
 - A cluster-level IDF pass penalizes terms that appear in many clusters and drops terms appearing in more than half of active-index clusters unless they are protected or the only valid option.
 - Chinese candidate terms dedupe obvious substring chains, so short fragments such as `两市` / `两市成` are removed when a fuller phrase such as `两市成交` is available.
 - Duplicate `auto_label` strings are disambiguated with extra terms, representative article terms, feed title fallback, or a short `#N` suffix. Collision diagnostics are stored in `label_diagnostics_json`.
@@ -186,36 +183,6 @@ fallback
 ```
 
 The automatic label rebuild job is `interest_cluster_label_rebuild`. It updates `interest_cluster_labels` for the active embedding index, preserves `manual_label`, and does not enqueue `embedding_generate` or `ranking_recalculate`.
-
-### Corpus Topic Snapshot
-
-Corpus Topic Snapshot answers "what topics exist in the subscribed corpus" for recent windows such as 7/30/60 days. It is not a per-article permanent category system and not part of the ranking path.
-
-Data contract:
-
-- `corpus_topic_runs` stores run status, algorithm, scope, params, skipped counts, and errors.
-- `corpus_topics` stores topic key, label, top terms, representative articles, article count, optional centroid, and confidence.
-- `corpus_topic_articles` stores the article assignment for a run.
-
-Hard constraints:
-
-- It only reads active-index `article_embeddings.vector_blob` rows where `article_embeddings.content_hash` matches the current article hash.
-- Missing embeddings and stale embeddings are skipped.
-- It never calls an embedding provider and never creates `embedding_generate`.
-- It never updates `interest_clusters.centroid_vector_blob`, `weight`, `sample_count`, or profile terms.
-- It never writes `article_rank_scores` or changes `latest` / `recommended` ordering.
-- The optional BERTopic runner uses precomputed embeddings with `embedding_model=None` and writes JSON only; TypeScript imports the output transactionally.
-- If `DIBAO_TOPIC_SNAPSHOT_COMMAND` is not configured, the server starts normally and rebuild requests return `TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE`.
-
-Job/API:
-
-```text
-topic_snapshot_rebuild
-GET  /api/recommendation/topic-snapshot/latest
-POST /api/recommendation/topic-snapshot/rebuild
-```
-
-`POST` only enqueues the background job. A successful snapshot rebuild may enqueue `interest_cluster_label_rebuild` so labels can consume the new topic terms, but it must not enqueue ranking recalculation.
 
 ### Interest Cluster Label Quality and Merge Diagnostics
 
@@ -337,6 +304,8 @@ Migration `005_recommendation_v2_completion` is append-only and safe for databas
 Migration `006_recommendation_maintenance_schedule` is append-only. It adds only `recommendation_maintenance_schedule_state` for scheduler observability and does not rewrite derived recommendation data.
 
 Migration `008_interest_cluster_labels` is append-only. The repository already has an existing `007_embedding_usage_and_profile_evidence_snapshots`; `008` adds `interest_cluster_labels` and extends the `jobs.type` CHECK constraint with `interest_cluster_label_rebuild` without modifying migrations `001` through `007`.
+
+Migration `011_remove_corpus_topic_snapshots` removes the retired Corpus Topic Snapshot experiment from databases that applied it during testing. It drops the corpus topic tables, removes `topic_snapshot_rebuild` jobs, and restores label/job CHECK constraints so the main recommendation path has no topic snapshot dependency.
 
 Live migration is gated. Use:
 
