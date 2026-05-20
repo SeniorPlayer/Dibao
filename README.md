@@ -30,7 +30,7 @@ docker compose up --build -d
 | `DIBAO_COOKIE_SECURE` | `false` | HTTP/LAN 自托管可保持 `false`；HTTPS 反向代理后建议设为 `true`。 |
 | `DIBAO_WEB_DIST_DIR` | `apps/web/dist` | 可选，覆盖 Web 静态资源目录。 |
 | `DIBAO_BACKGROUND_JOBS` | `true` | 可设为 `false` 关闭后台 job runner，主要用于测试。 |
-| `DIBAO_TOPIC_SNAPSHOT_COMMAND` | 未配置 | 可选 BERTopic 语料主题快照 runner 命令；未配置时主服务照常启动。 |
+| `DIBAO_TOPIC_SNAPSHOT_COMMAND` | Docker 镜像内置 `/opt/dibao-topic-snapshot/bin/python /app/scripts/topic-snapshot/bertopic_snapshot.py`；源码运行未配置 | 可选 BERTopic 语料主题快照 runner 命令；未配置时主服务照常启动，但“生成语料主题快照”按钮会提示 runner 不可用。 |
 | `DIBAO_TOPIC_SNAPSHOT_TOKENIZER` | `mixed` | 可选 topic terms tokenizer：`mixed` / `zh` / `ja`；只影响可选 runner 的主题词抽取，不影响 embedding 或排序。 |
 
 健康检查使用匿名接口：
@@ -40,6 +40,8 @@ curl http://localhost:8080/api/system/health
 ```
 
 Dockerfile 内置 HEALTHCHECK 不依赖 `curl`/`wget`，而是用 Node `fetch()` 检查 `/api/system/health`。
+
+Docker 镜像内置 Corpus Topic Snapshot 的 Python runner 环境，包括 BERTopic、jieba 和 Janome。它不会随服务启动自动运行，只在你手动点击“生成语料主题快照”或 enqueue `topic_snapshot_rebuild` 后作为后台 job 读取已有 `article_embeddings.vector_blob`。如果你从源码直接运行 Node server，需要自行安装 `scripts/topic-snapshot/requirements.txt` 并设置 `DIBAO_TOPIC_SNAPSHOT_COMMAND`。
 
 ## 首次设置
 

@@ -2,6 +2,7 @@ import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent, RefObject } fro
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dibaoVersion } from "@dibao/shared";
 import {
+  ApiRequestError,
   defaultAppSettings,
   dibaoApi,
   userMessageForError,
@@ -1383,7 +1384,11 @@ export function App() {
       });
       await loadRecommendationStatus();
     } catch (error) {
-      setRecommendationStatusError(userMessageForError(error, t.errors.api));
+      setRecommendationStatusError(
+        error instanceof ApiRequestError && error.code === "TOPIC_SNAPSHOT_RUNNER_UNAVAILABLE"
+          ? t.algorithmTransparency.topicSnapshot.runnerUnavailable
+          : userMessageForError(error, t.errors.api)
+      );
     } finally {
       setIsTopicSnapshotRebuilding(false);
     }
@@ -3340,6 +3345,7 @@ function TopicSnapshotPanel(props: {
     <section className={classNames(styles.settingsSection, "algorithm-card")}>
       <div>
         <h3>{t.algorithmTransparency.topicSnapshot.title}</h3>
+        <p>{t.algorithmTransparency.topicSnapshot.body}</p>
         <p>
           {run
             ? t.algorithmTransparency.topicSnapshot.available(

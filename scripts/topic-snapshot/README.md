@@ -4,6 +4,16 @@ This is an optional runner for `topic_snapshot_rebuild`. The main Dibao server
 does not import Python or BERTopic, and starts normally when this runner is not
 installed or not configured.
 
+The Docker image includes this runner in a separate Python virtual environment
+and sets:
+
+```bash
+DIBAO_TOPIC_SNAPSHOT_COMMAND="/opt/dibao-topic-snapshot/bin/python /app/scripts/topic-snapshot/bertopic_snapshot.py"
+DIBAO_TOPIC_SNAPSHOT_TOKENIZER=mixed
+```
+
+Source checkouts and custom runtimes can install it manually:
+
 Install manually in a separate Python environment:
 
 ```bash

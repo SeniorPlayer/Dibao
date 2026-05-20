@@ -504,12 +504,15 @@ export const zhCN = {
     },
     topicSnapshot: {
       title: "语料主题快照",
+      body: "低频后台任务。Docker 镜像内置 BERTopic runner；源码或自定义部署需要设置 DIBAO_TOPIC_SNAPSHOT_COMMAND。",
       available: (articleCount: number, topicCount: number) =>
         `已基于现有文章向量生成：${articleCount} 篇文章 · ${topicCount} 个主题。`,
       unavailable: (reason: string) =>
         reason === "NO_ACTIVE_EMBEDDING_INDEX"
           ? "当前没有 active embedding index，无法生成语料主题快照。"
           : "还没有可用的语料主题快照。",
+      runnerUnavailable:
+        "Topic Snapshot runner 未配置。Docker 镜像默认内置；源码或自定义部署请设置 DIBAO_TOPIC_SNAPSHOT_COMMAND。",
       generatedAt: "最近生成",
       embeddingIndex: "Embedding index",
       algorithm: "算法",
@@ -1436,12 +1439,15 @@ export const enUS = {
     },
     topicSnapshot: {
       title: "Corpus Topic Snapshot",
+      body: "Low-frequency background task. Docker images include the BERTopic runner; source or custom deployments must set DIBAO_TOPIC_SNAPSHOT_COMMAND.",
       available: (articleCount: number, topicCount: number) =>
         `Generated from existing article vectors: ${articleCount} articles · ${topicCount} topics.`,
       unavailable: (reason: string) =>
         reason === "NO_ACTIVE_EMBEDDING_INDEX"
           ? "No active embedding index is available for a corpus topic snapshot."
           : "No corpus topic snapshot is available yet.",
+      runnerUnavailable:
+        "Topic Snapshot runner is not configured. Docker images include it by default; source or custom deployments should set DIBAO_TOPIC_SNAPSHOT_COMMAND.",
       generatedAt: "Last generated",
       embeddingIndex: "Embedding index",
       algorithm: "Algorithm",

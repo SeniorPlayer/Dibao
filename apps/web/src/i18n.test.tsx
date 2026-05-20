@@ -786,6 +786,7 @@ describe("web i18n", () => {
     expect(html).toContain("+8.0");
     expect(html).toContain("收藏：是资料库/书签");
     expect(html).toContain("fallback 到基础排序");
+    expect(html).toContain("Docker 镜像内置 BERTopic runner");
   });
 
   it("renders feed management fields without provider configuration copy", () => {
