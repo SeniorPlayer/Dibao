@@ -676,6 +676,7 @@ describe("web i18n", () => {
           clusterLabelLexicon={null}
           error={null}
           isLoading={false}
+          notice={null}
           isTopicSnapshotRebuilding={false}
           mergeCandidates={[]}
           onBack={() => undefined}

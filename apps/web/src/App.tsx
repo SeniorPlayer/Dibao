@@ -1740,6 +1740,7 @@ export function App() {
           (isSettingsLoading || isEmbeddingLoading ? t.settings.loading : t.settings.status)
         : appPage.type === "algorithm-transparency"
           ? recommendationStatusError ??
+            noticeText ??
             (isRecommendationStatusLoading
               ? t.recommendationStatus.loading
               : t.algorithmTransparency.status)
@@ -1911,6 +1912,7 @@ export function App() {
           <AlgorithmTransparencyPage
             error={recommendationStatusError}
             isLoading={isRecommendationStatusLoading}
+            notice={noticeText}
             onBack={() => navigateToAppPage({ type: "settings" })}
             onOpenAllClusters={() => navigateToAppPage({ type: "algorithm-clusters" })}
             onRebuildTopicSnapshot={handleRebuildTopicSnapshot}
@@ -2942,6 +2944,7 @@ export function AlgorithmTransparencyPage(props: {
   clusterLabelLexicon: ClusterLabelLexiconResponse | null;
   error: string | null;
   isLoading: boolean;
+  notice: string | null;
   mergeCandidates: RecommendationClusterMergeCandidate[];
   onBack: () => void;
   onIgnoreCandidate: (candidateId: string) => Promise<void>;
@@ -3089,6 +3092,7 @@ export function AlgorithmTransparencyPage(props: {
         {props.isLoading ? (
           <p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>
         ) : null}
+        {props.notice ? <p className={styles.settingsNotice}>{props.notice}</p> : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
 
         <section className={classNames(styles.settingsSection, "algorithm-card", "diagnostics-card")}>
