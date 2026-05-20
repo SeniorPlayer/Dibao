@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import html
 import json
 import re
 import sqlite3
@@ -29,6 +30,119 @@ URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z]+|#\d+);")
 TOKEN_EDGE_RE = re.compile(r"^[^\w\u4e00-\u9fff+.#-]+|[^\w\u4e00-\u9fff+.#-]+$")
+ENTITY_RESIDUE_RE = re.compile(
+    r"\b(?:ldquordquo|quot|ldquo|rdquo|lsquo|rsquo|nbsp|amp|mdash|hellip|middot|zwnj|zwj)+\b|"
+    r"quot(?=[A-Z])|(?<=[A-Za-z])quot\b",
+    re.IGNORECASE,
+)
+HTML_NOISE_PREFIXES = (
+    "style",
+    "class",
+    "dataaction",
+    "decodingasync",
+    "font",
+    "fontsize",
+    "fontfamily",
+    "margin",
+    "padding",
+    "align",
+    "figcaption",
+    "stytle",
+)
+HTML_NOISE_TOKENS = {
+    "alt",
+    "arial",
+    "blockquote",
+    "body",
+    "br",
+    "center",
+    "comments",
+    "div",
+    "end",
+    "figcaption",
+    "figure",
+    "footer",
+    "head",
+    "href",
+    "html",
+    "img",
+    "li",
+    "lili",
+    "microsoft",
+    "nbsp",
+    "pcomments",
+    "points",
+    "ppoints",
+    "script",
+    "section",
+    "span",
+    "src",
+    "style",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "tr",
+    "ul",
+    "url",
+    "yahei",
+}
+EN_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "against",
+    "all",
+    "also",
+    "and",
+    "are",
+    "because",
+    "been",
+    "being",
+    "but",
+    "can",
+    "could",
+    "for",
+    "from",
+    "has",
+    "have",
+    "her",
+    "his",
+    "how",
+    "into",
+    "its",
+    "may",
+    "more",
+    "not",
+    "now",
+    "our",
+    "out",
+    "over",
+    "she",
+    "that",
+    "the",
+    "their",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "will",
+    "with",
+    "you",
+    "your",
+}
+LETTER_DIGIT_RE = re.compile(r"[A-Za-z]\d+")
+REPEATED_SHORT_LATIN_RE = re.compile(r"([A-Za-z]{1,3})\1{2,}")
 TOKENIZER_MODES = {"mixed", "zh", "ja"}
 
 CUSTOM_TERMS = [
@@ -100,6 +214,16 @@ STOPWORDS = {
     "utm",
     "href",
     "src",
+    "责任编辑",
+    "免责声明",
+    "转载",
+    "来源",
+    "编辑",
+    "图片",
+    "正文",
+    "点击",
+    "阅读",
+    "原文",
 }
 
 JA_STOPWORDS = {
@@ -357,9 +481,16 @@ def janome_tokenizer():
 
 
 def clean_tokenizer_text(text: str) -> str:
-    without_urls = URL_RE.sub(" ", text)
+    decoded = text
+    for _ in range(2):
+        next_decoded = html.unescape(decoded)
+        if next_decoded == decoded:
+            break
+        decoded = next_decoded
+    without_urls = URL_RE.sub(" ", decoded)
     without_markup = HTML_TAG_RE.sub(" ", without_urls)
-    return HTML_ENTITY_RE.sub(" ", without_markup)
+    without_entities = HTML_ENTITY_RE.sub(" ", without_markup)
+    return ENTITY_RESIDUE_RE.sub(" ", without_entities)
 
 
 def normalize_token(token: str) -> str:
@@ -367,19 +498,38 @@ def normalize_token(token: str) -> str:
 
 
 def is_useful_zh_token(token: str) -> bool:
-    return is_useful_token(token, cjk_re=CJK_RE, stopwords=STOPWORDS)
+    return is_useful_token(token, cjk_re=CJK_RE, stopwords=STOPWORDS | EN_STOPWORDS)
 
 
 def is_useful_ja_token(token: str) -> bool:
-    return is_useful_token(token, cjk_re=JAPANESE_RE, stopwords=STOPWORDS | JA_STOPWORDS)
+    return is_useful_token(
+        token,
+        cjk_re=JAPANESE_RE,
+        stopwords=STOPWORDS | JA_STOPWORDS | EN_STOPWORDS,
+    )
 
 
 def is_useful_latin_token(token: str) -> bool:
-    return is_useful_token(token, cjk_re=JAPANESE_RE, stopwords=STOPWORDS | JA_STOPWORDS)
+    return is_useful_token(
+        token,
+        cjk_re=JAPANESE_RE,
+        stopwords=STOPWORDS | JA_STOPWORDS | EN_STOPWORDS,
+    )
 
 
 def is_useful_token(token: str, cjk_re, stopwords: set[str]) -> bool:
     if not token or len(token) > 32:
+        return False
+    lower = token.lower()
+    if lower in HTML_NOISE_TOKENS:
+        return False
+    if lower.endswith(("gmailcom", "qqcom", "hotmailcom", "outlookcom")):
+        return False
+    if any(lower.startswith(prefix) for prefix in HTML_NOISE_PREFIXES):
+        return False
+    if REPEATED_SHORT_LATIN_RE.fullmatch(token):
+        return False
+    if LETTER_DIGIT_RE.fullmatch(token):
         return False
     if token.lower() in stopwords or token in stopwords:
         return False

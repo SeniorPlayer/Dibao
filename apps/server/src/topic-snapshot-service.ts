@@ -981,6 +981,7 @@ export class TopicSnapshotService {
         `
           ${topicSelect()}
           where run_id = ?
+            and topic_key != '-1'
           order by article_count desc, confidence desc, topic_key
           limit ?
         `

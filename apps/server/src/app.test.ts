@@ -2768,8 +2768,9 @@ describe("server API vertical slice", () => {
         method: "GET",
         url: "/api/recommendation/topic-snapshot/latest"
       });
+      const latestPayload = latest.json();
       expect(latest.statusCode, latest.body).toBe(200);
-      expect(latest.json()).toMatchObject({
+      expect(latestPayload).toMatchObject({
         data: {
           available: true,
           run: {
@@ -2777,7 +2778,7 @@ describe("server API vertical slice", () => {
             embeddingIndexId: index.id,
             status: "succeeded",
             articleCount: 2,
-            topicCount: 1
+            topicCount: 2
           },
           topics: [
             {
@@ -2789,6 +2790,9 @@ describe("server API vertical slice", () => {
           ]
         }
       });
+      expect(latestPayload.data.topics.map((topic: { topicKey: string }) => topic.topicKey)).not.toContain(
+        "-1"
+      );
 
       const rebuild = await app.inject({
         method: "POST",
@@ -5261,7 +5265,7 @@ function insertApiTopicSnapshotFixture(db: DibaoDatabase, embeddingIndexId: stri
         '{"days":60,"maxArticles":3000}',
         '{}',
         2,
-        1,
+        2,
         7000,
         7000,
         7000,
@@ -5299,6 +5303,36 @@ function insertApiTopicSnapshotFixture(db: DibaoDatabase, embeddingIndexId: stri
       )
     `
   ).run(toVectorBlob([1, 0, 0]));
+  db.prepare(
+    `
+      insert into corpus_topics (
+        id,
+        run_id,
+        topic_key,
+        label,
+        top_terms_json,
+        representative_articles_json,
+        article_count,
+        centroid_vector_blob,
+        confidence,
+        created_at,
+        updated_at
+      )
+      values (
+        'topic_api_outlier',
+        'run_api_topic',
+        '-1',
+        'HTML residue',
+        '[{"term":"nbsp","weight":9.9}]',
+        '[]',
+        99,
+        null,
+        0.1,
+        7000,
+        7000
+      )
+    `
+  ).run();
   db.prepare(
     `
       insert into corpus_topic_articles (
