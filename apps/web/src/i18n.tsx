@@ -16,6 +16,7 @@ export const zhCN = {
   },
   navigation: {
     ariaLabel: "主导航",
+    utilityMenuLabel: "更多",
     items: {
       latest: "最新",
       recommended: "推荐",
@@ -930,6 +931,7 @@ export const enUS = {
   },
   navigation: {
     ariaLabel: "Primary navigation",
+    utilityMenuLabel: "More",
     items: {
       latest: "Latest",
       recommended: "Recommended",

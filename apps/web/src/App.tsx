@@ -50,14 +50,22 @@ import styles from "./design-system/AppShell/AppShell.module.css";
 import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import { defaultLocale, useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
 
-const navigationItems: NavigationItemKey[] = [
+const primaryNavigationItems: NavigationItemKey[] = [
   "recommended",
   "latest",
   "read_later",
-  "favorites",
+  "favorites"
+];
+
+const utilityNavigationItems: NavigationItemKey[] = [
   "search",
   "feeds",
   "settings"
+];
+
+const navigationItems: NavigationItemKey[] = [
+  ...primaryNavigationItems,
+  ...utilityNavigationItems
 ];
 
 const defaultFavoriteArticleSort: FavoriteArticleSort = "favorited_desc";
@@ -200,6 +208,7 @@ export function App() {
   const [readLaterSort, setReadLaterSort] = useState<ReadLaterArticleSort>(
     () => urlReadLaterSortParam() ?? defaultReadLaterArticleSort
   );
+  const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
   const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(
     initialRoute.articleId
@@ -1715,6 +1724,7 @@ export function App() {
     if (!page) {
       return;
     }
+    setIsUtilityMenuOpen(false);
     navigateToAppPage(page);
   }
 
@@ -1823,7 +1833,10 @@ export function App() {
               <a
                 aria-disabled={isPlaceholder ? "true" : undefined}
                 aria-label={t.navigation.items[item]}
-                className={isNavigationItemActive(item, appPage) ? styles.navItemActive : styles.navItem}
+                className={classNames(
+                  isNavigationItemActive(item, appPage) ? styles.navItemActive : styles.navItem,
+                  utilityNavigationItems.includes(item) ? styles.navUtilityItem : null
+                )}
                 data-disabled={isPlaceholder ? "true" : undefined}
                 href={
                   navigationPage
@@ -1844,6 +1857,49 @@ export function App() {
               </a>
             );
           })}
+          <button
+            aria-controls="mobile-utility-menu"
+            aria-expanded={isUtilityMenuOpen}
+            aria-label={t.navigation.utilityMenuLabel}
+            className={classNames(
+              isUtilityNavigationActive(appPage) ? styles.navItemActive : styles.navItem,
+              styles.navUtilityToggle
+            )}
+            onClick={() => setIsUtilityMenuOpen((isOpen) => !isOpen)}
+            title={t.navigation.utilityMenuLabel}
+            type="button"
+          >
+            <ActionIcon name="more" />
+            <span className={styles.navLabel}>{t.navigation.utilityMenuLabel}</span>
+          </button>
+          {isUtilityMenuOpen ? (
+            <div
+              className={styles.utilityMenu}
+              id="mobile-utility-menu"
+              role="menu"
+              aria-label={t.navigation.utilityMenuLabel}
+            >
+              {utilityNavigationItems.map((item) => {
+                const navigationPage = pageForNavigationItem(item);
+                const isPlaceholder = !navigationPage;
+
+                return (
+                  <a
+                    aria-disabled={isPlaceholder ? "true" : undefined}
+                    className={styles.utilityMenuItem}
+                    data-disabled={isPlaceholder ? "true" : undefined}
+                    href={navigationPage ? urlForAppPage(navigationPage) : "#"}
+                    key={item}
+                    onClick={(event) => handleNavigationClick(event, item)}
+                    role="menuitem"
+                  >
+                    <NavigationIcon item={item} />
+                    <span>{t.navigation.items[item]}</span>
+                  </a>
+                );
+              })}
+            </div>
+          ) : null}
         </nav>
       </aside>
 
@@ -4763,6 +4819,7 @@ type ActionIconName =
   | "feed"
   | "gear"
   | "like"
+  | "more"
   | "search"
   | "sparkle"
   | "star"
@@ -4843,6 +4900,14 @@ function ActionIcon(props: { name: ActionIconName }) {
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
         <path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" fill="none" stroke="currentColor" strokeWidth="1.7" />
         <path d="M4.8 13.4v-2.8l2-.7.7-1.6-.9-1.9 2-2 1.9.9 1.5-.6.8-2h2.8l.8 2 1.5.6 1.9-.9 2 2-.9 1.9.7 1.6 2 .7v2.8l-2 .7-.7 1.6.9 1.9-2 2-1.9-.9-1.5.6-.8 2h-2.8l-.8-2-1.5-.6-1.9.9-2-2 .9-1.9-.7-1.6-2-.7Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.2" />
+      </svg>
+    );
+  }
+
+  if (props.name === "more") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18">
+        <path d="M5 12h.01M12 12h.01M19 12h.01" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
       </svg>
     );
   }
@@ -5765,6 +5830,15 @@ function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean
   }
 
   return item === "settings";
+}
+
+function isUtilityNavigationActive(page: AppPage): boolean {
+  return (
+    page.type === "feed-management" ||
+    page.type === "settings" ||
+    page.type === "algorithm-transparency" ||
+    page.type === "algorithm-clusters"
+  );
 }
 
 function noticeTextFor(notice: Notice, t: Dictionary): string {
