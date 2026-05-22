@@ -190,7 +190,8 @@ describe("db package", () => {
         "007",
         "008",
         "009",
-        "011"
+        "011",
+        "012"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
@@ -580,7 +581,8 @@ describe("db package", () => {
         "007",
         "008",
         "009",
-        "011"
+        "011",
+        "012"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);

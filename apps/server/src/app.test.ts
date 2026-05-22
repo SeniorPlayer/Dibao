@@ -905,6 +905,82 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("creates, tests, and lists Gemini embedding providers", async () => {
+    const db = createEmptyDatabase();
+    const embeddingCalls: Array<{
+      url: string;
+      apiKey: string | null;
+      inputCount: number;
+      model: string;
+    }> = [];
+    const app = buildServer({
+      db,
+      logger: false,
+      now: () => 1000,
+      embeddingFetcher: geminiEmbeddingFetcherFixture(embeddingCalls, 3)
+    });
+
+    try {
+      const created = await postJson(app, "/api/embedding/providers", {
+        type: "gemini",
+        name: "Gemini AI Studio",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/",
+        model: "gemini-embedding-001",
+        dimension: 3,
+        apiKey: "gemini-secret",
+        enabled: true,
+        qualityTier: "recommended"
+      });
+      expect(created.statusCode, created.body).toBe(200);
+      const providerId = (created.json() as { data: { id: string } }).data.id;
+
+      const providers = await app.inject({
+        method: "GET",
+        url: "/api/embedding/providers"
+      });
+      expect(providers.statusCode, providers.body).toBe(200);
+      expect(providers.json()).toMatchObject({
+        data: [
+          {
+            id: providerId,
+            type: "gemini",
+            name: "Gemini AI Studio",
+            baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+            model: "gemini-embedding-001",
+            dimension: 3,
+            enabled: true,
+            hasApiKey: true
+          }
+        ]
+      });
+      expect(providers.body).not.toContain("gemini-secret");
+
+      const test = await app.inject({
+        method: "POST",
+        url: `/api/embedding/providers/${providerId}/test`
+      });
+      expect(test.statusCode, test.body).toBe(200);
+      expect(test.json()).toMatchObject({
+        data: {
+          status: "success",
+          dimension: 3,
+          latencyMs: expect.any(Number)
+        }
+      });
+      expect(embeddingCalls).toEqual([
+        {
+          url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents",
+          apiKey: "gemini-secret",
+          inputCount: 1,
+          model: "models/gemini-embedding-001"
+        }
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("rejects unsupported embedding providers and invalid provider base URLs", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({ db, logger: false });
@@ -1116,6 +1192,41 @@ describe("server API vertical slice", () => {
             enabled: false
           }
         ]
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("rejects provider switches across different embedding models or dimensions", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false, now: () => 1000 });
+
+    try {
+      const first = await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "First Provider",
+        baseUrl: "https://api.first.example/v1",
+        model: "bge-m3",
+        dimension: 1024,
+        enabled: true
+      });
+      expect(first.statusCode, first.body).toBe(200);
+
+      const incompatible = await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "Second Provider",
+        baseUrl: "https://api.second.example/v1",
+        model: "text-embedding-3-small",
+        dimension: 1536,
+        enabled: true
+      });
+      expect(incompatible.statusCode, incompatible.body).toBe(409);
+      expect(incompatible.json()).toMatchObject({
+        error: {
+          code: "INCOMPATIBLE_PROVIDER_SWITCH"
+        }
       });
     } finally {
       await app.close();
@@ -4063,8 +4174,8 @@ describe("server API vertical slice", () => {
       canonicalUrl: "https://example.com/today",
       title: "Today only fixture",
       summary: "Today filter article.",
-      publishedAt: today,
-      discoveredAt: today,
+      publishedAt: today - 1,
+      discoveredAt: today - 1,
       dedupeKey: "today",
       now: today
     });
@@ -5546,6 +5657,39 @@ function ollamaEmbeddingFetcherFixture(
         embeddings: values.map(() =>
           Array.from({ length: dimension }, (_value, vectorIndex) => vectorIndex + 1)
         )
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      }
+    );
+  };
+}
+
+function geminiEmbeddingFetcherFixture(
+  calls: Array<{ url: string; apiKey: string | null; inputCount: number; model: string }>,
+  dimension: number
+): typeof fetch {
+  return async (input, init) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      requests?: Array<{ model?: unknown; content?: { parts?: Array<{ text?: unknown }> } }>;
+    };
+    const requests = Array.isArray(body.requests) ? body.requests : [];
+    const headers = new Headers(init?.headers);
+    calls.push({
+      url: String(input),
+      apiKey: headers.get("x-goog-api-key"),
+      inputCount: requests.length,
+      model: typeof requests[0]?.model === "string" ? requests[0].model : ""
+    });
+
+    return new Response(
+      JSON.stringify({
+        embeddings: requests.map(() => ({
+          values: Array.from({ length: dimension }, (_value, vectorIndex) => vectorIndex + 1)
+        }))
       }),
       {
         status: 200,

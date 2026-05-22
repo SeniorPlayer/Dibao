@@ -129,6 +129,7 @@ export type RankExplanation = {
 };
 
 export type ArticleView = "latest" | "recommended" | "favorites" | "read_later";
+export type ArticleTimeWindow = "all" | "24h" | "7d" | "30d";
 
 export type FavoriteArticleSort =
   | "favorited_desc"
@@ -262,6 +263,7 @@ export type EmbeddingProviderType =
   | "embedded_local"
   | "ollama"
   | "openai_compatible"
+  | "gemini"
   | "custom_http";
 
 export type EmbeddingProviderQualityTier = "basic" | "recommended" | "best_quality";
@@ -284,7 +286,7 @@ export type EmbeddingProvider = {
 };
 
 export type CreateEmbeddingProviderInput = {
-  type: "openai_compatible" | "ollama";
+  type: "openai_compatible" | "gemini" | "ollama";
   name: string;
   baseUrl: string;
   model: string;
@@ -1155,6 +1157,7 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
         cursor?: string | null;
         unreadOnly?: boolean;
         todayOnly?: boolean;
+        timeWindow?: ArticleTimeWindow;
         sort?: ArticleListSort;
       } = {}
     ): Promise<ArticleListResponse> {
@@ -1176,8 +1179,12 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       if (input.unreadOnly && (view === "latest" || view === "recommended")) {
         params.set("unreadOnly", "true");
       }
-      if (input.todayOnly && (view === "latest" || view === "recommended")) {
-        params.set("todayOnly", "true");
+      if (view === "latest" || view === "recommended") {
+        if (input.timeWindow && input.timeWindow !== "all") {
+          params.set("timeWindow", input.timeWindow);
+        } else if (input.todayOnly) {
+          params.set("timeWindow", "24h");
+        }
       }
       if (input.sort && (view === "favorites" || view === "read_later")) {
         params.set("sort", input.sort);

@@ -33,6 +33,9 @@ const interestClusterMergeCandidatesPath = fileURLToPath(
 const removeCorpusTopicSnapshotsPath = fileURLToPath(
   new URL("../migrations/011_remove_corpus_topic_snapshots.sql", import.meta.url)
 );
+const geminiEmbeddingProviderPath = fileURLToPath(
+  new URL("../migrations/012_gemini_embedding_provider.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -85,6 +88,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "011",
       name: "remove_corpus_topic_snapshots",
       sql: readFileSync(removeCorpusTopicSnapshotsPath, "utf8")
+    },
+    {
+      version: "012",
+      name: "gemini_embedding_provider",
+      sql: readFileSync(geminiEmbeddingProviderPath, "utf8")
     }
   ];
 }
@@ -114,16 +122,27 @@ export function runMigrations(
     }
 
     const appliedAt = now();
+    const disableForeignKeys = migration.sql.includes("-- dibao: disable-foreign-keys");
 
-    db.transaction(() => {
-      db.exec(migration.sql);
-      db.prepare(
-        `
-          insert into schema_migrations (version, name, applied_at, checksum)
-          values (?, ?, ?, ?)
-        `
-      ).run(migration.version, migration.name, appliedAt, checksum);
-    })();
+    try {
+      if (disableForeignKeys) {
+        db.pragma("foreign_keys = OFF");
+      }
+
+      db.transaction(() => {
+        db.exec(migration.sql);
+        db.prepare(
+          `
+            insert into schema_migrations (version, name, applied_at, checksum)
+            values (?, ?, ?, ?)
+          `
+        ).run(migration.version, migration.name, appliedAt, checksum);
+      })();
+    } finally {
+      if (disableForeignKeys) {
+        db.pragma("foreign_keys = ON");
+      }
+    }
 
     appliedNow.push({
       version: migration.version,

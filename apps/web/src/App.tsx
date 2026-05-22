@@ -9,6 +9,7 @@ import {
   type ArticleDetail,
   type ArticleListItem,
   type ArticleState,
+  type ArticleTimeWindow,
   type ArticleView,
   type AppSettings,
   type AuthSession,
@@ -70,6 +71,11 @@ const navigationItems: NavigationItemKey[] = [
 
 const defaultFavoriteArticleSort: FavoriteArticleSort = "favorited_desc";
 const defaultReadLaterArticleSort: ReadLaterArticleSort = "ranked";
+const defaultReaderFilters: PersistedReaderFilters = {
+  sourceSelection: { type: "all" },
+  unreadOnly: false,
+  timeWindow: "all"
+};
 
 type Notice =
   | { type: "feedAddedAndRefreshed"; feedTitle: string }
@@ -103,6 +109,12 @@ type AppRoute = {
   page: AppPage;
   articleId: string | null;
   hasExplicitPage: boolean;
+};
+
+type PersistedReaderFilters = {
+  sourceSelection: SourceSelection;
+  unreadOnly: boolean;
+  timeWindow: ArticleTimeWindow;
 };
 
 export type AppStage =
@@ -176,6 +188,15 @@ export function App() {
     () => routeFromLocation(defaultAppSettings.ui.defaultHomeView),
     []
   );
+  const initialReaderFilters = useMemo(
+    () =>
+      readerFiltersForView(
+        initialRoute.page.type === "reader"
+          ? initialRoute.page.view
+          : defaultAppSettings.ui.defaultHomeView
+      ),
+    [initialRoute.page]
+  );
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -198,10 +219,14 @@ export function App() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [articles, setArticles] = useState<ArticleListItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [sourceSelection, setSourceSelection] = useState<SourceSelection>({ type: "all" });
+  const [sourceSelection, setSourceSelection] = useState<SourceSelection>(
+    initialReaderFilters.sourceSelection
+  );
   const [appPage, setAppPage] = useState<AppPage>(initialRoute.page);
-  const [unreadOnly, setUnreadOnly] = useState(() => urlBooleanParam("unread"));
-  const [todayOnly, setTodayOnly] = useState(() => urlBooleanParam("today"));
+  const [unreadOnly, setUnreadOnly] = useState(initialReaderFilters.unreadOnly);
+  const [timeWindow, setTimeWindow] = useState<ArticleTimeWindow>(
+    initialReaderFilters.timeWindow
+  );
   const [favoriteSort, setFavoriteSort] = useState<FavoriteArticleSort>(
     () => urlFavoriteSortParam() ?? defaultFavoriteArticleSort
   );
@@ -303,7 +328,7 @@ export function App() {
             ? sourceSelection.folderId
             : "all",
         unreadOnly ? "unread" : "all",
-        todayOnly ? "today" : "any",
+        timeWindow,
         currentArticleView === "favorites" ? favoriteSort : "",
         currentArticleView === "read_later" ? readLaterSort : ""
       ].join(":"),
@@ -312,7 +337,7 @@ export function App() {
       favoriteSort,
       readLaterSort,
       sourceSelection,
-      todayOnly,
+      timeWindow,
       unreadOnly
     ]
   );
@@ -382,6 +407,12 @@ export function App() {
   function handleArticleViewChange(view: ArticleView) {
     if (appPage.type !== "reader" || appPage.view !== view) {
       resetArticleListForPendingQuery();
+      if (supportsQuickFilters(view)) {
+        const filters = readerFiltersForView(view);
+        setSourceSelection(filters.sourceSelection);
+        setUnreadOnly(filters.unreadOnly);
+        setTimeWindow(filters.timeWindow);
+      }
     }
     setAppPage({ type: "reader", view });
   }
@@ -407,11 +438,11 @@ export function App() {
     setUnreadOnly(nextUnreadOnly);
   }
 
-  function handleTodayOnlyChange(nextTodayOnly: boolean) {
-    if (todayOnly !== nextTodayOnly) {
+  function handleTimeWindowChange(nextTimeWindow: ArticleTimeWindow) {
+    if (timeWindow !== nextTimeWindow) {
       resetArticleListForPendingQuery();
     }
-    setTodayOnly(nextTodayOnly);
+    setTimeWindow(nextTimeWindow);
   }
 
   const resetReaderState = useCallback(() => {
@@ -424,7 +455,7 @@ export function App() {
     setSourceSelection({ type: "all" });
     setAppPage({ type: "reader", view: defaultAppSettings.ui.defaultHomeView });
     setUnreadOnly(false);
-    setTodayOnly(false);
+    setTimeWindow("all");
     setFavoriteSort(defaultFavoriteArticleSort);
     setReadLaterSort(defaultReadLaterArticleSort);
     setSelectedArticleId(null);
@@ -752,7 +783,7 @@ export function App() {
     onlyUnread: boolean,
     sort: FavoriteArticleSort = defaultFavoriteArticleSort,
     laterSort: ReadLaterArticleSort = defaultReadLaterArticleSort,
-    onlyToday = false
+    selectedTimeWindow: ArticleTimeWindow = "all"
   ) => {
     const requestVersion = articleRequestVersion.current + 1;
     articleRequestVersion.current = requestVersion;
@@ -775,7 +806,7 @@ export function App() {
         view,
         limit: 50,
         unreadOnly: supportsUnreadOnly(view) ? onlyUnread : false,
-        todayOnly: supportsQuickFilters(view) ? onlyToday : false,
+        timeWindow: supportsQuickFilters(view) ? selectedTimeWindow : "all",
         sort: articleSortForView(view, sort, laterSort)
       });
       if (requestVersion !== articleRequestVersion.current) {
@@ -829,7 +860,7 @@ export function App() {
       return;
     }
 
-    void loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly);
+    void loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, timeWindow);
   }, [
     appPage,
     appStage.type,
@@ -837,9 +868,21 @@ export function App() {
     loadArticles,
     readLaterSort,
     sourceSelection,
-    todayOnly,
+    timeWindow,
     unreadOnly
   ]);
+
+  useEffect(() => {
+    if (appStage.type !== "reader" || appPage.type !== "reader" || !supportsQuickFilters(appPage.view)) {
+      return;
+    }
+
+    persistReaderFilters(appPage.view, {
+      sourceSelection,
+      unreadOnly,
+      timeWindow
+    });
+  }, [appPage, appStage.type, sourceSelection, timeWindow, unreadOnly]);
 
   useEffect(() => {
     if (appStage.type !== "reader") {
@@ -890,8 +933,14 @@ export function App() {
       }
       setAppPage(route.page);
       setSelectedArticleId(route.articleId);
-      setUnreadOnly(urlBooleanParam("unread"));
-      setTodayOnly(urlBooleanParam("today"));
+      if (route.page.type === "reader" && supportsQuickFilters(route.page.view)) {
+        const filters = readerFiltersForView(route.page.view);
+        setSourceSelection((current) =>
+          sameSourceSelection(current, filters.sourceSelection) ? current : filters.sourceSelection
+        );
+        setUnreadOnly((current) => (current === filters.unreadOnly ? current : filters.unreadOnly));
+        setTimeWindow((current) => (current === filters.timeWindow ? current : filters.timeWindow));
+      }
       setFavoriteSort(urlFavoriteSortParam() ?? defaultFavoriteArticleSort);
       setReadLaterSort(urlReadLaterSortParam() ?? defaultReadLaterArticleSort);
     }
@@ -1121,7 +1170,7 @@ export function App() {
       await Promise.all([
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, timeWindow)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -1168,7 +1217,7 @@ export function App() {
         loadFeedFolders(),
         loadFeeds(),
         appPage.type === "reader"
-          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, todayOnly)
+          ? loadArticles(sourceSelection, appPage.view, unreadOnly, favoriteSort, readLaterSort, timeWindow)
           : Promise.resolve()
       ]);
     } catch (error) {
@@ -1224,7 +1273,7 @@ export function App() {
         unreadOnly,
         favoriteSort,
         readLaterSort,
-        todayOnly
+        timeWindow
       );
     }
   }
@@ -1495,7 +1544,7 @@ export function App() {
         limit: 50,
         cursor: nextArticleCursor,
         unreadOnly: supportsUnreadOnly(currentArticleView) ? unreadOnly : false,
-        todayOnly: supportsQuickFilters(currentArticleView) ? todayOnly : false,
+        timeWindow: supportsQuickFilters(currentArticleView) ? timeWindow : "all",
         sort: articleSortForView(currentArticleView, favoriteSort, readLaterSort)
       });
       if (requestVersion !== articleRequestVersion.current) {
@@ -1629,7 +1678,7 @@ export function App() {
     const href = urlForArticle(currentArticleView, articleId, {
       favoriteSort,
       readLaterSort,
-      todayOnly,
+      timeWindow,
       unreadOnly
     });
     if (selectedArticleId !== articleId) {
@@ -1643,7 +1692,7 @@ export function App() {
     window.history.pushState({ dibaoPage: page.type }, "", urlForAppPage(page, {
       favoriteSort,
       readLaterSort,
-      todayOnly,
+      timeWindow,
       unreadOnly
     }));
     if (page.type === "reader") {
@@ -1708,7 +1757,7 @@ export function App() {
       urlForAppPage({ type: "reader", view: currentArticleView }, {
         favoriteSort,
         readLaterSort,
-        todayOnly,
+        timeWindow,
         unreadOnly
       })
     );
@@ -1843,7 +1892,7 @@ export function App() {
                     ? urlForAppPage(navigationPage, {
                         favoriteSort,
                         readLaterSort,
-                        todayOnly,
+                        timeWindow,
                         unreadOnly
                       })
                     : "#"
@@ -2054,7 +2103,7 @@ export function App() {
               }}
               onFavoriteSortChange={handleFavoriteSortChange}
               onReadLaterSortChange={handleReadLaterSortChange}
-              onTodayOnlyChange={handleTodayOnlyChange}
+              onTimeWindowChange={handleTimeWindowChange}
               onUnreadOnlyChange={handleUnreadOnlyChange}
               favoriteSort={favoriteSort}
               readLaterSort={readLaterSort}
@@ -2071,7 +2120,7 @@ export function App() {
               showRecommendationStatus={currentArticleView === "recommended"}
               showQuickFilters={supportsQuickFilters(currentArticleView)}
               isRecommendationStatusLoading={isRecommendationStatusLoading}
-              todayOnly={todayOnly}
+              timeWindow={timeWindow}
               unreadCount={unreadCount}
               unreadOnly={unreadOnly}
             />
@@ -2346,7 +2395,7 @@ type SettingsDraft = {
 
 type SupportedEmbeddingProviderType = Extract<
   EmbeddingProviderType,
-  "openai_compatible" | "ollama"
+  "openai_compatible" | "gemini" | "ollama"
 >;
 
 type EmbeddingProviderDraft = {
@@ -2716,7 +2765,11 @@ export function SettingsWorkspace(props: {
                 id="settings-provider-type"
                 onChange={(event) => {
                   const nextType =
-                    event.target.value === "ollama" ? "ollama" : "openai_compatible";
+                    event.target.value === "ollama"
+                      ? "ollama"
+                      : event.target.value === "gemini"
+                        ? "gemini"
+                        : "openai_compatible";
                   setProviderDraft(draftWithProviderType(providerDraft, nextType));
                   setProviderLocalError(null);
                 }}
@@ -2725,6 +2778,7 @@ export function SettingsWorkspace(props: {
                 <option value="openai_compatible">
                   {t.settings.sections.provider.openaiCompatible}
                 </option>
+                <option value="gemini">{t.settings.sections.provider.gemini}</option>
                 <option value="ollama">{t.settings.sections.provider.ollama}</option>
               </select>
             </label>
@@ -2751,6 +2805,8 @@ export function SettingsWorkspace(props: {
                 placeholder={
                   providerDraft.type === "ollama"
                     ? t.settings.sections.provider.ollamaBaseUrlPlaceholder
+                    : providerDraft.type === "gemini"
+                      ? t.settings.sections.provider.geminiBaseUrlPlaceholder
                     : t.settings.sections.provider.baseUrlPlaceholder
                 }
                 type="url"
@@ -2768,6 +2824,8 @@ export function SettingsWorkspace(props: {
                 placeholder={
                   providerDraft.type === "ollama"
                     ? t.settings.sections.provider.ollamaModelPlaceholder
+                    : providerDraft.type === "gemini"
+                      ? t.settings.sections.provider.geminiModelPlaceholder
                     : t.settings.sections.provider.modelPlaceholder
                 }
                 value={providerDraft.model}
@@ -2784,7 +2842,7 @@ export function SettingsWorkspace(props: {
               value={providerDraft.dimension}
             />
 
-            {providerDraft.type === "openai_compatible" ? (
+            {providerDraft.type !== "ollama" ? (
               <label className={styles.settingsField} htmlFor="settings-provider-api-key">
                 <span>{t.settings.sections.provider.apiKeyLabel}</span>
                 <input
@@ -2807,6 +2865,11 @@ export function SettingsWorkspace(props: {
                 {t.settings.sections.provider.ollamaApiKeyHint}
               </p>
             )}
+            {providerDraft.type === "gemini" ? (
+              <p className={styles.managementHint}>
+                {t.settings.sections.provider.geminiApiKeyHint}
+              </p>
+            ) : null}
 
             <label className={styles.settingsField} htmlFor="settings-provider-quality">
               <span>{t.settings.sections.provider.qualityTierLabel}</span>
@@ -3976,7 +4039,7 @@ export function ArticleListPanel(props: {
   onOpenSources: () => void;
   onExplainArticle: (articleId: string) => void;
   onSelectArticle: (articleId: string) => void;
-  onTodayOnlyChange: (todayOnly: boolean) => void;
+  onTimeWindowChange: (timeWindow: ArticleTimeWindow) => void;
   onUnreadOnlyChange: (unreadOnly: boolean) => void;
   pendingAction?: PendingArticleAction | null;
   recommendationStatus: RecommendationStatus | null;
@@ -3986,7 +4049,7 @@ export function ArticleListPanel(props: {
   selectedFolder: FeedFolder | null;
   showRecommendationStatus: boolean;
   showQuickFilters: boolean;
-  todayOnly: boolean;
+  timeWindow: ArticleTimeWindow;
   unreadCount: number;
   unreadOnly: boolean;
 }) {
@@ -4069,15 +4132,10 @@ export function ArticleListPanel(props: {
           ) : null}
           {props.showQuickFilters ? (
             <div className={styles.articleFilterBar} aria-label={t.articles.filters.label}>
-              <button
-                aria-pressed={props.todayOnly}
-                className={props.todayOnly ? styles.articleFilterActive : styles.articleFilter}
-                onClick={() => props.onTodayOnlyChange(!props.todayOnly)}
-                title={t.articles.filters.todayTitle}
-                type="button"
-              >
-                {t.articles.filters.today}
-              </button>
+              <TimeWindowFilter
+                onChange={props.onTimeWindowChange}
+                timeWindow={props.timeWindow}
+              />
               <button
                 aria-pressed={props.unreadOnly}
                 className={props.unreadOnly ? styles.articleFilterActive : styles.articleFilter}
@@ -4141,7 +4199,7 @@ export function ArticleListPanel(props: {
                 href={urlForArticle(props.articleView, article.id, {
                   favoriteSort: props.favoriteSort,
                   readLaterSort: props.readLaterSort,
-                  todayOnly: props.todayOnly,
+                  timeWindow: props.timeWindow,
                   unreadOnly: props.unreadOnly
                 })}
                 onClick={(event) => {
@@ -4195,6 +4253,55 @@ export function ArticleListPanel(props: {
         ) : null}
       </div>
     </section>
+  );
+}
+
+function TimeWindowFilter(props: {
+  onChange: (timeWindow: ArticleTimeWindow) => void;
+  timeWindow: ArticleTimeWindow;
+}) {
+  const { t } = useI18n();
+  const [isOpen, setIsOpen] = useState(false);
+  const active = props.timeWindow !== "all";
+  const label = t.articles.filters.timeWindows[props.timeWindow];
+
+  return (
+    <div className={styles.timeFilterMenu}>
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-pressed={active}
+        className={active ? styles.articleFilterActive : styles.articleFilter}
+        onClick={() => setIsOpen((open) => !open)}
+        title={t.articles.filters.timeWindowTitle}
+        type="button"
+      >
+        {label}
+      </button>
+      {isOpen ? (
+        <div className={styles.timeFilterMenuItems} role="menu">
+          {(["all", "24h", "7d", "30d"] as const).map((windowKey) => (
+            <button
+              aria-checked={props.timeWindow === windowKey}
+              className={
+                props.timeWindow === windowKey
+                  ? styles.timeFilterMenuItemActive
+                  : styles.timeFilterMenuItem
+              }
+              key={windowKey}
+              onClick={() => {
+                props.onChange(windowKey);
+                setIsOpen(false);
+              }}
+              role="menuitemradio"
+              type="button"
+            >
+              {t.articles.filters.timeWindows[windowKey]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5342,6 +5449,15 @@ function defaultEmbeddingProviderDraft(type: SupportedEmbeddingProviderType) {
     };
   }
 
+  if (type === "gemini") {
+    return {
+      name: "Gemini AI Studio",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-embedding-001",
+      dimension: 3072
+    };
+  }
+
   return {
     name: "OpenAI Compatible",
     baseUrl: "",
@@ -5353,7 +5469,7 @@ function defaultEmbeddingProviderDraft(type: SupportedEmbeddingProviderType) {
 function supportedProviderType(
   type: EmbeddingProviderType | undefined
 ): SupportedEmbeddingProviderType {
-  return type === "ollama" ? "ollama" : "openai_compatible";
+  return type === "ollama" || type === "gemini" ? type : "openai_compatible";
 }
 
 function parseSettingsDraft(
@@ -5488,7 +5604,7 @@ function parseEmbeddingProviderDraft(
       dimension,
       enabled: draft.enabled,
       qualityTier: draft.qualityTier,
-      ...(draft.type === "openai_compatible" && draft.apiKey.trim()
+      ...(draft.type !== "ollama" && draft.apiKey.trim()
         ? { apiKey: draft.apiKey.trim() }
         : {})
     }
@@ -5594,7 +5710,7 @@ function sortExplanationForView(view: ArticleView, t: Dictionary): string {
 type UrlState = {
   favoriteSort?: FavoriteArticleSort;
   readLaterSort?: ReadLaterArticleSort;
-  todayOnly?: boolean;
+  timeWindow?: ArticleTimeWindow;
   unreadOnly?: boolean;
 };
 
@@ -5616,6 +5732,67 @@ function routeFromLocation(defaultView: ArticleView): AppRoute {
     articleId: articleId && articleId.trim() ? articleId : null,
     hasExplicitPage: params.has("page") || params.has("view") || params.has("article")
   };
+}
+
+function readerFiltersForView(view: ArticleView): PersistedReaderFilters {
+  const stored = readPersistedReaderFilters(view);
+  return {
+    sourceSelection: stored.sourceSelection,
+    unreadOnly: urlBooleanParam("unread") || stored.unreadOnly,
+    timeWindow: urlTimeWindowParam() ?? stored.timeWindow
+  };
+}
+
+function persistedReaderFiltersKey(view: ArticleView): string {
+  return `dibao:reader-filters:${view}`;
+}
+
+function readPersistedReaderFilters(view: ArticleView): PersistedReaderFilters {
+  if (typeof window === "undefined" || !supportsQuickFilters(view)) {
+    return defaultReaderFilters;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(persistedReaderFiltersKey(view));
+    if (!raw) {
+      return defaultReaderFilters;
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedReaderFilters>;
+    return {
+      sourceSelection: parsePersistedSourceSelection(parsed.sourceSelection),
+      unreadOnly: parsed.unreadOnly === true,
+      timeWindow: parseArticleTimeWindowValue(parsed.timeWindow) ?? "all"
+    };
+  } catch {
+    return defaultReaderFilters;
+  }
+}
+
+function persistReaderFilters(view: ArticleView, filters: PersistedReaderFilters): void {
+  if (typeof window === "undefined" || !supportsQuickFilters(view)) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(persistedReaderFiltersKey(view), JSON.stringify(filters));
+  } catch {
+    // Local storage is a convenience only; browsing must continue if it is unavailable.
+  }
+}
+
+function parsePersistedSourceSelection(value: unknown): SourceSelection {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { type: "all" };
+  }
+
+  const input = value as Partial<SourceSelection>;
+  if (input.type === "feed" && typeof input.feedId === "string") {
+    return { type: "feed", feedId: input.feedId };
+  }
+  if (input.type === "folder" && typeof input.folderId === "string") {
+    return { type: "folder", folderId: input.folderId };
+  }
+  return { type: "all" };
 }
 
 function urlForNavigationItem(item: NavigationItemKey, state: UrlState = {}): string {
@@ -5648,8 +5825,8 @@ function paramsForReaderView(view: ArticleView, state: UrlState): URLSearchParam
   if (view === "read_later" && state.readLaterSort && state.readLaterSort !== defaultReadLaterArticleSort) {
     params.set("sort", state.readLaterSort);
   }
-  if (supportsQuickFilters(view) && state.todayOnly) {
-    params.set("today", "1");
+  if (supportsQuickFilters(view) && state.timeWindow && state.timeWindow !== "all") {
+    params.set("time", state.timeWindow);
   }
   if (supportsUnreadOnly(view) && state.unreadOnly) {
     params.set("unread", "1");
@@ -5689,6 +5866,20 @@ function urlBooleanParam(name: string): boolean {
   }
   const value = new URLSearchParams(window.location.search).get(name);
   return value === "1" || value === "true";
+}
+
+function urlTimeWindowParam(): ArticleTimeWindow | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return parseArticleTimeWindowValue(params.get("time")) ?? (urlBooleanParam("today") ? "24h" : null);
+}
+
+function parseArticleTimeWindowValue(value: unknown): ArticleTimeWindow | null {
+  return value === "all" || value === "24h" || value === "7d" || value === "30d"
+    ? value
+    : null;
 }
 
 function urlFavoriteSortParam(): FavoriteArticleSort | null {

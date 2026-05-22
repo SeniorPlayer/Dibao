@@ -680,7 +680,7 @@ export type ArticleSearchResult = {
 
 export type EmbeddingProviderInput = {
   id: string;
-  type: "embedded_local" | "ollama" | "openai_compatible" | "custom_http";
+  type: "embedded_local" | "ollama" | "openai_compatible" | "gemini" | "custom_http";
   name: string;
   baseUrl?: string | null;
   model: string;
@@ -693,7 +693,7 @@ export type EmbeddingProviderInput = {
 
 export type EmbeddingProviderRow = {
   id: string;
-  type: "embedded_local" | "ollama" | "openai_compatible" | "custom_http";
+  type: "embedded_local" | "ollama" | "openai_compatible" | "gemini" | "custom_http";
   name: string;
   baseUrl: string | null;
   model: string;

@@ -1132,14 +1132,28 @@ function representativeArticlesFor(
   evidence: EvidenceArticle[],
   limit: number
 ): ClusterDisplayLabel["representativeArticles"] {
-  return evidence.slice(0, limit).map((item) => ({
-    articleId: item.articleId,
-    title: item.title,
-    feedTitle: item.feedTitle,
-    eventType: item.eventType,
-    confidence: Number(item.confidence.toFixed(4)),
-    similarity: item.similarity === null ? null : Number(item.similarity.toFixed(4))
-  }));
+  const seenArticleIds = new Set<string>();
+  const representatives: ClusterDisplayLabel["representativeArticles"] = [];
+
+  for (const item of evidence) {
+    if (seenArticleIds.has(item.articleId)) {
+      continue;
+    }
+    seenArticleIds.add(item.articleId);
+    representatives.push({
+      articleId: item.articleId,
+      title: item.title,
+      feedTitle: item.feedTitle,
+      eventType: item.eventType,
+      confidence: Number(item.confidence.toFixed(4)),
+      similarity: item.similarity === null ? null : Number(item.similarity.toFixed(4))
+    });
+    if (representatives.length >= limit) {
+      break;
+    }
+  }
+
+  return representatives;
 }
 
 function labelFromRepresentativeTitles(
@@ -1456,6 +1470,7 @@ function parseLabelTerms(value: string | null): string[] {
 function parseRepresentativeArticles(
   value: string | null
 ): ClusterDisplayLabel["representativeArticles"] {
+  const seenArticleIds = new Set<string>();
   return parseJsonArray(value)
     .map((item) => {
       if (typeof item !== "object" || item === null || Array.isArray(item)) {
@@ -1477,7 +1492,13 @@ function parseRepresentativeArticles(
     .filter(
       (
         item
-      ): item is ClusterDisplayLabel["representativeArticles"][number] => item !== null
+      ): item is ClusterDisplayLabel["representativeArticles"][number] => {
+        if (item === null || seenArticleIds.has(item.articleId)) {
+          return false;
+        }
+        seenArticleIds.add(item.articleId);
+        return true;
+      }
     );
 }
 

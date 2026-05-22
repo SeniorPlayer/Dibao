@@ -65,6 +65,7 @@ import {
   EmbeddingProviderService,
   EmbeddingProviderServiceError
 } from "./embedding-provider-service.js";
+import { GeminiEmbeddingAdapter } from "./embedding/gemini-adapter.js";
 import { OllamaEmbeddingAdapter } from "./embedding/ollama-adapter.js";
 import { OpenAiCompatibleEmbeddingAdapter } from "./embedding/openai-compatible-adapter.js";
 import {
@@ -185,6 +186,7 @@ type ArticleQuery = {
   status?: string;
   unreadOnly?: string;
   todayOnly?: string;
+  timeWindow?: string;
   limit?: string;
   cursor?: string;
   sort?: string;
@@ -286,6 +288,9 @@ export function buildServer(options: BuildServerOptions = {}) {
   const vectorStore = new SqliteVecVectorStore(db);
   const embeddingAdapters = {
     openai_compatible: new OpenAiCompatibleEmbeddingAdapter({
+      fetcher: options.embeddingFetcher
+    }),
+    gemini: new GeminiEmbeddingAdapter({
       fetcher: options.embeddingFetcher
     }),
     ollama: new OllamaEmbeddingAdapter({
@@ -3016,6 +3021,14 @@ function parseArticleQuery(
       message: "todayOnly must be true or false"
     };
   }
+  const timeWindow = parseArticleTimeWindow(query.timeWindow, todayOnly);
+  if (timeWindow === null) {
+    return {
+      ok: false,
+      message: "timeWindow must be 24h, 7d, or 30d",
+      details: { field: "timeWindow" }
+    };
+  }
 
   const limit = parseLimit(query.limit);
   if (limit === null) {
@@ -3093,8 +3106,8 @@ function parseArticleQuery(
   if (unreadOnly !== undefined) {
     input.unreadOnly = unreadOnly;
   }
-  if (todayOnly) {
-    const range = localDayRange(now?.() ?? Date.now());
+  if (timeWindow !== undefined) {
+    const range = rollingTimeRange(now?.() ?? Date.now(), timeWindow);
     input.todayStartAt = range.startAt;
     input.todayEndAt = range.endAt;
   }
@@ -3105,15 +3118,35 @@ function parseArticleQuery(
   return { ok: true, input };
 }
 
-function localDayRange(timestamp: number): { startAt: number; endAt: number } {
-  const start = new Date(timestamp);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
+function parseArticleTimeWindow(
+  value: string | undefined,
+  todayOnly: boolean | undefined
+): "24h" | "7d" | "30d" | undefined | null {
+  if (value === undefined) {
+    return todayOnly ? "24h" : undefined;
+  }
+  if (value === "" || value === "all") {
+    return undefined;
+  }
+  if (value === "24h" || value === "7d" || value === "30d") {
+    return value;
+  }
+  return null;
+}
 
+function rollingTimeRange(
+  timestamp: number,
+  window: "24h" | "7d" | "30d"
+): { startAt: number; endAt: number } {
+  const durationMs =
+    window === "24h"
+      ? 24 * 60 * 60 * 1000
+      : window === "7d"
+        ? 7 * 24 * 60 * 60 * 1000
+        : 30 * 24 * 60 * 60 * 1000;
   return {
-    startAt: start.getTime(),
-    endAt: end.getTime()
+    startAt: timestamp - durationMs,
+    endAt: timestamp
   };
 }
 

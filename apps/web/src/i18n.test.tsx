@@ -327,7 +327,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -340,7 +340,7 @@ describe("web i18n", () => {
           }}
           showRecommendationStatus={false}
           showQuickFilters={true}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={12}
           unreadOnly={false}
         />
@@ -354,7 +354,7 @@ describe("web i18n", () => {
     expect(feedPanel).toContain("分组");
     expect(feedPanel).toContain('title="刷新 Design Feed"');
     expect(articlePanel).toContain("只看未读");
-    expect(articlePanel).toContain("今日");
+    expect(articlePanel).toContain("全部");
     expect(articlePanel).toContain("加载更多");
     expect(articlePanel).toContain("设计");
   });
@@ -382,7 +382,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={{
             mode: "embedding",
@@ -420,7 +420,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus
           showQuickFilters={true}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={3}
           unreadOnly={true}
         />
@@ -480,7 +480,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -489,7 +489,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus={false}
           showQuickFilters={true}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={1}
           unreadOnly={false}
         />
@@ -524,7 +524,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -533,7 +533,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus={false}
           showQuickFilters={true}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={1}
           unreadOnly={false}
         />
@@ -561,7 +561,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -570,7 +570,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus={false}
           showQuickFilters={true}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={1}
           unreadOnly={false}
         />
@@ -605,7 +605,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -614,7 +614,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus={false}
           showQuickFilters={false}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={1}
           unreadOnly={true}
         />
@@ -642,7 +642,7 @@ describe("web i18n", () => {
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
-          onTodayOnlyChange={() => undefined}
+          onTimeWindowChange={() => undefined}
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
@@ -651,7 +651,7 @@ describe("web i18n", () => {
           selectedFolder={null}
           showRecommendationStatus={false}
           showQuickFilters={false}
-          todayOnly={false}
+          timeWindow="all"
           unreadCount={0}
           unreadOnly={true}
         />
