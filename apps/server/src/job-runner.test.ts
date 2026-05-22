@@ -715,6 +715,64 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("continues active index backfill until remaining embedding candidates are covered", async () => {
+    const fixture = createEmbeddingPipelineFixture();
+    const { db, articles, embeddingJobs, jobs } = fixture;
+
+    try {
+      for (let index = 0; index < 1005; index += 1) {
+        insertEmbeddingArticleFixture(
+          db,
+          articles,
+          `article_backfill_${String(index).padStart(4, "0")}`,
+          `Backfill article ${index}`
+        );
+      }
+
+      const initialJobs = embeddingJobs.enqueueBackfillForActiveIndex();
+      expect(initialJobs).toHaveLength(63);
+
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [EMBEDDING_GENERATE_JOB_TYPE]: (job) => embeddingJobs.handleEmbeddingGenerateJob(job)
+        },
+        now: () => 2000
+      });
+
+      await runner.runDueOnce();
+
+      expect(
+        (
+          db
+            .prepare("select count(*) as count from jobs where type = ? and status = 'queued'")
+            .get(EMBEDDING_GENERATE_JOB_TYPE) as { count: number }
+        ).count
+      ).toBe(62);
+
+      await runner.drainDue();
+
+      expect(
+        (
+          db
+            .prepare("select count(*) as count from article_embeddings where embedding_index_id = ?")
+            .get("index_openai") as { count: number }
+        ).count
+      ).toBe(1005);
+      expect(
+        (
+          db
+            .prepare(
+              "select count(*) as count from jobs where type = ? and status in ('queued', 'running')"
+            )
+            .get(EMBEDDING_GENERATE_JOB_TYPE) as { count: number }
+        ).count
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("retries retryable provider failures and permanently fails malformed provider responses", async () => {
     const retryable = createEmbeddingPipelineFixture();
 

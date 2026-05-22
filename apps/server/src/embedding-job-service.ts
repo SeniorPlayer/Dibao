@@ -150,6 +150,7 @@ export class EmbeddingJobService {
       limit: EMBEDDING_JOB_ARTICLE_LIMIT
     });
     if (candidates.length === 0) {
+      this.enqueueNextBackfillBatchIfDrained(index.id, provider.type);
       return;
     }
 
@@ -204,6 +205,8 @@ export class EmbeddingJobService {
       } else {
         this.options.rankingJobs?.enqueueArticles(writtenArticleIds);
       }
+
+      this.enqueueNextBackfillBatchIfDrained(index.id, provider.type);
     } catch (error) {
       if (error instanceof PermanentJobFailure) {
         throw error;
@@ -269,18 +272,57 @@ export class EmbeddingJobService {
   private openArticleIdsForIndex(embeddingIndexId: string): Set<string> {
     const ids = new Set<string>();
 
-    for (const job of this.options.jobs.listOpenByType(EMBEDDING_GENERATE_JOB_TYPE)) {
-      const payload = parseEmbeddingGeneratePayload(job.payloadJson);
-      if (!payload || payload.embeddingIndexId !== embeddingIndexId) {
-        continue;
-      }
-
+    for (const { payload } of this.openEmbeddingJobsForIndex(embeddingIndexId)) {
       for (const articleId of payload.articleIds) {
         ids.add(articleId);
       }
     }
 
     return ids;
+  }
+
+  private enqueueNextBackfillBatchIfDrained(
+    embeddingIndexId: string,
+    providerType: string
+  ): EmbeddingBackfillEnqueueResult | null {
+    const openJobs = this.openEmbeddingJobsForIndex(embeddingIndexId);
+    if (openJobs.length > 1) {
+      return null;
+    }
+
+    const candidates = this.options.articles.listEmbeddingCandidates({
+      embeddingIndexId,
+      limit: EMBEDDING_BACKFILL_LIMIT
+    });
+    const result = this.enqueueCandidates(
+      embeddingIndexId,
+      candidates,
+      embeddingBatchSizeFor(providerType)
+    );
+
+    return {
+      jobIds: result.jobs.map((job) => job.id),
+      candidateCount: result.candidateCount,
+      enqueuedArticleCount: result.enqueuedArticleCount,
+      dedupedArticleCount: result.dedupedArticleCount
+    };
+  }
+
+  private openEmbeddingJobsForIndex(
+    embeddingIndexId: string
+  ): Array<{ job: JobRow; payload: EmbeddingGenerateJobPayload }> {
+    const jobs: Array<{ job: JobRow; payload: EmbeddingGenerateJobPayload }> = [];
+
+    for (const job of this.options.jobs.listOpenByType(EMBEDDING_GENERATE_JOB_TYPE)) {
+      const payload = parseEmbeddingGeneratePayload(job.payloadJson);
+      if (!payload || payload.embeddingIndexId !== embeddingIndexId) {
+        continue;
+      }
+
+      jobs.push({ job, payload });
+    }
+
+    return jobs;
   }
 }
 

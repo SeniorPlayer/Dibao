@@ -183,7 +183,7 @@ export class SqliteArticleRepository implements ArticleRepository {
     articleIds?: string[];
     limit?: number;
   }): ArticleEmbeddingCandidateRow[] {
-    const limit = normalizeLimit(input.limit);
+    const limit = normalizeEmbeddingCandidateLimit(input.limit);
     const params: unknown[] = [input.embeddingIndexId];
     const articleFilter =
       input.articleIds && input.articleIds.length > 0
@@ -790,6 +790,14 @@ function normalizeLimit(limit: number | undefined): number {
   }
 
   return Math.min(Math.max(Math.trunc(limit), 1), 100);
+}
+
+function normalizeEmbeddingCandidateLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return 50;
+  }
+
+  return Math.min(Math.max(Math.trunc(limit), 1), 1_000);
 }
 
 function normalizeOffset(offset: number | undefined): number {
