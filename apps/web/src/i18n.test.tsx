@@ -871,16 +871,18 @@ describe("web i18n", () => {
           error={null}
           isEmbeddingLoading={false}
           isLoading={false}
+          activatingProviderId={null}
           isSavingEmbeddingProvider={false}
           isSaving={false}
           rebuildingIndexId={null}
           testingProviderId={null}
-                    onBackfillEmbeddingIndex={() => Promise.resolve()}
-onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onActivateEmbeddingProvider={() => Promise.resolve()}
+          onBackfillEmbeddingIndex={() => Promise.resolve()}
+          onDeleteEmbeddingProvider={() => Promise.resolve()}
           onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
-          onSaveEmbeddingProvider={() => Promise.resolve()}
+          onSaveEmbeddingProvider={() => Promise.resolve(null)}
           onSaveSettings={() => Promise.resolve()}
           onTestEmbeddingProvider={() => Promise.resolve()}
           settings={defaultAppSettings}
@@ -901,6 +903,9 @@ onDeleteEmbeddingProvider={() => Promise.resolve()}
     expect(html).toContain("保留天数");
     expect(html).toContain("retention.retentionDays");
     expect(html).toContain("智能能力");
+    expect(html).toContain("当前未启用 Provider");
+    expect(html).toContain("保存配置档");
+    expect(html).toContain("设为当前 Provider");
     expect(html).toContain("OpenAI-compatible");
     expect(html).toContain("Ollama");
     expect(html).toContain("API Key");
@@ -965,16 +970,18 @@ onDeleteEmbeddingProvider={() => Promise.resolve()}
           error={null}
           isEmbeddingLoading={false}
           isLoading={false}
+          activatingProviderId={null}
           isSavingEmbeddingProvider={false}
           isSaving={false}
           rebuildingIndexId={null}
           testingProviderId={null}
-                    onBackfillEmbeddingIndex={() => Promise.resolve()}
-onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onActivateEmbeddingProvider={() => Promise.resolve()}
+          onBackfillEmbeddingIndex={() => Promise.resolve()}
+          onDeleteEmbeddingProvider={() => Promise.resolve()}
           onOpenAlgorithmTransparency={() => undefined}
           onPreviewSettings={() => undefined}
           onRebuildEmbeddingIndex={() => Promise.resolve()}
-          onSaveEmbeddingProvider={() => Promise.resolve()}
+          onSaveEmbeddingProvider={() => Promise.resolve(null)}
           onSaveSettings={() => Promise.resolve()}
           onTestEmbeddingProvider={() => Promise.resolve()}
           settings={defaultAppSettings}
@@ -983,6 +990,8 @@ onDeleteEmbeddingProvider={() => Promise.resolve()}
     );
 
     expect(html).toContain("连接测试状态");
+    expect(html).toContain("当前生效 Provider");
+    expect(html).toContain("已是当前 Provider");
     expect(html).toContain("连接测试成功");
     expect(html).toContain("Embedding job 状态");
     expect(html).toContain("6 / 10 · 60%");

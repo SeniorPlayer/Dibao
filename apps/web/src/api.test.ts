@@ -286,6 +286,8 @@ describe("web API client", () => {
         ? init?.method === "POST"
           ? { id: "provider/openai" }
           : [provider]
+        : path.endsWith("/activate")
+          ? provider
         : path.endsWith("/test")
           ? { status: "success", dimension: 1536, latencyMs: 12 }
           : path === "/api/embedding/indexes"
@@ -336,6 +338,7 @@ describe("web API client", () => {
     await api.updateEmbeddingProvider("provider/openai", {
       enabled: false
     });
+    await api.activateEmbeddingProvider("provider/openai");
     await api.testEmbeddingProvider("provider/openai");
     await api.listEmbeddingIndexes();
     await api.rebuildEmbeddingIndex("index/openai");
@@ -368,6 +371,11 @@ describe("web API client", () => {
         body: {
           enabled: false
         }
+      },
+      {
+        path: "/api/embedding/providers/provider%2Fopenai/activate",
+        method: "POST",
+        body: null
       },
       {
         path: "/api/embedding/providers/provider%2Fopenai/test",

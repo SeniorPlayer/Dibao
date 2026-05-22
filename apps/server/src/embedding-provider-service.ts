@@ -184,6 +184,30 @@ export class EmbeddingProviderService {
     return mapProvider(this.mustFindProvider(id));
   }
 
+  activateProvider(id: string): EmbeddingProviderResponse {
+    const existing = this.options.embeddings.findProviderById(id);
+    if (!existing) {
+      throw notFound("Embedding provider not found");
+    }
+
+    validateEnabledProviderType(existing.type, true);
+    this.adapterForProviderType(existing.type);
+    this.assertProviderSwitchCompatible(id, existing.model, existing.dimension);
+
+    const now = this.now();
+    const updated = this.options.embeddings.updateProvider({
+      id,
+      enabled: true,
+      now
+    });
+    if (!updated) {
+      throw notFound("Embedding provider not found");
+    }
+
+    this.ensureActiveIndex(id, existing.model, existing.dimension, now);
+    return mapProvider(this.mustFindProvider(id));
+  }
+
   deleteProvider(id: string): { ok: true } {
     const existing = this.options.embeddings.findProviderById(id);
     if (!existing) {

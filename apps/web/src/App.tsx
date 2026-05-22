@@ -85,6 +85,7 @@ type Notice =
   | { type: "opmlExported" }
   | { type: "settingsSaved" }
   | { type: "embeddingProviderSaved" }
+  | { type: "embeddingProviderActivated" }
   | { type: "embeddingProviderTested" }
   | { type: "embeddingProviderDeleted" }
   | { type: "embeddingIndexRebuildQueued" }
@@ -210,6 +211,7 @@ export function App() {
   const [embeddingIndexes, setEmbeddingIndexes] = useState<EmbeddingIndex[]>([]);
   const [isEmbeddingLoading, setIsEmbeddingLoading] = useState(false);
   const [isSavingEmbeddingProvider, setIsSavingEmbeddingProvider] = useState(false);
+  const [activatingProviderId, setActivatingProviderId] = useState<string | null>(null);
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
   const [rebuildingIndexId, setRebuildingIndexId] = useState<string | null>(null);
@@ -499,6 +501,7 @@ export function App() {
     setEmbeddingIndexes([]);
     setIsEmbeddingLoading(false);
     setIsSavingEmbeddingProvider(false);
+    setActivatingProviderId(null);
     setTestingProviderId(null);
     setDeletingProviderId(null);
     setRebuildingIndexId(null);
@@ -1327,23 +1330,44 @@ export function App() {
   async function handleSaveEmbeddingProvider(
     providerId: string | null,
     input: CreateEmbeddingProviderInput | UpdateEmbeddingProviderInput
-  ) {
+  ): Promise<string | null> {
     setIsSavingEmbeddingProvider(true);
     setEmbeddingError(null);
     setNotice(null);
 
     try {
+      let savedProviderId = providerId;
       if (providerId) {
         await dibaoApi.updateEmbeddingProvider(providerId, input);
       } else {
-        await dibaoApi.createEmbeddingProvider(input as CreateEmbeddingProviderInput);
+        const created = await dibaoApi.createEmbeddingProvider(input as CreateEmbeddingProviderInput);
+        savedProviderId = created.id;
       }
       await loadEmbeddingSettings();
       setNotice({ type: "embeddingProviderSaved" });
+      return savedProviderId;
     } catch (error) {
       setEmbeddingError(userMessageForError(error, t.errors.api));
+      return null;
     } finally {
       setIsSavingEmbeddingProvider(false);
+    }
+  }
+
+  async function handleActivateEmbeddingProvider(providerId: string) {
+    setActivatingProviderId(providerId);
+    setEmbeddingError(null);
+    setNotice(null);
+
+    try {
+      await dibaoApi.activateEmbeddingProvider(providerId);
+      await loadEmbeddingSettings();
+      setNotice({ type: "embeddingProviderActivated" });
+    } catch (error) {
+      setEmbeddingError(userMessageForError(error, t.errors.api));
+      await loadEmbeddingSettings();
+    } finally {
+      setActivatingProviderId(null);
     }
   }
 
@@ -2006,6 +2030,7 @@ export function App() {
             error={settingsError}
             isEmbeddingLoading={isEmbeddingLoading}
             isLoading={isSettingsLoading}
+            activatingProviderId={activatingProviderId}
             isSavingEmbeddingProvider={isSavingEmbeddingProvider}
             isSaving={isSavingSettings}
             backfillingIndexId={backfillingIndexId}
@@ -2013,6 +2038,7 @@ export function App() {
             rebuildingIndexId={rebuildingIndexId}
             testingProviderId={testingProviderId}
             onBackfillEmbeddingIndex={handleBackfillEmbeddingIndex}
+            onActivateEmbeddingProvider={handleActivateEmbeddingProvider}
             onDeleteEmbeddingProvider={handleDeleteEmbeddingProvider}
             onPreviewSettings={handlePreviewSettings}
             onRebuildEmbeddingIndex={handleRebuildEmbeddingIndex}
@@ -2421,10 +2447,12 @@ export function SettingsWorkspace(props: {
   error: string | null;
   isEmbeddingLoading: boolean;
   isLoading: boolean;
+  activatingProviderId: string | null;
   isSavingEmbeddingProvider: boolean;
   isSaving: boolean;
   rebuildingIndexId: string | null;
   testingProviderId: string | null;
+  onActivateEmbeddingProvider: (providerId: string) => Promise<void>;
   onBackfillEmbeddingIndex: (indexId: string) => Promise<void>;
   onDeleteEmbeddingProvider: (providerId: string) => Promise<void>;
   onOpenAlgorithmTransparency: () => void;
@@ -2434,7 +2462,7 @@ export function SettingsWorkspace(props: {
   onSaveEmbeddingProvider: (
     providerId: string | null,
     input: CreateEmbeddingProviderInput | UpdateEmbeddingProviderInput
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   onTestEmbeddingProvider: (providerId: string) => Promise<void>;
   settings: AppSettings;
 }) {
@@ -2447,6 +2475,7 @@ export function SettingsWorkspace(props: {
   const [providerDraft, setProviderDraft] = useState<EmbeddingProviderDraft>(() =>
     draftForEmbeddingProvider(initialProvider)
   );
+  const [pendingProviderSelectionId, setPendingProviderSelectionId] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [providerLocalError, setProviderLocalError] = useState<string | null>(null);
   const [usageWindow, setUsageWindow] = useState<"24h" | "7d" | "30d">("24h");
@@ -2456,13 +2485,34 @@ export function SettingsWorkspace(props: {
   }, [props.settings]);
 
   useEffect(() => {
+    if (pendingProviderSelectionId) {
+      const pendingProvider = props.embeddingProviders.find(
+        (provider) => provider.id === pendingProviderSelectionId
+      );
+      if (pendingProvider) {
+        setProviderDraft(draftForEmbeddingProvider(pendingProvider));
+        setPendingProviderSelectionId(null);
+        setProviderLocalError(null);
+        return;
+      }
+    }
+
+    const selectedProvider = props.embeddingProviders.find(
+      (provider) => provider.id === providerDraft.providerId
+    );
+    if (selectedProvider) {
+      setProviderDraft(draftForEmbeddingProvider(selectedProvider));
+      setProviderLocalError(null);
+      return;
+    }
+
     const activeProvider =
       props.embeddingProviders.find((provider) => provider.enabled) ??
       props.embeddingProviders[0] ??
       null;
     setProviderDraft(draftForEmbeddingProvider(activeProvider));
     setProviderLocalError(null);
-  }, [props.embeddingProviders]);
+  }, [pendingProviderSelectionId, props.embeddingProviders]);
 
   function applyDraft(nextDraft: SettingsDraft) {
     setDraft(nextDraft);
@@ -2495,10 +2545,13 @@ export function SettingsWorkspace(props: {
     }
 
     setProviderLocalError(null);
-    await props.onSaveEmbeddingProvider(
+    const savedProviderId = await props.onSaveEmbeddingProvider(
       providerDraft.providerId === newEmbeddingProviderId ? null : providerDraft.providerId,
       parsed.input
     );
+    if (savedProviderId) {
+      setPendingProviderSelectionId(savedProviderId);
+    }
   }
 
   const selectedProvider =
@@ -2506,9 +2559,18 @@ export function SettingsWorkspace(props: {
       ? null
       : props.embeddingProviders.find((provider) => provider.id === providerDraft.providerId) ??
         null;
+  const activeProvider = props.embeddingProviders.find((provider) => provider.enabled) ?? null;
+  const activeProviderIndex = activeProvider
+    ? props.embeddingIndexes.find(
+        (index) => index.providerId === activeProvider.id && index.status === "active"
+      ) ?? null
+    : null;
   const selectedProviderIndexes = selectedProvider
     ? props.embeddingIndexes.filter((index) => index.providerId === selectedProvider.id)
     : [];
+  const canActivateSelectedProvider = selectedProvider !== null && !selectedProvider.enabled;
+  const isActivatingSelectedProvider =
+    selectedProvider !== null && props.activatingProviderId === selectedProvider.id;
 
   return (
     <form
@@ -2733,6 +2795,63 @@ export function SettingsWorkspace(props: {
           {props.embeddingError ? <p className={styles.errorText}>{props.embeddingError}</p> : null}
           {providerLocalError ? <p className={styles.errorText}>{providerLocalError}</p> : null}
 
+          <div className={styles.providerActiveStatus}>
+            <div>
+              <strong>
+                {activeProvider
+                  ? t.settings.sections.provider.activeTitle
+                  : t.settings.sections.provider.activeEmptyTitle}
+              </strong>
+              <p>
+                {activeProvider
+                  ? t.settings.sections.provider.activeBody(
+                      activeProvider.name,
+                      activeProvider.model,
+                      activeProvider.dimension
+                    )
+                  : t.settings.sections.provider.activeEmptyBody}
+              </p>
+              {activeProviderIndex ? (
+                <p>{embeddingCoverageText(activeProviderIndex, t)}</p>
+              ) : null}
+            </div>
+          </div>
+
+          {props.embeddingProviders.length > 0 ? (
+            <div
+              aria-label={t.settings.sections.provider.profileListLabel}
+              className={styles.providerProfileList}
+            >
+              {props.embeddingProviders.map((provider) => (
+                <button
+                  className={
+                    provider.id === providerDraft.providerId
+                      ? styles.providerProfileCardActive
+                      : styles.providerProfileCard
+                  }
+                  key={provider.id}
+                  onClick={() => {
+                    setProviderDraft(draftForEmbeddingProvider(provider));
+                    setProviderLocalError(null);
+                  }}
+                  type="button"
+                >
+                  <span>
+                    <strong>{provider.name}</strong>
+                    <small>
+                      {provider.type} · {provider.model} / {provider.dimension}
+                    </small>
+                  </span>
+                  <em>
+                    {provider.enabled
+                      ? t.settings.sections.provider.currentBadge
+                      : t.settings.sections.provider.profileBadge}
+                  </em>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <div className={styles.settingsGrid}>
             <label className={styles.settingsField} htmlFor="settings-provider-select">
               <span>{t.settings.sections.provider.providerLabel}</span>
@@ -2895,18 +3014,7 @@ export function SettingsWorkspace(props: {
           </div>
 
           <p className={styles.managementHint}>{t.settings.sections.provider.modelHint}</p>
-
-          <label className={styles.settingsInlineStatus} htmlFor="settings-provider-enabled">
-            <span>{t.settings.sections.provider.enabledLabel}</span>
-            <input
-              checked={providerDraft.enabled}
-              id="settings-provider-enabled"
-              onChange={(event) =>
-                setProviderDraft({ ...providerDraft, enabled: event.target.checked })
-              }
-              type="checkbox"
-            />
-          </label>
+          <p className={styles.managementHint}>{t.settings.sections.provider.activateHint}</p>
 
           {selectedProvider ? (
             <div className={styles.setupStatusBox}>
@@ -2939,6 +3047,26 @@ export function SettingsWorkspace(props: {
               {props.isSavingEmbeddingProvider
                 ? t.settings.sections.provider.saving
                 : t.settings.sections.provider.save}
+            </button>
+            <button
+              className={styles.primaryButton}
+              disabled={
+                !canActivateSelectedProvider ||
+                isActivatingSelectedProvider ||
+                props.isSavingEmbeddingProvider
+              }
+              onClick={() =>
+                selectedProvider
+                  ? void props.onActivateEmbeddingProvider(selectedProvider.id)
+                  : undefined
+              }
+              type="button"
+            >
+              {isActivatingSelectedProvider
+                ? t.settings.sections.provider.activating
+                : selectedProvider?.enabled
+                  ? t.settings.sections.provider.activeActionCurrent
+                  : t.settings.sections.provider.activate}
             </button>
             <button
               className={styles.secondaryButton}
@@ -6052,6 +6180,8 @@ function noticeTextFor(notice: Notice, t: Dictionary): string {
       return t.settings.notices.saved;
     case "embeddingProviderSaved":
       return t.settings.sections.provider.notices.saved;
+    case "embeddingProviderActivated":
+      return t.settings.sections.provider.notices.activated;
     case "embeddingProviderTested":
       return t.settings.sections.provider.notices.tested;
     case "embeddingProviderDeleted":

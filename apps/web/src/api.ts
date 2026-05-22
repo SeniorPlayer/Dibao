@@ -885,6 +885,17 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       ).data;
     },
 
+    async activateEmbeddingProvider(providerId: string): Promise<EmbeddingProvider> {
+      return (
+        await request<EmbeddingProvider>(
+          `/api/embedding/providers/${encodeURIComponent(providerId)}/activate`,
+          {
+            method: "POST"
+          }
+        )
+      ).data;
+    },
+
     async deleteEmbeddingProvider(providerId: string): Promise<DeleteResponse> {
       return (
         await request<DeleteResponse>(

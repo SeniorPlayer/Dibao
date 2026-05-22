@@ -1061,6 +1061,22 @@ export function buildServer(options: BuildServerOptions = {}) {
   );
 
   app.post<{ Params: EmbeddingProviderParams }>(
+    "/api/embedding/providers/:id/activate",
+    async (request, reply) => {
+      try {
+        const provider = embeddingProviderService.activateProvider(request.params.id);
+        enqueueEmbeddingBackfill();
+        enqueueRankingAll();
+        return {
+          data: provider
+        };
+      } catch (error) {
+        return sendEmbeddingProviderError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: EmbeddingProviderParams }>(
     "/api/embedding/providers/:id/test",
     async (request, reply) => {
       try {

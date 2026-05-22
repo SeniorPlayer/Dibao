@@ -1199,6 +1199,67 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("activates a saved provider explicitly without editing the provider profile", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false, now: () => 1000 });
+
+    try {
+      const first = await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "First Provider",
+        baseUrl: "https://api.first.example/v1",
+        model: "bge-m3",
+        dimension: 1024,
+        enabled: true
+      });
+      const firstProviderId = (first.json() as { data: { id: string } }).data.id;
+
+      const second = await postJson(app, "/api/embedding/providers", {
+        type: "ollama",
+        name: "Second Provider",
+        baseUrl: "http://127.0.0.1:11434",
+        model: "bge-m3",
+        dimension: 1024,
+        enabled: false
+      });
+      const secondProviderId = (second.json() as { data: { id: string } }).data.id;
+
+      const activated = await app.inject({
+        method: "POST",
+        url: `/api/embedding/providers/${secondProviderId}/activate`
+      });
+      expect(activated.statusCode, activated.body).toBe(200);
+      expect(activated.json()).toMatchObject({
+        data: {
+          id: secondProviderId,
+          enabled: true,
+          model: "bge-m3",
+          dimension: 1024
+        }
+      });
+
+      const providers = await app.inject({
+        method: "GET",
+        url: "/api/embedding/providers"
+      });
+      expect(providers.json()).toMatchObject({
+        data: [
+          {
+            id: secondProviderId,
+            enabled: true
+          },
+          {
+            id: firstProviderId,
+            enabled: false
+          }
+        ]
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("rejects provider switches across different embedding models or dimensions", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({ db, logger: false, now: () => 1000 });
@@ -1221,6 +1282,47 @@ describe("server API vertical slice", () => {
         model: "text-embedding-3-small",
         dimension: 1536,
         enabled: true
+      });
+      expect(incompatible.statusCode, incompatible.body).toBe(409);
+      expect(incompatible.json()).toMatchObject({
+        error: {
+          code: "INCOMPATIBLE_PROVIDER_SWITCH"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("rejects explicit provider activation across different embedding models or dimensions", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({ db, logger: false, now: () => 1000 });
+
+    try {
+      const first = await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "First Provider",
+        baseUrl: "https://api.first.example/v1",
+        model: "bge-m3",
+        dimension: 1024,
+        enabled: true
+      });
+      expect(first.statusCode, first.body).toBe(200);
+
+      const second = await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "Second Provider",
+        baseUrl: "https://api.second.example/v1",
+        model: "text-embedding-3-small",
+        dimension: 1536,
+        enabled: false
+      });
+      const secondProviderId = (second.json() as { data: { id: string } }).data.id;
+
+      const incompatible = await app.inject({
+        method: "POST",
+        url: `/api/embedding/providers/${secondProviderId}/activate`
       });
       expect(incompatible.statusCode, incompatible.body).toBe(409);
       expect(incompatible.json()).toMatchObject({
