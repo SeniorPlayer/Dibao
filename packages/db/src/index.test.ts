@@ -9,6 +9,7 @@ import {
   SqliteAppSettingsRepository,
   SqliteAuthCredentialRepository,
   SqliteEmbeddingRepository,
+  SqliteFeedFolderRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
   SqliteProfileRepository,
@@ -1081,6 +1082,251 @@ describe("db package", () => {
         limit: 2
       });
       expect(rebuilt[0]?.articleId).toBe("article_ai_local");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("searches local articles with filters, pagination, CJK fallback, and recommendation-aware ordering", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const folders = new SqliteFeedFolderRepository(db);
+      const feeds = new SqliteFeedRepository(db);
+      const articles = new SqliteArticleRepository(db);
+      const actions = new SqliteArticleActionRepository(db);
+      const rankings = new SqliteRankingRepository(db);
+
+      folders.upsert({
+        id: "folder_search",
+        title: "Search Folder",
+        now: 1000
+      });
+      feeds.upsert({
+        id: "feed_search",
+        folderId: "folder_search",
+        title: "Search Feed",
+        feedUrl: "https://example.com/search.xml",
+        now: 1000
+      });
+      feeds.upsert({
+        id: "feed_other",
+        title: "Other Feed",
+        feedUrl: "https://example.com/other.xml",
+        now: 1000
+      });
+
+      const fixtures = [
+        {
+          id: "article_title",
+          feedId: "feed_search",
+          title: "Alpha launch report",
+          summary: "Title match",
+          content: "A short note.",
+          publishedAt: 1000
+        },
+        {
+          id: "article_content",
+          feedId: "feed_search",
+          title: "Release notes",
+          summary: "Content match",
+          content: "This article discusses alpha launch experiments in detail.",
+          publishedAt: 2000
+        },
+        {
+          id: "article_cjk",
+          feedId: "feed_search",
+          title: "腾讯研究院发布报告",
+          summary: "中文搜索 fixture",
+          content: "报告关注本地推荐系统。",
+          publishedAt: 3000
+        },
+        {
+          id: "article_favorite",
+          feedId: "feed_search",
+          title: "Alpha favorite",
+          summary: "Favorite state",
+          content: "Favorite alpha item.",
+          publishedAt: 4000
+        },
+        {
+          id: "article_later",
+          feedId: "feed_search",
+          title: "Alpha read later",
+          summary: "Read later state",
+          content: "Read later alpha item.",
+          publishedAt: 5000
+        },
+        {
+          id: "article_read",
+          feedId: "feed_search",
+          title: "Alpha read",
+          summary: "Read state",
+          content: "Read alpha item.",
+          publishedAt: 6000
+        },
+        {
+          id: "article_other_feed",
+          feedId: "feed_other",
+          title: "Alpha other feed",
+          summary: "Other feed",
+          content: "Other feed alpha item.",
+          publishedAt: 7000
+        },
+        {
+          id: "article_hidden",
+          feedId: "feed_search",
+          title: "Alpha hidden",
+          summary: "Hidden state",
+          content: "Hidden alpha item.",
+          publishedAt: 8000
+        },
+        {
+          id: "article_not_interested",
+          feedId: "feed_search",
+          title: "Alpha not interested",
+          summary: "Not interested state",
+          content: "Not interested alpha item.",
+          publishedAt: 9000
+        }
+      ];
+
+      for (const fixture of fixtures) {
+        articles.upsert({
+          id: fixture.id,
+          feedId: fixture.feedId,
+          url: `https://example.com/${fixture.id}`,
+          title: fixture.title,
+          summary: fixture.summary,
+          publishedAt: fixture.publishedAt,
+          discoveredAt: fixture.publishedAt,
+          dedupeKey: fixture.id,
+          now: fixture.publishedAt
+        });
+        articles.upsertContent({
+          articleId: fixture.id,
+          contentText: fixture.content,
+          extractionStatus: "success",
+          extractedAt: fixture.publishedAt,
+          now: fixture.publishedAt
+        });
+      }
+
+      actions.record({ articleId: "article_favorite", type: "favorite", now: 10_000 });
+      actions.record({ articleId: "article_later", type: "read_later", now: 10_100 });
+      actions.record({
+        articleId: "article_read",
+        type: "read_progress",
+        progress: 0.95,
+        now: 10_200
+      });
+      actions.record({ articleId: "article_hidden", type: "hide", now: 10_300 });
+      actions.record({
+        articleId: "article_not_interested",
+        type: "not_interested",
+        now: 10_400
+      });
+
+      rankings.upsertScore({
+        articleId: "article_content",
+        rankContext: "ctx_search",
+        score: 0.95,
+        baseScore: 0.95,
+        interestScore: 0,
+        sourceScore: 0,
+        freshnessScore: 0,
+        stateScore: 0,
+        diversityScore: 0,
+        penaltyScore: 0,
+        rerankPosition: 1,
+        calculatedAt: 11_000
+      });
+      rankings.upsertScore({
+        articleId: "article_title",
+        rankContext: "ctx_search",
+        score: 0.1,
+        baseScore: 0.1,
+        interestScore: 0,
+        sourceScore: 0,
+        freshnessScore: 0,
+        stateScore: 0,
+        diversityScore: 0,
+        penaltyScore: 0,
+        rerankPosition: 2,
+        calculatedAt: 11_000
+      });
+
+      expect(articles.search({ query: "report" }).items.map((article) => article.id)).toEqual([
+        "article_title"
+      ]);
+      expect(articles.search({ query: "experiments" }).items.map((article) => article.id)).toEqual([
+        "article_content"
+      ]);
+      expect(articles.search({ query: "腾讯" }).items.map((article) => article.id)).toEqual([
+        "article_cjk"
+      ]);
+      expect(articles.search({ query: "研究院" }).items.map((article) => article.id)).toEqual([
+        "article_cjk"
+      ]);
+
+      const visibleAlpha = articles.search({ query: "alpha", limit: 20 }).items.map((article) => article.id);
+      expect(visibleAlpha).toContain("article_title");
+      expect(visibleAlpha).not.toContain("article_hidden");
+      expect(visibleAlpha).not.toContain("article_not_interested");
+
+      expect(
+        articles.search({ query: "alpha", feedId: "feed_other" }).items.map((article) => article.id)
+      ).toEqual(["article_other_feed"]);
+      expect(
+        articles.search({ query: "alpha", folderId: "folder_search", limit: 20 }).items.map((article) => article.id)
+      ).not.toContain("article_other_feed");
+      expect(
+        articles.search({ query: "alpha", state: "favorites" }).items.map((article) => article.id)
+      ).toEqual(["article_favorite"]);
+      expect(
+        articles.search({ query: "alpha", state: "read_later" }).items.map((article) => article.id)
+      ).toEqual(["article_later"]);
+      expect(
+        articles.search({ query: "alpha", state: "read" }).items.map((article) => article.id)
+      ).toEqual(["article_read"]);
+      expect(
+        articles.search({ query: "alpha", state: "unread", limit: 20 }).items.map((article) => article.id)
+      ).toEqual(["article_other_feed", "article_title", "article_content"]);
+      expect(
+        articles.search({ query: "alpha", from: 1500, to: 4500, limit: 20 }).items.map((article) => article.id)
+      ).toEqual(["article_favorite", "article_content"]);
+
+      const firstPage = articles.search({ query: "alpha", limit: 1 });
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.nextOffset).toBe(1);
+
+      expect(
+        articles.search({ query: "launch", sort: "relevance", limit: 2 }).items.map((article) => article.id)
+      ).toEqual(["article_title", "article_content"]);
+      expect(
+        articles.search({ query: "alpha", sort: "latest", limit: 2 }).items.map((article) => article.id)
+      ).toEqual(["article_other_feed", "article_read"]);
+      expect(
+        articles.search({
+          query: "alpha",
+          sort: "recommended",
+          rankContext: "ctx_search",
+          limit: 2
+        }).items.map((article) => article.id)
+      ).toEqual(["article_content", "article_title"]);
+      expect(
+        articles.search({
+          query: "alpha",
+          sort: "recommended",
+          rankContext: "ctx_missing",
+          limit: 2
+        }).items.map((article) => article.id)
+      ).toEqual(["article_read", "article_favorite"]);
+      expect(articles.search({ query: "alpha" }).unreadCount).toBe(3);
+      expect(articles.search({ query: "   " })).toEqual({
+        items: [],
+        nextOffset: null,
+        unreadCount: 0
+      });
     } finally {
       db.close();
     }

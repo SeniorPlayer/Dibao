@@ -11,6 +11,7 @@ It is designed for people who want a local and controllable alternative to algor
 - First-run setup with password-based auth.
 - OPML import/export.
 - Feed and folder management.
+- Search UI for local title, summary, and full-text article search.
 - Article actions: favorite, read later, read/unread, not interested, and read progress.
 - Background feed refresh, retention cleanup, embedding, ranking, and profile jobs.
 - Settings for language, reader typography, retention, and embedding providers.
@@ -30,6 +31,7 @@ It is designed for people who want a local and controllable alternative to algor
 - Open article detail.
 - Use article actions and reader scroll progress to shape future recommendations.
 - Load more article list pages through cursor pagination.
+- Search the local article library by keyword, filter by feed/folder/state/date, and open results in the existing reader.
 - Desktop feed/list/reader columns scroll independently.
 
 ### Subscriptions
@@ -49,6 +51,7 @@ It is designed for people who want a local and controllable alternative to algor
 - sqlite-vec indexes can be rebuilt from the SQLite authority table without calling the provider.
 - User behavior updates positive and negative interest clusters.
 - Recommended ranking combines interest match, source preference, freshness, state, and penalties.
+- Search v0 supports relevance, latest, and recommendation-aware ordering inside matched results.
 - The system falls back gracefully when provider, embedding, or profile data is unavailable.
 - Diagnostics show mode, coverage, behavior counts, clusters, rank context, pending/failed jobs, and warnings without exposing API keys or vectors.
 
@@ -88,12 +91,12 @@ The E2E and Docker smoke suites use local RSS and embedding fixtures and do not 
 - No OAuth or password recovery.
 - No PWA installability yet.
 - No native iOS / Android / desktop app packaging yet.
-- No Search UI yet, although SQLite FTS infrastructure exists.
 - No full mobile layout hardening beyond MVP smoke coverage.
 - No custom HTTP or embedded-local provider adapter yet.
 - No provider API key encryption beyond current MVP local SQLite storage.
 - No advanced diversity reranking or duplicate penalties yet.
 - No full model migration UX for changing embedding dimensions/models.
+- Search v0 does not support semantic search, complex search syntax, or external search services.
 - Recommendation quality is still early and benefits from explicit user behavior and complete embedding coverage.
 
 ## Upgrade Notes

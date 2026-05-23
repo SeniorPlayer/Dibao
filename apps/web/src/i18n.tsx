@@ -45,6 +45,44 @@ export const zhCN = {
       read_later: "稍后读视图"
     }
   },
+  search: {
+    pageTitle: "搜索",
+    title: "搜索文章",
+    body: "在本地文章库中搜索标题、摘要和正文。",
+    inputLabel: "关键词",
+    inputPlaceholder: "搜索标题、摘要和正文",
+    submit: "搜索",
+    submitting: "搜索中",
+    sortLabel: "排序",
+    sorts: {
+      relevance: "相关性",
+      recommended: "推荐优先",
+      latest: "最新"
+    },
+    recommendedSortHint: "仅在搜索结果中按你的推荐模型排序。",
+    stateLabel: "状态",
+    sourceLabel: "来源",
+    folderLabel: "分组",
+    feedLabel: "订阅源",
+    allSources: "全部来源",
+    allFolders: "全部分组",
+    allFeeds: "全部订阅源",
+    dateFromLabel: "开始日期",
+    dateToLabel: "结束日期",
+    states: {
+      all: "全部",
+      unread: "未读",
+      read: "已读",
+      favorites: "收藏",
+      read_later: "稍后读"
+    },
+    emptyTitle: "没有找到文章",
+    emptyBody: "可以换一个关键词，或放宽来源、状态和时间筛选。",
+    initialTitle: "搜索你的 RSS 文章库",
+    initialBody: "输入关键词后，可以在标题、摘要和正文中查找。",
+    resultsCount: (count: number) => `${count} 条结果`,
+    loadMore: "加载更多"
+  },
   auth: {
     loading: "正在检查登录状态",
     setupTitle: "设置访问密码",
@@ -989,6 +1027,44 @@ export const enUS = {
       favorites: "Favorites view",
       read_later: "Read-later view"
     }
+  },
+  search: {
+    pageTitle: "Search",
+    title: "Search Articles",
+    body: "Search titles, summaries, and full text in your local article library.",
+    inputLabel: "Keyword",
+    inputPlaceholder: "Search titles, summaries, and full text",
+    submit: "Search",
+    submitting: "Searching",
+    sortLabel: "Sort",
+    sorts: {
+      relevance: "Relevance",
+      recommended: "Recommended first",
+      latest: "Latest"
+    },
+    recommendedSortHint: "Only sorts matched search results with your recommendation model.",
+    stateLabel: "State",
+    sourceLabel: "Source",
+    folderLabel: "Folder",
+    feedLabel: "Feed",
+    allSources: "All sources",
+    allFolders: "All folders",
+    allFeeds: "All feeds",
+    dateFromLabel: "From",
+    dateToLabel: "To",
+    states: {
+      all: "All",
+      unread: "Unread",
+      read: "Read",
+      favorites: "Favorites",
+      read_later: "Read later"
+    },
+    emptyTitle: "No articles found",
+    emptyBody: "Try another keyword or loosen the source, state, and date filters.",
+    initialTitle: "Search your RSS article library",
+    initialBody: "Enter a keyword to search titles, summaries, and full text.",
+    resultsCount: (count: number) => `${count} results`,
+    loadMore: "Load more"
   },
   auth: {
     loading: "Checking session",

@@ -242,6 +242,23 @@ export type ArticleListInput = {
   sort?: ArticleListSort;
 };
 
+export type ArticleSearchState = "all" | "unread" | "read" | "favorites" | "read_later";
+
+export type ArticleSearchSort = "relevance" | "recommended" | "latest";
+
+export type ArticleSearchInput = {
+  query: string;
+  feedId?: string;
+  folderId?: string;
+  from?: number;
+  to?: number;
+  state?: ArticleSearchState;
+  sort?: ArticleSearchSort;
+  limit?: number;
+  offset?: number;
+  rankContext?: string;
+};
+
 export type ArticleStateSnapshot = {
   read: boolean;
   favorited: boolean;
@@ -671,7 +688,9 @@ export type UpsertArticleContentInput = {
   now?: number;
 };
 
-export type ArticleSearchResult = {
+export type ArticleSearchResult = ArticleListResult;
+
+export type ArticleFtsSearchResult = {
   articleId: string;
   title: string;
   summary: string | null;

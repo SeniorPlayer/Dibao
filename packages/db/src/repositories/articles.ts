@@ -1,4 +1,4 @@
-import { SqliteArticleFtsIndex } from "../fts/article-fts.js";
+import { SqliteArticleFtsIndex, sanitizeFtsQuery } from "../fts/article-fts.js";
 import type {
   ArticleDetailRow,
   ArticleEmbeddingCandidateRow,
@@ -9,6 +9,8 @@ import type {
   ArticleRetentionCandidateRow,
   ArticleRetentionCleanupResult,
   ArticleRow,
+  ArticleSearchInput,
+  ArticleSearchResult,
   DibaoDatabase,
   UpsertArticleContentInput,
   UpsertArticleInput
@@ -81,6 +83,7 @@ export interface ArticleRepository {
     limit?: number;
   }): ArticleRetentionCandidateRow[];
   list(input?: ArticleListInput): ArticleListResult;
+  search(input: ArticleSearchInput): ArticleSearchResult;
   upsert(input: UpsertArticleInput): ArticleRow;
   upsertContent(input: UpsertArticleContentInput): void;
 }
@@ -345,6 +348,106 @@ export class SqliteArticleRepository implements ArticleRepository {
     };
   }
 
+  search(input: ArticleSearchInput): ArticleSearchResult {
+    const query = input.query.trim();
+    if (!query) {
+      return {
+        items: [],
+        nextOffset: null,
+        unreadCount: 0
+      };
+    }
+
+    const limit = normalizeLimit(input.limit);
+    const offset = normalizeOffset(input.offset);
+    const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
+    const search = buildSearchHitsCte(query);
+    const baseConditions = [
+      "a.deleted_at is null",
+      "a.status != 'deleted'",
+      "f.deleted_at is null",
+      "s.hidden_at is null",
+      "s.not_interested_at is null"
+    ];
+    const filterParams: unknown[] = [];
+
+    if (input.feedId) {
+      baseConditions.push("a.feed_id = ?");
+      filterParams.push(input.feedId);
+    }
+
+    if (input.folderId) {
+      baseConditions.push("f.folder_id = ?");
+      filterParams.push(input.folderId);
+    }
+
+    if (typeof input.from === "number") {
+      baseConditions.push("coalesce(a.published_at, a.discovered_at) >= ?");
+      filterParams.push(input.from);
+    }
+
+    if (typeof input.to === "number") {
+      baseConditions.push("coalesce(a.published_at, a.discovered_at) <= ?");
+      filterParams.push(input.to);
+    }
+
+    const unreadCount = this.countForSearchConditions(
+      search,
+      [...baseConditions, unreadArticleCondition()],
+      [rankContext, BASE_RANK_CONTEXT],
+      filterParams
+    );
+
+    const conditions = [...baseConditions];
+    switch (input.state ?? "all") {
+      case "unread":
+        conditions.push(unreadArticleCondition());
+        break;
+      case "read":
+        conditions.push("(s.read_at is not null or coalesce(s.reading_progress, 0) >= 0.9)");
+        break;
+      case "favorites":
+        conditions.push("s.favorited_at is not null");
+        break;
+      case "read_later":
+        conditions.push("s.read_later_at is not null");
+        break;
+      case "all":
+        break;
+    }
+
+    const rows = this.db
+      .prepare(
+        `
+          ${search.sql}
+          ${baseArticleReadSelect()}
+          ${baseArticleReadFrom()}
+          join search_hits on search_hits.article_id = a.id
+          where ${conditions.join(" and ")}
+          ${orderByForSearch(input.sort ?? "relevance")}
+          limit ?
+          offset ?
+        `
+      )
+      .all(
+        ...search.params,
+        rankContext,
+        BASE_RANK_CONTEXT,
+        ...filterParams,
+        limit + 1,
+        offset
+      ) as ArticleReadDbRow[];
+
+    const hasMore = rows.length > limit;
+    const items = (hasMore ? rows.slice(0, limit) : rows).map(mapArticleListItem);
+
+    return {
+      items,
+      nextOffset: hasMore ? offset + limit : null,
+      unreadCount
+    };
+  }
+
   private countForConditions(conditions: string[], params: unknown[]): number {
     const row = this.db
       .prepare(
@@ -355,6 +458,27 @@ export class SqliteArticleRepository implements ArticleRepository {
         `
       )
       .get(...params) as { count: number } | undefined;
+
+    return row?.count ?? 0;
+  }
+
+  private countForSearchConditions(
+    search: SearchHitsCte,
+    conditions: string[],
+    rankParams: unknown[],
+    filterParams: unknown[]
+  ): number {
+    const row = this.db
+      .prepare(
+        `
+          ${search.sql}
+          select count(*) as count
+          ${baseArticleReadFrom()}
+          join search_hits on search_hits.article_id = a.id
+          where ${conditions.join(" and ")}
+        `
+      )
+      .get(...search.params, ...rankParams, ...filterParams) as { count: number } | undefined;
 
     return row?.count ?? 0;
   }
@@ -698,6 +822,113 @@ function orderByForView(
       coalesce(a.published_at, a.discovered_at) desc,
       a.id desc
   `;
+}
+
+type SearchHitsCte = {
+  sql: string;
+  params: unknown[];
+};
+
+function buildSearchHitsCte(query: string): SearchHitsCte {
+  const sanitizedFtsQuery = sanitizeFtsQuery(query);
+  const useLikeFallback = sanitizedFtsQuery.length === 0 || containsHanScript(query);
+  const ctes: string[] = [];
+  const hitSources: string[] = [];
+  const params: unknown[] = [];
+
+  if (sanitizedFtsQuery) {
+    ctes.push(`
+      fts_hits as materialized (
+      select
+        article_id,
+        bm25(article_fts, 5.0, 2.0, 0.6) as search_rank
+      from article_fts
+      where article_fts match ?
+      )
+    `);
+    hitSources.push("select article_id, search_rank from fts_hits");
+    params.push(sanitizedFtsQuery);
+  }
+
+  if (useLikeFallback) {
+    const likeQuery = `%${escapeLikePattern(query)}%`;
+    ctes.push(`
+      like_hits as (
+      select
+        article_id,
+        case
+          when title like ? escape '\\' then 8.0
+          when summary like ? escape '\\' then 14.0
+          else 20.0
+        end as search_rank
+      from article_fts
+      where title like ? escape '\\'
+         or summary like ? escape '\\'
+         or content_text like ? escape '\\'
+      )
+    `);
+    hitSources.push("select article_id, search_rank from like_hits");
+    params.push(likeQuery, likeQuery, likeQuery, likeQuery, likeQuery);
+  }
+
+  return {
+    sql: `
+      with
+      ${ctes.join(",\n      ")},
+      search_hits as (
+        select
+          article_id,
+          min(search_rank) as search_rank
+        from (
+          ${hitSources.join("\n          union all\n")}
+        )
+        group by article_id
+      )
+    `,
+    params
+  };
+}
+
+function containsHanScript(value: string): boolean {
+  return /\p{Script=Han}/u.test(value);
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+function orderByForSearch(sort: ArticleSearchInput["sort"]): string {
+  switch (sort) {
+    case "recommended":
+      return `
+        order by
+          case when rs.rerank_position is null then 1 else 0 end,
+          rs.rerank_position asc,
+          coalesce(rs.score, base_rs.score) desc,
+          search_hits.search_rank asc,
+          coalesce(a.published_at, a.discovered_at) desc,
+          a.id desc
+      `;
+    case "latest":
+      return `
+        order by
+          coalesce(a.published_at, a.discovered_at) desc,
+          search_hits.search_rank asc,
+          coalesce(rs.score, base_rs.score) desc,
+          a.id desc
+      `;
+    case "relevance":
+    default:
+      return `
+        order by
+          search_hits.search_rank asc,
+          case when rs.rerank_position is null then 1 else 0 end,
+          rs.rerank_position asc,
+          coalesce(rs.score, base_rs.score) desc,
+          coalesce(a.published_at, a.discovered_at) desc,
+          a.id desc
+      `;
+  }
 }
 
 function mapArticle(row: ArticleDbRow): ArticleRow {

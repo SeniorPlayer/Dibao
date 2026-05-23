@@ -4016,6 +4016,228 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("searches articles with filters, latest sort, empty results, and validation errors", async () => {
+    const db = createEmptyDatabase();
+    const folders = new SqliteFeedFolderRepository(db);
+    const feeds = new SqliteFeedRepository(db);
+    const articles = new SqliteArticleRepository(db);
+    const actions = new SqliteArticleActionRepository(db);
+    const folder = folders.upsert({
+      id: "folder_search_api",
+      title: "Search API",
+      now: 1000
+    });
+    feeds.upsert({
+      id: "feed_search_api",
+      folderId: folder.id,
+      title: "Search API Feed",
+      feedUrl: "https://example.com/search-api.xml",
+      now: 1000
+    });
+    feeds.upsert({
+      id: "feed_search_other",
+      title: "Search Other Feed",
+      feedUrl: "https://example.com/search-other.xml",
+      now: 1000
+    });
+    for (const [id, feedId, title, publishedAt] of [
+      ["article_search_old", "feed_search_api", "Local search apple", 2000],
+      ["article_search_new", "feed_search_api", "Local search apple latest", 4000],
+      ["article_search_other", "feed_search_other", "Local search apple other", 6000]
+    ] as const) {
+      articles.upsert({
+        id,
+        feedId,
+        url: `https://example.com/${id}`,
+        title,
+        summary: "API search fixture",
+        publishedAt,
+        discoveredAt: publishedAt,
+        dedupeKey: id,
+        now: publishedAt
+      });
+    }
+    actions.record({ articleId: "article_search_new", type: "favorite", now: 7000 });
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const result = await app.inject({
+        method: "GET",
+        url: "/api/search?q=apple&sort=latest&limit=2"
+      });
+      expect(result.statusCode, result.body).toBe(200);
+      expect(result.json()).toMatchObject({
+        data: [
+          {
+            id: "article_search_other",
+            title: "Local search apple other"
+          },
+          {
+            id: "article_search_new",
+            state: {
+              favorited: true
+            }
+          }
+        ],
+        page: {
+          nextCursor: expect.any(String)
+        },
+        meta: {
+          unreadCount: 2
+        }
+      });
+
+      const filtered = await app.inject({
+        method: "GET",
+        url: `/api/search?q=apple&feedId=feed_search_api&folderId=${folder.id}&state=favorites&from=1970-01-01T00:00:03.000Z&to=1970-01-01T00:00:05.000Z`
+      });
+      expect(filtered.statusCode, filtered.body).toBe(200);
+      expect(filtered.json().data.map((article: { id: string }) => article.id)).toEqual([
+        "article_search_new"
+      ]);
+
+      const empty = await app.inject({
+        method: "GET",
+        url: "/api/search?q=missing"
+      });
+      expect(empty.statusCode, empty.body).toBe(200);
+      expect(empty.json()).toEqual({
+        data: [],
+        page: {
+          nextCursor: null
+        },
+        meta: {
+          unreadCount: 0
+        }
+      });
+
+      for (const url of [
+        "/api/search",
+        "/api/search?q=%20%20",
+        "/api/search?q=apple&state=bad",
+        "/api/search?q=apple&sort=bad",
+        "/api/search?q=apple&from=1970-01-02&to=1970-01-01"
+      ]) {
+        const response = await app.inject({ method: "GET", url });
+        expect(response.statusCode, `${url}: ${response.body}`).toBe(400);
+        expect(response.json()).toMatchObject({
+          error: {
+            code: "VALIDATION_ERROR"
+          }
+        });
+      }
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("protects the search API when auth is required", async () => {
+    const db = createFixtureDatabase();
+    const app = buildRealServer({ db, logger: false, cookieSecure: false });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/search?q=ranking"
+      });
+      expect(response.statusCode, response.body).toBe(401);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("search recommended sort uses the active rank context inside matched results only", async () => {
+    const db = createEmptyDatabase();
+    const feeds = new SqliteFeedRepository(db);
+    const articles = new SqliteArticleRepository(db);
+    const embeddings = new SqliteEmbeddingRepository(db);
+    const rankings = new SqliteRankingRepository(db);
+    feeds.upsert({
+      id: "feed_search_rank",
+      title: "Search Rank Feed",
+      feedUrl: "https://example.com/search-rank.xml",
+      now: 1000
+    });
+    for (const [id, title, publishedAt] of [
+      ["article_search_low", "Matched kiwi low", 2000],
+      ["article_search_high", "Matched kiwi high", 1000],
+      ["article_unmatched_high", "Unmatched banana high", 3000]
+    ] as const) {
+      articles.upsert({
+        id,
+        feedId: "feed_search_rank",
+        url: `https://example.com/${id}`,
+        title,
+        summary: "Ranking fixture",
+        publishedAt,
+        discoveredAt: publishedAt,
+        dedupeKey: id,
+        now: publishedAt
+      });
+    }
+    embeddings.upsertProvider({
+      id: "provider_search_rank",
+      type: "embedded_local",
+      name: "Search Rank Provider",
+      model: "fixture",
+      dimension: 4,
+      enabled: true,
+      now: 4000
+    });
+    embeddings.createIndex({
+      id: "index_search_rank",
+      providerId: "provider_search_rank",
+      model: "fixture",
+      dimension: 4,
+      now: 4000
+    });
+    const activeContext = "rec_v2:embedding:cocoon_5:schema_2";
+    for (const [articleId, score, rerankPosition] of [
+      ["article_search_low", 0.1, 2],
+      ["article_search_high", 0.9, 1],
+      ["article_unmatched_high", 1.0, 0]
+    ] as const) {
+      rankings.upsertScore({
+        articleId,
+        rankContext: activeContext,
+        embeddingIndexId: "index_search_rank",
+        score,
+        baseScore: score,
+        interestScore: 0,
+        sourceScore: 0,
+        freshnessScore: 0,
+        stateScore: 0,
+        diversityScore: 0,
+        penaltyScore: 0,
+        rerankPosition,
+        calculatedAt: 5000
+      });
+    }
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/search?q=kiwi&sort=recommended"
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data.map((article: { id: string }) => article.id)).toEqual([
+        "article_search_high",
+        "article_search_low"
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("orders recommended articles by stored rank scores", async () => {
     const db = createFixtureDatabase();
     const app = buildServer({ db, logger: false });

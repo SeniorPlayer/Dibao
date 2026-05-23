@@ -130,6 +130,8 @@ export type RankExplanation = {
 
 export type ArticleView = "latest" | "recommended" | "favorites" | "read_later";
 export type ArticleTimeWindow = "all" | "24h" | "7d" | "30d";
+export type ArticleSearchState = "all" | "unread" | "read" | "favorites" | "read_later";
+export type ArticleSearchSort = "relevance" | "recommended" | "latest";
 
 export type FavoriteArticleSort =
   | "favorited_desc"
@@ -1209,6 +1211,55 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       }
 
       const response = await request<ArticleListItem[]>(`/api/articles?${params.toString()}`);
+
+      return {
+        data: response.data,
+        page: response.page ?? { nextCursor: null },
+        meta: {
+          unreadCount: response.meta?.unreadCount ?? response.data.length
+        }
+      };
+    },
+
+    async searchArticles(input: {
+      q: string;
+      feedId?: string | null;
+      folderId?: string | null;
+      from?: string | null;
+      to?: string | null;
+      state?: ArticleSearchState;
+      sort?: ArticleSearchSort;
+      limit?: number;
+      cursor?: string | null;
+    }): Promise<ArticleListResponse> {
+      const params = new URLSearchParams({
+        q: input.q,
+        limit: String(input.limit ?? 50)
+      });
+
+      if (input.feedId) {
+        params.set("feedId", input.feedId);
+      }
+      if (input.folderId) {
+        params.set("folderId", input.folderId);
+      }
+      if (input.from) {
+        params.set("from", input.from);
+      }
+      if (input.to) {
+        params.set("to", input.to);
+      }
+      if (input.state && input.state !== "all") {
+        params.set("state", input.state);
+      }
+      if (input.sort) {
+        params.set("sort", input.sort);
+      }
+      if (input.cursor) {
+        params.set("cursor", input.cursor);
+      }
+
+      const response = await request<ArticleListItem[]>(`/api/search?${params.toString()}`);
 
       return {
         data: response.data,

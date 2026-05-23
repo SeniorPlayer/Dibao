@@ -79,6 +79,8 @@
 .managementFolderRow input:focus-visible,
 .addFeedRow input:focus-visible,
 .articleSortControl select:focus-visible,
+.searchField input:focus-visible,
+.searchField select:focus-visible,
 .settingsField input:focus-visible,
 .settingsField select:focus-visible {
   border-color: var(--color-pine);
@@ -1582,6 +1584,75 @@
   font-size: var(--text-xs);
 }
 
+.searchForm {
+  display: grid;
+  gap: var(--space-3);
+  border-bottom: var(--border-default);
+  padding: var(--space-4);
+  background: var(--color-paper);
+}
+
+.searchIntro {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.searchIntro h2,
+.searchIntro p {
+  margin: 0;
+}
+
+.searchIntro p {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.searchActions,
+.searchFilters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.searchFilters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.searchField {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.searchField input,
+.searchField select {
+  min-width: 0;
+  height: var(--input-height-md);
+  border: var(--input-border);
+  border-radius: var(--input-radius);
+  padding-inline: var(--input-padding-x);
+  background: var(--input-background);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+}
+
+.searchHint,
+.searchResultCount {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.searchResultCount {
+  padding: var(--space-3) var(--space-4) 0;
+}
+
 .addFeedForm {
   display: grid;
   gap: var(--space-2);
@@ -2779,6 +2850,19 @@
 
   .workspaceReading .readerPanel {
     display: block;
+  }
+
+  .searchForm {
+    padding: var(--space-3);
+  }
+
+  .searchActions,
+  .searchFilters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .searchActions .primaryButton {
+    width: 100%;
   }
 
   .mobileSourceButton,

@@ -31,6 +31,9 @@ import {
   type ArticleListItemRow,
   type ArticleListView,
   type ArticleReadStatus,
+  type ArticleSearchInput,
+  type ArticleSearchSort,
+  type ArticleSearchState,
   type DibaoDatabase,
   type EmbeddingIndexListRow,
   type EmbeddingProviderRow,
@@ -190,6 +193,18 @@ type ArticleQuery = {
   limit?: string;
   cursor?: string;
   sort?: string;
+};
+
+type SearchQuery = {
+  q?: string;
+  feedId?: string;
+  folderId?: string;
+  from?: string;
+  to?: string;
+  state?: string;
+  sort?: string;
+  limit?: string;
+  cursor?: string;
 };
 
 type JobQuery = {
@@ -1306,6 +1321,28 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
 
     const result = articles.list({
+      ...parsed.input,
+      rankContext: rankingService.getActiveRankContext()
+    });
+
+    return {
+      data: result.items.map(mapArticleListItem),
+      page: {
+        nextCursor: encodeCursor(result.nextOffset)
+      },
+      meta: {
+        unreadCount: result.unreadCount
+      }
+    };
+  });
+
+  app.get<{ Querystring: SearchQuery }>("/api/search", async (request, reply) => {
+    const parsed = parseSearchQuery(request.query);
+    if (!parsed.ok) {
+      return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+    }
+
+    const result = articles.search({
       ...parsed.input,
       rankContext: rankingService.getActiveRankContext()
     });
@@ -3148,6 +3185,103 @@ function parseArticleQuery(
   return { ok: true, input };
 }
 
+function parseSearchQuery(query: SearchQuery):
+  | { ok: true; input: ArticleSearchInput }
+  | { ok: false; message: string; details?: unknown } {
+  const rawQuery = query.q?.trim() ?? "";
+  if (!rawQuery) {
+    return {
+      ok: false,
+      message: "q is required",
+      details: { field: "q" }
+    };
+  }
+  if (rawQuery.length > 256) {
+    return {
+      ok: false,
+      message: "q must be 256 characters or fewer",
+      details: { field: "q", maxLength: 256 }
+    };
+  }
+
+  const state = parseSearchState(query.state);
+  if (state === null) {
+    return {
+      ok: false,
+      message: "state must be all, unread, read, favorites, or read_later",
+      details: { field: "state" }
+    };
+  }
+
+  const sort = parseSearchSort(query.sort);
+  if (sort === null) {
+    return {
+      ok: false,
+      message: "sort must be relevance, recommended, or latest",
+      details: { field: "sort" }
+    };
+  }
+
+  const from = parseSearchTimestamp(query.from);
+  if (from === null) {
+    return {
+      ok: false,
+      message: "from must be an ISO 8601 date or YYYY-MM-DD",
+      details: { field: "from" }
+    };
+  }
+
+  const to = parseSearchTimestamp(query.to);
+  if (to === null) {
+    return {
+      ok: false,
+      message: "to must be an ISO 8601 date or YYYY-MM-DD",
+      details: { field: "to" }
+    };
+  }
+
+  if (typeof from === "number" && typeof to === "number" && from > to) {
+    return {
+      ok: false,
+      message: "from must be before to",
+      details: { field: "from" }
+    };
+  }
+
+  const limit = parseLimit(query.limit);
+  if (limit === null) {
+    return {
+      ok: false,
+      message: "limit must be a positive integer",
+      details: { field: "limit" }
+    };
+  }
+
+  const offset = decodeCursor(query.cursor);
+  if (offset === null) {
+    return {
+      ok: false,
+      message: "cursor is invalid",
+      details: { field: "cursor" }
+    };
+  }
+
+  return {
+    ok: true,
+    input: {
+      query: rawQuery,
+      state: state ?? "all",
+      sort: sort ?? "relevance",
+      limit,
+      offset,
+      ...(query.feedId !== undefined ? { feedId: query.feedId } : {}),
+      ...(query.folderId !== undefined ? { folderId: query.folderId } : {}),
+      ...(typeof from === "number" ? { from } : {}),
+      ...(typeof to === "number" ? { to } : {})
+    }
+  };
+}
+
 function parseArticleTimeWindow(
   value: string | undefined,
   todayOnly: boolean | undefined
@@ -3407,6 +3541,45 @@ function isReadLaterArticleSort(value: ArticleListInput["sort"]): boolean {
     value === "published_desc" ||
     value === "published_asc"
   );
+}
+
+function parseSearchState(value: string | undefined): ArticleSearchState | undefined | null {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+
+  if (
+    value === "all" ||
+    value === "unread" ||
+    value === "read" ||
+    value === "favorites" ||
+    value === "read_later"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function parseSearchSort(value: string | undefined): ArticleSearchSort | undefined | null {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+
+  if (value === "relevance" || value === "recommended" || value === "latest") {
+    return value;
+  }
+
+  return null;
+}
+
+function parseSearchTimestamp(value: string | undefined): number | undefined | null {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function parseJobStatus(value: string | undefined): JobStatus | undefined | null {

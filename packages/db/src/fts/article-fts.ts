@@ -1,4 +1,4 @@
-import type { ArticleSearchResult, DibaoDatabase } from "../types.js";
+import type { ArticleFtsSearchResult, DibaoDatabase } from "../types.js";
 
 export interface ArticleFtsIndex {
   upsert(input: {
@@ -8,7 +8,7 @@ export interface ArticleFtsIndex {
     contentText?: string | null;
   }): void;
   delete(articleId: string): void;
-  search(query: string, limit?: number): ArticleSearchResult[];
+  search(query: string, limit?: number): ArticleFtsSearchResult[];
 }
 
 export class SqliteArticleFtsIndex implements ArticleFtsIndex {
@@ -42,7 +42,7 @@ export class SqliteArticleFtsIndex implements ArticleFtsIndex {
     this.db.prepare("delete from article_fts where article_id = ?").run(articleId);
   }
 
-  search(query: string, limit: number = 50): ArticleSearchResult[] {
+  search(query: string, limit: number = 50): ArticleFtsSearchResult[] {
     const sanitized = sanitizeFtsQuery(query);
     if (!sanitized) {
       return [];
@@ -62,7 +62,7 @@ export class SqliteArticleFtsIndex implements ArticleFtsIndex {
           limit ?
         `
       )
-      .all(sanitized, limit) as ArticleSearchResult[];
+      .all(sanitized, limit) as ArticleFtsSearchResult[];
   }
 }
 

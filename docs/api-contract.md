@@ -958,11 +958,40 @@ folderId
 from
 to
 state=all|unread|read|favorites|read_later
+sort=relevance|recommended|latest
 limit
 cursor
 ```
 
-响应同 `GET /api/articles`。
+参数说明：
+
+- `q` 必填，trim 后至少 1 个字符，最大 256 字符。
+- `feedId` / `folderId` 限定搜索来源。
+- `from` / `to` 接受 ISO 8601 或 `YYYY-MM-DD`，按 `coalesce(publishedAt, discoveredAt)` 过滤；`from > to` 返回 `VALIDATION_ERROR`。
+- `state` 默认 `all`；`unread` 使用文章列表同一未读语义，`favorites` 对应收藏，`read_later` 对应稍后读。
+- `sort` 默认 `relevance`。
+
+排序语义：
+
+- `relevance`：先按关键词相关性，再按当前推荐分 / rerank position，再按发布时间。
+- `recommended`：先用关键词搜索召回候选文章，再只在命中候选内部按当前 active rank context 排序；不会扩大到非关键词命中的推荐文章。缺少 active rank score 时 fallback 到 base rank score、搜索相关性和发布时间。
+- `latest`：先用关键词搜索召回候选文章，再按 `coalesce(publishedAt, discoveredAt)` 倒序，之后 fallback 到搜索相关性。
+
+响应同 `GET /api/articles`：
+
+```json
+{
+  "data": [ArticleListItem],
+  "page": {
+    "nextCursor": "string-or-null"
+  },
+  "meta": {
+    "unreadCount": 12
+  }
+}
+```
+
+`meta.unreadCount` 表示同一搜索条件下的未读匹配数。Search v0 使用 SQLite FTS5 + CJK/短词 LIKE fallback，不引入 Meilisearch、Typesense、Tantivy 或额外搜索服务。
 
 ## Settings
 

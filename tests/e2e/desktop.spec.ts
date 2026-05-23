@@ -6,6 +6,8 @@ import { startFixtureServer } from "./fixtures.js";
 const accessPassword = "correct horse battery";
 const e2eDatabasePath = resolve(".tmp/e2e/dibao.sqlite");
 
+test.setTimeout(90_000);
+
 test.beforeEach(async ({ page }) => {
   await blockExternalBrowserRequests(page);
 });
@@ -40,6 +42,18 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByRole("link", { name: "最新" }).click();
     await expect(page.getByRole("heading", { name: "最新文章" })).toBeVisible();
     await expect(page.getByRole("link", { name: /E2E Article Beta/ })).toBeVisible();
+    await page.getByRole("link", { name: "搜索" }).click();
+    await expect(page.getByRole("heading", { name: "搜索文章" })).toBeVisible();
+    await page.getByRole("searchbox", { name: "关键词" }).fill("Alpha");
+    await page.getByRole("button", { name: "搜索" }).click();
+    await expect(page.getByRole("link", { name: /E2E Article Alpha/ })).toBeVisible();
+    await page.getByLabel("排序").selectOption("recommended");
+    await page.getByRole("button", { name: "搜索" }).click();
+    await expect(page.getByRole("link", { name: /E2E Article Alpha/ })).toBeVisible();
+    await page.getByRole("link", { name: /E2E Article Alpha/ }).click();
+    await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
+    await page.getByRole("link", { name: "最新" }).click();
+    await expect(page.getByRole("heading", { name: "最新文章" })).toBeVisible();
     await page.getByRole("button", { name: "只看未读" }).click();
     await page.getByTestId("article-list-scroll-container").evaluate((element) => {
       element.scrollTop = 900;
@@ -135,10 +149,11 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByLabel("Base URL").fill(`${fixture.origin}/v1`);
     await page.getByLabel("模型").fill("e2e-embedding");
     await page.getByLabel("维度").fill("4");
-    await page.getByLabel("启用 provider").check();
-    await page.getByRole("button", { name: "保存 provider" }).click();
+    await page.getByRole("button", { name: "保存配置档" }).click();
     await expect(page.getByText("Embedding provider 已保存。")).toBeVisible();
-    await expect(page.getByText(/0 \/ \d+ · 0%/)).toBeVisible();
+    await page.getByRole("button", { name: "设为当前 Provider" }).click();
+    await expect(page.getByText("当前 embedding provider 已切换。")).toBeVisible();
+    await expect(page.getByText(/0 \/ \d+ · 0%/).first()).toBeVisible();
     await expect(page.getByText(/待处理 \d+/)).toBeVisible();
     await expect(page.getByText("失败 0")).toBeVisible();
     await expect(page.getByRole("button", { name: "重建向量索引" })).toBeVisible();

@@ -8,6 +8,8 @@ import {
   type ArticleActionRequest,
   type ArticleDetail,
   type ArticleListItem,
+  type ArticleSearchSort,
+  type ArticleSearchState,
   type ArticleState,
   type ArticleTimeWindow,
   type ArticleView,
@@ -101,6 +103,7 @@ type AuthMode = "setup" | "login";
 
 export type AppPage =
   | { type: "reader"; view: ArticleView }
+  | { type: "search" }
   | { type: "feed-management" }
   | { type: "settings" }
   | { type: "algorithm-transparency" }
@@ -116,6 +119,15 @@ type PersistedReaderFilters = {
   sourceSelection: SourceSelection;
   unreadOnly: boolean;
   timeWindow: ArticleTimeWindow;
+};
+
+type SearchFormState = {
+  q: string;
+  sourceSelection: SourceSelection;
+  state: ArticleSearchState;
+  sort: ArticleSearchSort;
+  from: string;
+  to: string;
 };
 
 export type AppStage =
@@ -198,6 +210,7 @@ export function App() {
       ),
     [initialRoute.page]
   );
+  const initialSearchForm = useMemo(() => searchFormFromLocation(), []);
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -228,6 +241,13 @@ export function App() {
   const [unreadOnly, setUnreadOnly] = useState(initialReaderFilters.unreadOnly);
   const [timeWindow, setTimeWindow] = useState<ArticleTimeWindow>(
     initialReaderFilters.timeWindow
+  );
+  const [searchForm, setSearchForm] = useState<SearchFormState>(initialSearchForm);
+  const [hasSubmittedSearch, setHasSubmittedSearch] = useState(
+    () => initialRoute.page.type === "search" && initialSearchForm.q.trim().length > 0
+  );
+  const [submittedSearchForm, setSubmittedSearchForm] = useState<SearchFormState>(
+    initialSearchForm
   );
   const [favoriteSort, setFavoriteSort] = useState<FavoriteArticleSort>(
     () => urlFavoriteSortParam() ?? defaultFavoriteArticleSort
@@ -447,6 +467,26 @@ export function App() {
     setTimeWindow(nextTimeWindow);
   }
 
+  function handleSearchFormChange(nextForm: SearchFormState) {
+    setSearchForm(nextForm);
+  }
+
+  function handleSearchSubmit(nextForm: SearchFormState) {
+    const normalizedForm = {
+      ...nextForm,
+      q: nextForm.q.trim()
+    };
+    resetArticleListForPendingQuery();
+    setSearchForm(normalizedForm);
+    setSubmittedSearchForm(normalizedForm);
+    setHasSubmittedSearch(normalizedForm.q.length > 0);
+    window.history.pushState(
+      { dibaoPage: "search" },
+      "",
+      urlForSearchPage(normalizedForm)
+    );
+  }
+
   const resetReaderState = useCallback(() => {
     setFeedFolders([]);
     setFeeds([]);
@@ -458,6 +498,9 @@ export function App() {
     setAppPage({ type: "reader", view: defaultAppSettings.ui.defaultHomeView });
     setUnreadOnly(false);
     setTimeWindow("all");
+    setSearchForm(defaultSearchForm());
+    setSubmittedSearchForm(defaultSearchForm());
+    setHasSubmittedSearch(false);
     setFavoriteSort(defaultFavoriteArticleSort);
     setReadLaterSort(defaultReadLaterArticleSort);
     setSelectedArticleId(null);
@@ -850,6 +893,66 @@ export function App() {
     }
   }, [appPage.type, t.errors.api]);
 
+  const loadSearchArticles = useCallback(async (form: SearchFormState) => {
+    const requestVersion = articleRequestVersion.current + 1;
+    articleRequestVersion.current = requestVersion;
+    setIsArticlesLoading(true);
+    setArticleError(null);
+    setLoadMoreError(null);
+    setNextArticleCursor(null);
+    setArticles([]);
+    setDetailError(null);
+    setExplanationError(null);
+    setRecommendationStatus(null);
+    setIsRecommendationStatusLoading(false);
+    setRecommendationStatusError(null);
+
+    try {
+      const response = await dibaoApi.searchArticles({
+        ...articleQueryFor(form.sourceSelection),
+        q: form.q.trim(),
+        state: form.state,
+        sort: form.sort,
+        from: form.from || null,
+        to: form.to || null,
+        limit: 50
+      });
+      if (requestVersion !== articleRequestVersion.current) {
+        return;
+      }
+      const responseArticles = articleListWithKnownLocalStates(
+        response.data,
+        articleStateById.current,
+        locallyUpdatedArticleIds.current
+      );
+      rememberArticleStates(responseArticles, articleStateById.current);
+      setArticles(responseArticles);
+      setUnreadCount(
+        unreadCountWithKnownLocalStates(
+          response.meta.unreadCount,
+          response.data,
+          articleStateById.current,
+          locallyUpdatedArticleIds.current
+        )
+      );
+      setNextArticleCursor(response.page.nextCursor);
+    } catch (error) {
+      if (requestVersion !== articleRequestVersion.current) {
+        return;
+      }
+      setArticleError(userMessageForError(error, t.errors.api));
+      setArticles([]);
+      setUnreadCount(0);
+      articleStateById.current.clear();
+      locallyUpdatedArticleIds.current.clear();
+      setNextArticleCursor(null);
+    } finally {
+      if (requestVersion === articleRequestVersion.current) {
+        setIsArticlesLoading(false);
+      }
+    }
+  }, [t.errors.api]);
+
   useEffect(() => {
     if (appStage.type !== "reader") {
       return;
@@ -874,6 +977,14 @@ export function App() {
     timeWindow,
     unreadOnly
   ]);
+
+  useEffect(() => {
+    if (appStage.type !== "reader" || appPage.type !== "search" || !hasSubmittedSearch) {
+      return;
+    }
+
+    void loadSearchArticles(submittedSearchForm);
+  }, [appPage.type, appStage.type, hasSubmittedSearch, loadSearchArticles, submittedSearchForm]);
 
   useEffect(() => {
     if (appStage.type !== "reader" || appPage.type !== "reader" || !supportsQuickFilters(appPage.view)) {
@@ -935,6 +1046,12 @@ export function App() {
         resetArticleListForPendingQuery();
       }
       setAppPage(route.page);
+      if (route.page.type === "search") {
+        const nextSearchForm = searchFormFromLocation();
+        setSearchForm(nextSearchForm);
+        setSubmittedSearchForm(nextSearchForm);
+        setHasSubmittedSearch(nextSearchForm.q.trim().length > 0);
+      }
       setSelectedArticleId(route.articleId);
       if (route.page.type === "reader" && supportsQuickFilters(route.page.view)) {
         const filters = readerFiltersForView(route.page.view);
@@ -1562,15 +1679,27 @@ export function App() {
     setLoadMoreError(null);
 
     try {
-      const response = await dibaoApi.listArticles({
-        ...articleQueryFor(sourceSelection),
-        view: currentArticleView,
-        limit: 50,
-        cursor: nextArticleCursor,
-        unreadOnly: supportsUnreadOnly(currentArticleView) ? unreadOnly : false,
-        timeWindow: supportsQuickFilters(currentArticleView) ? timeWindow : "all",
-        sort: articleSortForView(currentArticleView, favoriteSort, readLaterSort)
-      });
+      const response =
+        appPage.type === "search"
+          ? await dibaoApi.searchArticles({
+              ...articleQueryFor(submittedSearchForm.sourceSelection),
+              q: submittedSearchForm.q.trim(),
+              state: submittedSearchForm.state,
+              sort: submittedSearchForm.sort,
+              from: submittedSearchForm.from || null,
+              to: submittedSearchForm.to || null,
+              limit: 50,
+              cursor: nextArticleCursor
+            })
+          : await dibaoApi.listArticles({
+              ...articleQueryFor(sourceSelection),
+              view: currentArticleView,
+              limit: 50,
+              cursor: nextArticleCursor,
+              unreadOnly: supportsUnreadOnly(currentArticleView) ? unreadOnly : false,
+              timeWindow: supportsQuickFilters(currentArticleView) ? timeWindow : "all",
+              sort: articleSortForView(currentArticleView, favoriteSort, readLaterSort)
+            });
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
@@ -1583,10 +1712,12 @@ export function App() {
       setArticles((current) =>
         appendUniqueArticles(
           current,
-          articlesVisibleForUnreadFilter(
-            responseArticles,
-            supportsUnreadOnly(currentArticleView) && unreadOnly
-          )
+          appPage.type === "search"
+            ? responseArticles
+            : articlesVisibleForUnreadFilter(
+                responseArticles,
+                supportsUnreadOnly(currentArticleView) && unreadOnly
+              )
         )
       );
       setUnreadCount(
@@ -1699,12 +1830,15 @@ export function App() {
 
   function handleSelectArticle(articleId: string) {
     setIsExplanationOpen(false);
-    const href = urlForArticle(currentArticleView, articleId, {
-      favoriteSort,
-      readLaterSort,
-      timeWindow,
-      unreadOnly
-    });
+    const href =
+      appPage.type === "search"
+        ? urlForSearchPage(submittedSearchForm, articleId)
+        : urlForArticle(currentArticleView, articleId, {
+            favoriteSort,
+            readLaterSort,
+            timeWindow,
+            unreadOnly
+          });
     if (selectedArticleId !== articleId) {
       window.history.pushState({ dibaoArticleId: articleId }, "", href);
     }
@@ -1737,7 +1871,7 @@ export function App() {
   }
 
   async function handleOpenListExplanation(articleId: string) {
-    if (!shouldLoadRankExplanation(currentArticleView)) {
+    if (!canLoadRankExplanation(appPageRef.current, currentArticleView)) {
       return;
     }
 
@@ -1776,14 +1910,16 @@ export function App() {
     }
 
     window.history.pushState(
-      { dibaoPage: currentArticleView },
+      { dibaoPage: appPage.type === "search" ? "search" : currentArticleView },
       "",
-      urlForAppPage({ type: "reader", view: currentArticleView }, {
-        favoriteSort,
-        readLaterSort,
-        timeWindow,
-        unreadOnly
-      })
+      appPage.type === "search"
+        ? urlForSearchPage(submittedSearchForm)
+        : urlForAppPage({ type: "reader", view: currentArticleView }, {
+            favoriteSort,
+            readLaterSort,
+            timeWindow,
+            unreadOnly
+          })
     );
     clearSelectedArticle();
   }
@@ -1805,6 +1941,8 @@ export function App() {
   const pageTitle =
     appPage.type === "feed-management"
       ? t.feedManagement.pageTitle
+      : appPage.type === "search"
+        ? t.search.pageTitle
       : appPage.type === "settings"
         ? t.settings.pageTitle
         : appPage.type === "algorithm-transparency" || appPage.type === "algorithm-clusters"
@@ -1815,6 +1953,13 @@ export function App() {
       ? isFeedsLoading
         ? t.feedManagement.loading
         : t.feedManagement.status(feeds.length, feedFolders.length)
+      : appPage.type === "search"
+        ? articleError ??
+          (hasSubmittedSearch
+            ? isArticlesLoading
+              ? t.search.submitting
+              : t.search.resultsCount(articles.length)
+            : t.search.initialTitle)
       : appPage.type === "settings"
         ? settingsError ??
           embeddingError ??
@@ -2077,6 +2222,68 @@ export function App() {
             total={allRecommendationClusterTotal}
             updatingClusterLabelId={updatingClusterLabelId}
           />
+        ) : appPage.type === "search" ? (
+          <div
+            className={classNames(
+              styles.workspace,
+              selectedArticleId ? styles.workspaceReading : null
+            )}
+          >
+            <SearchResultsPanel
+              articleError={articleError}
+              articles={articles}
+              feedFolders={feedFolders}
+              feeds={feeds}
+              form={searchForm}
+              hasSubmitted={hasSubmittedSearch}
+              isArticlesLoading={isArticlesLoading}
+              isLoadingMore={isLoadingMoreArticles}
+              loadMoreError={loadMoreError}
+              nextCursor={nextArticleCursor}
+              onArticleAction={handleArticleAction}
+              onChange={handleSearchFormChange}
+              onExplainArticle={(articleId) => {
+                void handleOpenListExplanation(articleId);
+              }}
+              onLoadMore={handleLoadMoreArticles}
+              onSelectArticle={handleSelectArticle}
+              onSubmit={handleSearchSubmit}
+              pendingAction={pendingArticleAction}
+              selectedArticleId={selectedArticleId}
+              unreadCount={unreadCount}
+            />
+
+            <ArticleDetailPanel
+              actionError={articleActionError}
+              article={articleDetail}
+              articleView={currentArticleView}
+              detailError={detailError}
+              explanation={null}
+              explanationError={explanationError}
+              isDetailLoading={isDetailLoading}
+              isExplanationOpen={isExplanationOpen}
+              isExplanationLoading={isExplanationLoading}
+              onArticleAction={handleArticleAction}
+              onBackToList={handleBackToArticleList}
+              onCloseExplanation={handleCloseExplanation}
+              onOpenExplanation={handleOpenExplanation}
+              onReadProgress={handleReadProgress}
+              pendingAction={
+                articleDetail && pendingArticleAction?.articleId === articleDetail.id
+                  ? pendingArticleAction.intent
+                  : null
+              }
+              readerSettings={appSettings.reader}
+            />
+
+            <ArticleExplanationDialog
+              error={listExplanationError}
+              explanation={listRankExplanation}
+              isLoading={isListExplanationLoading}
+              isOpen={isListExplanationOpen}
+              onClose={clearListExplanation}
+            />
+          </div>
         ) : (
           <div
             className={classNames(
@@ -4426,6 +4633,252 @@ export function ArticleListPanel(props: {
   );
 }
 
+export function SearchResultsPanel(props: {
+  articleError: string | null;
+  articles: ArticleListItem[];
+  feedFolders: FeedFolder[];
+  feeds: Feed[];
+  form: SearchFormState;
+  hasSubmitted: boolean;
+  isArticlesLoading: boolean;
+  isLoadingMore: boolean;
+  loadMoreError: string | null;
+  nextCursor: string | null;
+  onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
+  onChange: (form: SearchFormState) => void;
+  onExplainArticle: (articleId: string) => void;
+  onLoadMore: () => void;
+  onSelectArticle: (articleId: string) => void;
+  onSubmit: (form: SearchFormState) => void;
+  pendingAction?: PendingArticleAction | null;
+  selectedArticleId: string | null;
+  unreadCount: number;
+}) {
+  const { t, formatDate } = useI18n();
+
+  function update(patch: Partial<SearchFormState>) {
+    props.onChange({
+      ...props.form,
+      ...patch
+    });
+  }
+
+  return (
+    <section className={styles.articlePanel} aria-labelledby="search-title">
+      <form
+        className={styles.searchForm}
+        onSubmit={(event) => {
+          event.preventDefault();
+          props.onSubmit(props.form);
+        }}
+      >
+        <div className={styles.searchIntro}>
+          <p className={styles.kicker}>{t.search.pageTitle}</p>
+          <h2 id="search-title">{t.search.title}</h2>
+          <p>{t.search.body}</p>
+        </div>
+        <label className={styles.searchField}>
+          <span>{t.search.inputLabel}</span>
+          <input
+            autoComplete="off"
+            onChange={(event) => update({ q: event.target.value })}
+            placeholder={t.search.inputPlaceholder}
+            type="search"
+            value={props.form.q}
+          />
+        </label>
+        <div className={styles.searchActions}>
+          <label className={styles.searchField}>
+            <span>{t.search.sortLabel}</span>
+            <select
+              onChange={(event) => update({ sort: event.target.value as ArticleSearchSort })}
+              value={props.form.sort}
+            >
+              <option value="relevance">{t.search.sorts.relevance}</option>
+              <option value="recommended">{t.search.sorts.recommended}</option>
+              <option value="latest">{t.search.sorts.latest}</option>
+            </select>
+          </label>
+          <label className={styles.searchField}>
+            <span>{t.search.stateLabel}</span>
+            <select
+              onChange={(event) => update({ state: event.target.value as ArticleSearchState })}
+              value={props.form.state}
+            >
+              <option value="all">{t.search.states.all}</option>
+              <option value="unread">{t.search.states.unread}</option>
+              <option value="read">{t.search.states.read}</option>
+              <option value="favorites">{t.search.states.favorites}</option>
+              <option value="read_later">{t.search.states.read_later}</option>
+            </select>
+          </label>
+          <button
+            className={styles.primaryButton}
+            disabled={props.isArticlesLoading || props.form.q.trim().length === 0}
+            type="submit"
+          >
+            {props.isArticlesLoading ? t.search.submitting : t.search.submit}
+          </button>
+        </div>
+        {props.form.sort === "recommended" ? (
+          <p className={styles.searchHint}>{t.search.recommendedSortHint}</p>
+        ) : null}
+        <div className={styles.searchFilters} aria-label={t.search.sourceLabel}>
+          <label className={styles.searchField}>
+            <span>{t.search.folderLabel}</span>
+            <select
+              onChange={(event) =>
+                update({
+                  sourceSelection: event.target.value
+                    ? { type: "folder", folderId: event.target.value }
+                    : { type: "all" }
+                })
+              }
+              value={
+                props.form.sourceSelection.type === "folder"
+                  ? props.form.sourceSelection.folderId
+                  : ""
+              }
+            >
+              <option value="">{t.search.allFolders}</option>
+              {props.feedFolders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.searchField}>
+            <span>{t.search.feedLabel}</span>
+            <select
+              onChange={(event) =>
+                update({
+                  sourceSelection: event.target.value
+                    ? { type: "feed", feedId: event.target.value }
+                    : { type: "all" }
+                })
+              }
+              value={
+                props.form.sourceSelection.type === "feed"
+                  ? props.form.sourceSelection.feedId
+                  : ""
+              }
+            >
+              <option value="">{t.search.allFeeds}</option>
+              {props.feeds.map((feed) => (
+                <option key={feed.id} value={feed.id}>
+                  {feed.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.searchField}>
+            <span>{t.search.dateFromLabel}</span>
+            <input
+              onChange={(event) => update({ from: event.target.value })}
+              type="date"
+              value={props.form.from}
+            />
+          </label>
+          <label className={styles.searchField}>
+            <span>{t.search.dateToLabel}</span>
+            <input
+              onChange={(event) => update({ to: event.target.value })}
+              type="date"
+              value={props.form.to}
+            />
+          </label>
+        </div>
+      </form>
+
+      {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
+
+      <div className={styles.list} aria-live="polite">
+        {props.isArticlesLoading ? <SkeletonRows count={10} /> : null}
+
+        {!props.isArticlesLoading && !props.hasSubmitted ? (
+          <EmptyState title={t.search.initialTitle} body={t.search.initialBody} />
+        ) : null}
+
+        {!props.isArticlesLoading && props.hasSubmitted && props.articles.length === 0 ? (
+          <EmptyState title={t.search.emptyTitle} body={t.search.emptyBody} />
+        ) : null}
+
+        {!props.isArticlesLoading && props.articles.length > 0 ? (
+          <p className={styles.searchResultCount}>
+            {t.search.resultsCount(props.articles.length)}
+            {props.unreadCount > 0 ? ` · ${t.articles.state.unread} ${props.unreadCount}` : ""}
+          </p>
+        ) : null}
+
+        {!props.isArticlesLoading &&
+          props.articles.map((article) => (
+            <article
+              className={articleItemClassName(article, props.selectedArticleId)}
+              data-article-id={article.id}
+              data-interaction-status={articleInteractionStatusForState(article.state)}
+              data-favorited={article.state.favorited ? "true" : undefined}
+              data-liked={article.state.liked ? "true" : undefined}
+              data-read-later={article.state.readLater ? "true" : undefined}
+              key={article.id}
+            >
+              <a
+                className={styles.articleMain}
+                href={urlForSearchPage(props.form, article.id)}
+                onClick={(event) => {
+                  if (shouldLetBrowserHandleLinkClick(event)) {
+                    return;
+                  }
+                  event.preventDefault();
+                  props.onSelectArticle(article.id);
+                }}
+              >
+                <span className={styles.meta}>
+                  {t.articles.itemMeta(
+                    formatDate(article.publishedAt ?? article.discoveredAt),
+                    article.feedTitle
+                  )}
+                </span>
+                <strong>{article.title}</strong>
+                {article.summary ? (
+                  <span className={styles.summary}>{plainTextSummary(article.summary)}</span>
+                ) : null}
+              </a>
+              <ArticleRowActions
+                article={article}
+                canExplain={true}
+                onAction={(intent) => props.onArticleAction?.(article, intent)}
+                onExplain={() => props.onExplainArticle(article.id)}
+                pendingAction={
+                  props.pendingAction?.articleId === article.id
+                    ? props.pendingAction.intent
+                    : null
+                }
+              />
+            </article>
+          ))}
+
+        {!props.isArticlesLoading && props.nextCursor ? (
+          <div className={styles.loadMoreBar}>
+            <button
+              className={styles.secondaryButton}
+              disabled={props.isLoadingMore}
+              onClick={props.onLoadMore}
+              type="button"
+            >
+              {props.isLoadingMore ? t.articles.loadingMore : t.search.loadMore}
+            </button>
+          </div>
+        ) : null}
+
+        {!props.isArticlesLoading && props.loadMoreError ? (
+          <p className={styles.paginationError}>{props.loadMoreError}</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function TimeWindowFilter(props: {
   onChange: (timeWindow: ArticleTimeWindow) => void;
   timeWindow: ArticleTimeWindow;
@@ -5907,6 +6360,10 @@ function shouldLoadRankExplanation(view: ArticleView): boolean {
   return view === "recommended" || view === "read_later";
 }
 
+function canLoadRankExplanation(page: AppPage, view: ArticleView): boolean {
+  return page.type === "search" || shouldLoadRankExplanation(view);
+}
+
 function sortExplanationForView(view: ArticleView, t: Dictionary): string {
   switch (view) {
     case "latest":
@@ -5936,14 +6393,19 @@ function routeFromLocation(defaultView: ArticleView): AppRoute {
     };
   }
 
+  const pathname = window.location.pathname;
   const params = new URLSearchParams(window.location.search);
   const view = parseUrlView(params.get("view"));
-  const page = parseUrlPage(params.get("page"), view ?? defaultView);
-  const articleId = page.type === "reader" ? params.get("article") : null;
+  const page = pathname === "/search"
+    ? { type: "search" } satisfies AppPage
+    : parseUrlPage(params.get("page"), view ?? defaultView);
+  const articleId =
+    page.type === "reader" || page.type === "search" ? params.get("article") : null;
   return {
     page,
     articleId: articleId && articleId.trim() ? articleId : null,
-    hasExplicitPage: params.has("page") || params.has("view") || params.has("article")
+    hasExplicitPage:
+      pathname === "/search" || params.has("page") || params.has("view") || params.has("article")
   };
 }
 
@@ -6024,9 +6486,48 @@ function urlForAppPage(page: AppPage, state: UrlState = {}): string {
     return `/?${paramsForReaderView(page.view, state).toString()}`;
   }
 
+  if (page.type === "search") {
+    return urlForSearchPage(defaultSearchForm());
+  }
+
   const params = new URLSearchParams();
   params.set("page", page.type);
   return `/?${params.toString()}`;
+}
+
+function urlForSearchPage(form: SearchFormState, articleId?: string): string {
+  const params = paramsForSearchForm(form);
+  if (articleId) {
+    params.set("article", articleId);
+  }
+  const query = params.toString();
+  return query ? `/search?${query}` : "/search";
+}
+
+function paramsForSearchForm(form: SearchFormState): URLSearchParams {
+  const params = new URLSearchParams();
+  if (form.q.trim()) {
+    params.set("q", form.q.trim());
+  }
+  if (form.sort !== "relevance") {
+    params.set("sort", form.sort);
+  }
+  if (form.state !== "all") {
+    params.set("state", form.state);
+  }
+  if (form.sourceSelection.type === "feed") {
+    params.set("feedId", form.sourceSelection.feedId);
+  }
+  if (form.sourceSelection.type === "folder") {
+    params.set("folderId", form.sourceSelection.folderId);
+  }
+  if (form.from) {
+    params.set("from", form.from);
+  }
+  if (form.to) {
+    params.set("to", form.to);
+  }
+  return params;
 }
 
 function paramsForReaderView(view: ArticleView, state: UrlState): URLSearchParams {
@@ -6049,6 +6550,8 @@ function paramsForReaderView(view: ArticleView, state: UrlState): URLSearchParam
 
 function parseUrlPage(value: string | null, view: ArticleView): AppPage {
   switch (value) {
+    case "search":
+      return { type: "search" };
     case "feeds":
     case "feed-management":
       return { type: "feed-management" };
@@ -6062,6 +6565,55 @@ function parseUrlPage(value: string | null, view: ArticleView): AppPage {
     default:
       return { type: "reader", view };
   }
+}
+
+function defaultSearchForm(): SearchFormState {
+  return {
+    q: "",
+    sourceSelection: { type: "all" },
+    state: "all",
+    sort: "relevance",
+    from: "",
+    to: ""
+  };
+}
+
+function searchFormFromLocation(): SearchFormState {
+  if (typeof window === "undefined") {
+    return defaultSearchForm();
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const feedId = params.get("feedId");
+  const folderId = params.get("folderId");
+  return {
+    q: params.get("q") ?? "",
+    sourceSelection: feedId
+      ? { type: "feed", feedId }
+      : folderId
+        ? { type: "folder", folderId }
+        : { type: "all" },
+    state: parseArticleSearchStateValue(params.get("state")) ?? "all",
+    sort: parseArticleSearchSortValue(params.get("sort")) ?? "relevance",
+    from: params.get("from") ?? "",
+    to: params.get("to") ?? ""
+  };
+}
+
+function parseArticleSearchStateValue(value: unknown): ArticleSearchState | null {
+  return value === "all" ||
+    value === "unread" ||
+    value === "read" ||
+    value === "favorites" ||
+    value === "read_later"
+    ? value
+    : null;
+}
+
+function parseArticleSearchSortValue(value: unknown): ArticleSearchSort | null {
+  return value === "relevance" || value === "recommended" || value === "latest"
+    ? value
+    : null;
 }
 
 function parseUrlView(value: string | null): ArticleView | null {
@@ -6213,6 +6765,10 @@ export function pageForNavigationItem(item: NavigationItemKey): AppPage | null {
     return { type: "feed-management" };
   }
 
+  if (item === "search") {
+    return { type: "search" };
+  }
+
   if (item === "settings") {
     return { type: "settings" };
   }
@@ -6229,6 +6785,10 @@ function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean
     return item === "feeds";
   }
 
+  if (page.type === "search") {
+    return item === "search";
+  }
+
   if (page.type === "algorithm-transparency" || page.type === "algorithm-clusters") {
     return item === "settings";
   }
@@ -6239,6 +6799,7 @@ function isNavigationItemActive(item: NavigationItemKey, page: AppPage): boolean
 function isUtilityNavigationActive(page: AppPage): boolean {
   return (
     page.type === "feed-management" ||
+    page.type === "search" ||
     page.type === "settings" ||
     page.type === "algorithm-transparency" ||
     page.type === "algorithm-clusters"

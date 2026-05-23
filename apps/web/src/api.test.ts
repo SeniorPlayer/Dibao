@@ -683,6 +683,48 @@ describe("web API client", () => {
     expect(first.meta.unreadCount).toBe(17);
   });
 
+  it("searches articles with encoded filters and preserves list response fallbacks", async () => {
+    const calls: string[] = [];
+    const api = createDibaoApi(async (input) => {
+      calls.push(String(input));
+
+      return new Response(
+        JSON.stringify({
+          data: [],
+          page: {
+            nextCursor: "next_cursor"
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    const first = await api.searchArticles({ q: "ai" });
+    await api.searchArticles({
+      q: "local ai",
+      feedId: "feed/design",
+      folderId: "folder/design",
+      state: "favorites",
+      sort: "recommended",
+      from: "2026-05-01",
+      to: "2026-05-22",
+      cursor: "cursor/1",
+      limit: 25
+    });
+
+    expect(calls).toEqual([
+      "/api/search?q=ai&limit=50",
+      "/api/search?q=local+ai&limit=25&feedId=feed%2Fdesign&folderId=folder%2Fdesign&from=2026-05-01&to=2026-05-22&state=favorites&sort=recommended&cursor=cursor%2F1"
+    ]);
+    expect(first.page.nextCursor).toBe("next_cursor");
+    expect(first.meta.unreadCount).toBe(0);
+  });
+
   it("imports OPML without forcing a JSON content type", async () => {
     const calls: Array<{
       path: string;
