@@ -88,6 +88,34 @@ test("mobile recommended article exposes algorithm transparency details", async 
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
 });
 
+test("mobile search keeps advanced filters collapsed until requested", async ({ page }) => {
+  await login(page);
+
+  await page.getByRole("button", { exact: true, name: "更多" }).click();
+  await page.getByRole("menuitem", { name: "搜索" }).click();
+  await expect(page.getByRole("heading", { name: "搜索文章" })).toBeVisible();
+  const searchPanel = page.getByRole("region", { name: "搜索文章" });
+  await expect(searchPanel.getByRole("searchbox", { name: "关键词" })).toBeVisible();
+  await expect(searchPanel.getByLabel("排序")).toBeVisible();
+  await expect(searchPanel.getByLabel("状态")).toBeVisible();
+  await expect(searchPanel.getByRole("button", { name: "高级搜索" })).toBeVisible();
+
+  await expect(searchPanel.getByLabel("分组")).toBeHidden();
+  await expect(searchPanel.getByLabel("订阅源")).toBeHidden();
+  await expect(searchPanel.getByLabel("开始日期")).toBeHidden();
+  await expect(searchPanel.getByLabel("结束日期")).toBeHidden();
+
+  await searchPanel.getByRole("button", { name: "高级搜索" }).click();
+  await expect(searchPanel.getByRole("button", { name: "收起高级搜索" })).toBeVisible();
+  await expect(searchPanel.getByLabel("分组")).toBeVisible();
+  await expect(searchPanel.getByLabel("订阅源")).toBeVisible();
+  await expect(searchPanel.getByLabel("开始日期")).toBeVisible();
+  await expect(searchPanel.getByLabel("结束日期")).toBeVisible();
+
+  await searchPanel.getByRole("button", { name: "收起高级搜索" }).click();
+  await expect(searchPanel.getByLabel("分组")).toBeHidden();
+});
+
 test("mobile article actions expose selected favorite and read-later state", async ({ page }) => {
   await login(page);
 

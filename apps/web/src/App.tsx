@@ -4671,6 +4671,7 @@ export function SearchResultsPanel(props: {
   unreadCount: number;
 }) {
   const { t, formatDate } = useI18n();
+  const [isAdvancedSearchOpen, setIsAdvancedSearchOpen] = useState(false);
 
   function update(patch: Partial<SearchFormState>) {
     props.onChange({
@@ -4739,71 +4740,88 @@ export function SearchResultsPanel(props: {
         {props.form.sort === "recommended" ? (
           <p className={styles.searchHint}>{t.search.recommendedSortHint}</p>
         ) : null}
-        <div className={styles.searchFilters} aria-label={t.search.sourceLabel}>
-          <label className={styles.searchField}>
-            <span>{t.search.folderLabel}</span>
-            <select
-              onChange={(event) =>
-                update({
-                  sourceSelection: event.target.value
-                    ? { type: "folder", folderId: event.target.value }
-                    : { type: "all" }
-                })
-              }
-              value={
-                props.form.sourceSelection.type === "folder"
-                  ? props.form.sourceSelection.folderId
-                  : ""
-              }
-            >
-              <option value="">{t.search.allFolders}</option>
-              {props.feedFolders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.searchField}>
-            <span>{t.search.feedLabel}</span>
-            <select
-              onChange={(event) =>
-                update({
-                  sourceSelection: event.target.value
-                    ? { type: "feed", feedId: event.target.value }
-                    : { type: "all" }
-                })
-              }
-              value={
-                props.form.sourceSelection.type === "feed"
-                  ? props.form.sourceSelection.feedId
-                  : ""
-              }
-            >
-              <option value="">{t.search.allFeeds}</option>
-              {props.feeds.map((feed) => (
-                <option key={feed.id} value={feed.id}>
-                  {feed.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.searchField}>
-            <span>{t.search.dateFromLabel}</span>
-            <input
-              onChange={(event) => update({ from: event.target.value })}
-              type="date"
-              value={props.form.from}
-            />
-          </label>
-          <label className={styles.searchField}>
-            <span>{t.search.dateToLabel}</span>
-            <input
-              onChange={(event) => update({ to: event.target.value })}
-              type="date"
-              value={props.form.to}
-            />
-          </label>
+        <button
+          aria-controls="search-advanced-filters"
+          aria-expanded={isAdvancedSearchOpen}
+          className={styles.searchAdvancedToggle}
+          onClick={() => setIsAdvancedSearchOpen((value) => !value)}
+          type="button"
+        >
+          <ActionIcon name="more" />
+          <span>
+            {isAdvancedSearchOpen ? t.search.hideAdvancedSearch : t.search.advancedSearch}
+          </span>
+        </button>
+        <div
+          className={`${styles.searchAdvanced} ${
+            isAdvancedSearchOpen ? styles.searchAdvancedOpen : ""
+          }`}
+          id="search-advanced-filters"
+        >
+          <div className={styles.searchFilters} aria-label={t.search.sourceLabel}>
+            <label className={styles.searchField}>
+              <span>{t.search.folderLabel}</span>
+              <select
+                onChange={(event) =>
+                  update({
+                    sourceSelection: event.target.value
+                      ? { type: "folder", folderId: event.target.value }
+                      : { type: "all" }
+                  })
+                }
+                value={
+                  props.form.sourceSelection.type === "folder"
+                    ? props.form.sourceSelection.folderId
+                    : ""
+                }
+              >
+                <option value="">{t.search.allFolders}</option>
+                {props.feedFolders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.searchField}>
+              <span>{t.search.feedLabel}</span>
+              <select
+                onChange={(event) =>
+                  update({
+                    sourceSelection: event.target.value
+                      ? { type: "feed", feedId: event.target.value }
+                      : { type: "all" }
+                  })
+                }
+                value={
+                  props.form.sourceSelection.type === "feed" ? props.form.sourceSelection.feedId : ""
+                }
+              >
+                <option value="">{t.search.allFeeds}</option>
+                {props.feeds.map((feed) => (
+                  <option key={feed.id} value={feed.id}>
+                    {feed.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.searchField}>
+              <span>{t.search.dateFromLabel}</span>
+              <input
+                onChange={(event) => update({ from: event.target.value })}
+                type="date"
+                value={props.form.from}
+              />
+            </label>
+            <label className={styles.searchField}>
+              <span>{t.search.dateToLabel}</span>
+              <input
+                onChange={(event) => update({ to: event.target.value })}
+                type="date"
+                value={props.form.to}
+              />
+            </label>
+          </div>
         </div>
       </form>
 
