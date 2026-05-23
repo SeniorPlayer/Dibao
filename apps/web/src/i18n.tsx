@@ -1186,7 +1186,7 @@ export const enUS = {
     utilityMenuLabel: "More",
     items: {
       latest: "Latest",
-      recommended: "Recommended",
+      recommended: "For You",
       favorites: "Favorites",
       read_later: "Read Later",
       search: "Search",
@@ -1195,21 +1195,21 @@ export const enUS = {
     }
   },
   shell: {
-    kicker: "RSS Ingestion",
-    pageTitle: "Latest Articles",
+    kicker: "RSS feeds",
+    pageTitle: "Latest",
     pageTitles: {
-      latest: "Latest Articles",
-      recommended: "Recommended Articles",
-      favorites: "Favorite Articles",
+      latest: "Latest",
+      recommended: "For You",
+      favorites: "Favorites",
       read_later: "Read Later"
     },
     loadingArticles: "Loading articles",
-    latestView: "Latest view",
+    latestView: "Latest",
     viewStatus: {
-      latest: "Latest view",
-      recommended: "Recommended view",
-      favorites: "Favorites view",
-      read_later: "Read-later view"
+      latest: "Latest",
+      recommended: "For You",
+      favorites: "Favorites",
+      read_later: "Read Later"
     }
   },
   search: {
@@ -1223,10 +1223,10 @@ export const enUS = {
     sortLabel: "Sort",
     sorts: {
       relevance: "Relevance",
-      recommended: "Recommended first",
+      recommended: "For You",
       latest: "Latest"
     },
-    recommendedSortHint: "Only sorts matched search results with your recommendation model.",
+    recommendedSortHint: "Reorders only the matched results using your personalization model.",
     stateLabel: "State",
     advancedSearch: "Advanced search",
     hideAdvancedSearch: "Hide advanced search",
@@ -1253,24 +1253,24 @@ export const enUS = {
     loadMore: "Load more"
   },
   auth: {
-    loading: "Checking session",
-    setupTitle: "Set username and access password",
-    setupBody: "This is a single-user self-hosted instance. Set a username and access password to enter the reader.",
+    loading: "Checking your session",
+    setupTitle: "Create your account",
+    setupBody: "This self-hosted instance has one user. Create a username and password to protect it.",
     loginTitle: "Log in to Dibao",
-    loginBody: "Enter your username and access password to continue.",
+    loginBody: "Enter your username and password to continue.",
     usernameLabel: "Username",
-    usernamePlaceholder: "Enter username",
-    passwordLabel: "Access password",
+    usernamePlaceholder: "Username",
+    passwordLabel: "Password",
     passwordPlaceholder: "At least 8 characters",
     setupSubmit: "Finish setup",
     loginSubmit: "Log in",
-    submitting: "Working",
+    submitting: "Please wait",
     logout: "Log out",
     logoutTitle: "Log out",
-    usernameRequired: "Enter the username.",
-    passwordRequired: "Enter the access password.",
+    usernameRequired: "Enter your username.",
+    passwordRequired: "Enter your password.",
     errors: {
-      session: "Unable to read session state.",
+      session: "Could not check your session.",
       logout: "Log out failed."
     }
   },
@@ -1278,7 +1278,7 @@ export const enUS = {
     kicker: "First-run setup",
     welcome: {
       title: "Welcome to Dibao",
-      body: "A self-hosted personal RSS recommendation reader. Complete the required steps before entering the reader.",
+      body: "A self-hosted RSS reader with a private For You feed. Finish the required setup before opening the reader.",
       start: "Start setup"
     },
     sources: {
@@ -1290,10 +1290,10 @@ export const enUS = {
       noFeedsAfterAdd: "The feed was not created. Please try again."
     },
     provider: {
-      title: "Recommendation capability",
-      body: "Dibao will use baseline ranking for now. Embedding providers will be configured in later settings, and this step does not send article text to external services.",
+      title: "Personalization",
+      body: "Dibao will use baseline ranking for now. You can add an embedding provider later in Settings; this step does not send article text to any external service.",
       currentTitle: "Baseline ranking is active",
-      currentBody: "You can still read, favorite, save for later, and let baseline ranking use those behavior signals.",
+      currentBody: "You can still read, favorite, and save articles for later. Dibao will use those signals for baseline ranking.",
       continue: "Skip for now and continue"
     }
   },
@@ -1312,7 +1312,7 @@ export const enUS = {
     refresh: "Refresh",
     refreshing: "…",
     refreshAll: "Refresh all",
-    refreshingAll: "Queueing",
+    refreshingAll: "Queuing",
     openSources: "Sources",
     openSourcesLabel: "Open sources",
     closeSources: "Close sources",
@@ -1436,14 +1436,14 @@ export const enUS = {
     fullContent: {
       label: "Content source",
       modes: {
-        feed_only: "Use Feed content (default)",
+        feed_only: "Use feed content (default)",
         fetch_full_content: "Fetch full web article"
       },
       feedOnlyHint: "Best for most full-text RSS feeds. Fast and stable.",
       fetchHint:
         "Useful for summary-only RSS feeds. It can fail and will not bypass paywalls.",
       preview: "Preview full content fetch",
-      backfill: "Fetch current Feed articles",
+      backfill: "Fetch current feed articles",
       backfilling: "Fetching",
       backfillConfirm:
         "Dibao will read the current RSS response again and fetch full web content only for articles still present there. It will not scan all historical articles from this feed.",
@@ -1484,17 +1484,17 @@ export const enUS = {
         zhCN: "简体中文",
         enUS: "English",
         jaJP: "日本語",
-        defaultHomeViewLabel: "Default home view",
-        defaultHomeViewRecommended: "Recommended",
+        defaultHomeViewLabel: "Start page",
+        defaultHomeViewRecommended: "For You",
         defaultHomeViewLatest: "Latest"
       },
       account: {
         title: "Account security",
-        body: "Change the current access password. Enter the current password first to confirm it is you.",
+        body: "Change your password. Enter your current password first to confirm it is you.",
         currentPasswordLabel: "Current password",
         newPasswordLabel: "New password",
         confirmPasswordLabel: "Confirm new password",
-        currentPasswordPlaceholder: "Enter current access password",
+        currentPasswordPlaceholder: "Current password",
         newPasswordPlaceholder: "At least 8 characters",
         confirmPasswordPlaceholder: "Enter the new password again",
         submit: "Change password",
@@ -1509,12 +1509,12 @@ export const enUS = {
       },
       behavior: {
         title: "Behavior tracking",
-        body: "Control automatic behavior capture for browsing lists and the read-later queue.",
-        algorithmTransparencyLink: "View algorithm transparency",
-        markScrolledArticlesIgnored: "Mark unopened scrolled-past articles as ignored and remove them from unread",
-        removeReadLaterOnReadComplete: "Remove read-later articles after completed reading",
+        body: "Control automatic behavior capture in article lists and the Read Later queue.",
+        algorithmTransparencyLink: "View personalization details",
+        markScrolledArticlesIgnored: "Mark unopened articles you scroll past as ignored and remove them from unread",
+        removeReadLaterOnReadComplete: "Remove Read Later articles after you finish them",
         cocoonLevel: "Cocoon level",
-        cocoonLevelHint: "1 is more open, distributed, and exploratory; 10 is more personalized, stable, and less disruptive. Every level still ranks only your subscribed feeds and respects dedupe plus explicit negative feedback."
+        cocoonLevelHint: "1 is broader and more exploratory; 10 stays closer to your established interests. Every level only ranks articles from your subscribed feeds and still respects deduping and explicit negative feedback."
       },
       reader: {
         title: "Reading",
@@ -1526,17 +1526,17 @@ export const enUS = {
       },
       retention: {
         title: "Article retention",
-        body: "Background cleanup removes articles older than the retention window. Use 0 to keep articles forever. Favorites and read-later items can be kept independently.",
+        body: "Background cleanup removes articles older than the retention window. Use 0 to keep articles forever. Favorites and Read Later items can be kept independently.",
         retentionDays: "Retention days",
         keepFavorites: "Keep favorited articles",
-        keepReadLater: "Keep read-later articles",
+        keepReadLater: "Keep Read Later articles",
         enabled: "On",
         disabled: "Off",
         mappingHint: "API field retention.retentionDays is stored as storage key retention.articleDays."
       },
       provider: {
         title: "Intelligence",
-        body: "Configure an OpenAI-compatible, Gemini AI Studio, or Ollama embedding provider. Without an enabled provider, Dibao keeps using baseline ranking.",
+        body: "Set up an OpenAI-compatible, Gemini AI Studio, or Ollama embedding provider. Without an enabled provider, Dibao keeps using baseline ranking.",
         loading: "Loading intelligence settings",
         providerLabel: "Provider",
         newProvider: "New embedding provider",
@@ -1563,10 +1563,10 @@ export const enUS = {
         apiKeyRetainPlaceholder: "Leave blank to keep the saved key",
         ollamaApiKeyHint: "The local Ollama API does not require an API key by default.",
         geminiApiKeyHint: "Gemini AI Studio uses x-goog-api-key when calling the Gemini embedding API.",
-        modelHint: "Warning: switching to a different model family, dimension, or text slice length creates a new vector space. Existing vectors are not reused; semantic recommendations recover after the new index is generated.",
+        modelHint: "Warning: switching to a different model family, dimension, or text slice length creates a new vector space. Existing vectors are not reused; semantic ranking resumes after the new index is generated.",
         textMaxCharsHint: "Warning: changing the text slice length makes existing vectors inconsistent with the new strategy. Saving and setting the provider current creates a new active index; regenerate/backfill vectors afterwards.",
         rateLimitHint: "QPM/QPD count batch requests. QPM pauses jobs until the next minute; QPD pauses them until the next local day. Leave blank for no limit.",
-        activateHint: "Saving only updates the profile. Only “Set as current provider” switches embedding generation, the active index, and recommendation provider usage.",
+        activateHint: "Saving only updates the provider profile. Use “Set as current provider” to switch embedding generation, the active index, and personalized ranking to this provider.",
         activeTitle: "Current provider",
         activeEmptyTitle: "No current provider",
         activeBody: (name: string, model: string, dimension: number) =>
@@ -1578,7 +1578,7 @@ export const enUS = {
         qualityTierLabel: "Quality tier",
         quality: {
           basic: "Basic",
-          recommended: "Recommended",
+          recommended: "Balanced",
           bestQuality: "Best quality"
         },
         enabledStatus: "Enabled",
@@ -1680,7 +1680,7 @@ export const enUS = {
     title: "Latest",
     views: {
       latest: "Latest",
-      recommended: "Recommended",
+      recommended: "For You",
       favorites: "Favorites",
       read_later: "Read Later"
     },
@@ -1747,7 +1747,7 @@ export const enUS = {
       confirmBodyLoading: "Counting unread articles in the clear scope…",
       confirmBodyUnknown: "Mark unread articles in this clear scope as read?",
       confirmHint:
-        "This will not clear favorites or read-later items, and it will not count as positive recommendation feedback.",
+        "This will not clear favorites or Read Later items, and it will not count as positive personalization feedback.",
       cancel: "Cancel",
       confirm: "Mark read",
       clearing: "Clearing",
@@ -1757,17 +1757,17 @@ export const enUS = {
     }
   },
   algorithmTransparency: {
-    pageTitle: "Algorithm Transparency",
-    status: "Algorithm notes ready",
+    pageTitle: "Personalization Details",
+    status: "Personalization details ready",
     backToSettings: "Back to settings",
     noWarnings: "No warnings",
     sections: {
-      currentStatus: "Current recommendation status",
+      currentStatus: "Current personalization status",
       currentClusters: "Current interest clusters",
       maintenance: "Algorithm maintenance",
       mergeCandidates: "Possible duplicate clusters",
       labelLexicon: "Label lexicon",
-      algorithmExplanation: "Algorithm explanation",
+      algorithmExplanation: "How ranking works",
       terms: "Terms",
       scoreTable: "Behavior score table",
       rankingFlow: "Ranking flow",
@@ -1800,7 +1800,7 @@ export const enUS = {
       failureStates: "Fallback / task states"
     },
     clusters: {
-      empty: "No interest clusters have formed yet. Likes, favorites, read-later saves, and completed reads will generate them automatically.",
+      empty: "No interest clusters have formed yet. Likes, favorites, Read Later saves, and completed reads will generate them automatically.",
       generated:
         "Interest clusters are not preset by the system. Labels come from local keywords, representative articles, and feed titles, and can be renamed manually.",
       positive: "Positive",
@@ -1866,7 +1866,7 @@ export const enUS = {
       left: "Left cluster",
       right: "Right cluster",
       metrics: "Metrics",
-      recommendation: "Recommendation",
+      recommendation: "Suggested action",
       actions: "Actions",
       merge: "Merge",
       ignore: "Ignore",
@@ -1891,9 +1891,9 @@ export const enUS = {
     maintenance: {
       disclosureHint: "If the system is running normally, you do not need to run these manually.",
       body:
-        "These tasks maintain local recommendation state. Tasks that might call the provider are called out separately; when unsure, start with ranking recalculation or recent intent rebuild.",
+        "These tasks maintain local personalization state. Tasks that might call the provider are called out separately; when unsure, start with ranking recalculation or recent intent rebuild.",
       run: "Run",
-      running: "Queueing",
+      running: "Queuing",
       remoteUse: "Remote use",
       lastState: "Last state",
       neverRun: "No record",
@@ -1903,7 +1903,7 @@ export const enUS = {
       tasks: {
         ranking_recalculate: {
           label: "Recalculate ranking",
-          description: "Recomputes local ranking scores for recommendation and read-later lists without requesting embeddings.",
+          description: "Recomputes local ranking scores for For You and Read Later without requesting embeddings.",
           remoteUse: "Does not call provider"
         },
         fingerprint_backfill: {
@@ -1948,7 +1948,7 @@ export const enUS = {
         },
         evaluation: {
           label: "Run ranking evaluation",
-          description: "Runs local replay diagnostics to check whether the recommendation chain is healthy.",
+          description: "Runs local replay diagnostics to check whether personalization is working.",
           remoteUse: "Does not call provider"
         },
         ftrl_promote: {
@@ -1977,7 +1977,7 @@ export const enUS = {
       {
         term: "Interest cluster",
         description:
-          "An interest cluster is a topic centroid merged from similar article vectors. Likes, favorites, read-later saves, and completed reads strengthen positive clusters; not-interested and hidden actions create negative clusters."
+          "An interest cluster is a topic centroid merged from similar article vectors. Likes, favorites, Read Later saves, and completed reads strengthen positive clusters; not-interested and hidden actions create negative clusters."
       },
       {
         term: "Coverage",
@@ -2002,7 +2002,7 @@ export const enUS = {
       },
       {
         name: "Visibility filter",
-        role: "Hidden, not-interested, and deleted articles leave normal lists while favorites and read-later keep their queue semantics."
+        role: "Hidden, not-interested, and deleted articles leave normal lists while favorites and Read Later keep their queue semantics."
       },
       {
         name: "Semantic matching",
@@ -2014,7 +2014,7 @@ export const enUS = {
       },
       {
         name: "State and negative feedback",
-        role: "Favorites, likes, read-later saves, and reading progress boost ranking; not interested clears other states and lowers similar topics."
+        role: "Favorites, likes, Read Later saves, and reading progress boost ranking; not interested clears other states and lowers similar topics."
       },
       {
         name: "Dedupe and MMR",
@@ -2152,14 +2152,14 @@ export const enUS = {
       {
         phase: "Output",
         title: "Return by channel",
-        description: "Latest uses time; recommended and read later use personalization; favorites use saved time."
+        description: "Latest uses time; For You and Read Later use personalization; Favorites uses saved time."
       }
     ],
     channelRules: [
       "Latest: time-descending by default. Only unread filters derived unread state without changing the sort meaning.",
-      "Recommended: personalized ranking. If the profile card or embeddings are missing, Dibao falls back to baseline ranking.",
-      "Read later: shows only read-later articles, but still uses personalized ranking as a to-read queue.",
-      "Favorites: library/bookmark mode. It defaults to favorited time descending and can switch between favorited time and published time; it does not use personalized ranking."
+      "For You: personalized ranking. If the profile card or embeddings are missing, Dibao falls back to baseline ranking.",
+      "Read Later: shows only saved-for-later articles, but still uses personalized ranking as a to-read queue.",
+      "Favorites: library/bookmark mode. It sorts by favorited time by default and can switch between favorited time and published time; it does not use personalized ranking."
     ],
     copy: {
       localData:
@@ -2169,12 +2169,12 @@ export const enUS = {
     }
   },
   recommendationStatus: {
-    title: "Recommendation status",
-    loading: "Loading recommendation status",
-    fallback: "Recommendation status is unavailable; the list is still readable.",
+    title: "Personalization status",
+    loading: "Loading personalization status",
+    fallback: "Personalization status is unavailable; the list is still readable.",
     modes: {
       baseline: "Baseline ranking",
-      personalized: "Personalized recommendations enabled",
+      personalized: "Personalized ranking is on",
       embedding: "Generating embeddings",
       degraded: "Provider issue, fallback active"
     },
@@ -2194,12 +2194,12 @@ export const enUS = {
     feedOnlyNotice: "Only the feed summary is available.",
     contentSource: {
       success: "Body content comes from full web article fetching.",
-      feed_only: "Body content comes from the RSS / Atom Feed. Most Feeds already provide full text.",
-      failed: "Full web article fetching failed; current content is from the Feed.",
+      feed_only: "Body content comes from the RSS / Atom feed. Most feeds already provide full text.",
+      failed: "Full web article fetching failed; current content is from the feed.",
       failedWithError: (error: string) =>
-        `Full web article fetching failed; current content is from the Feed. ${error}`,
-      skipped: "Full web article content was not used; current content is from the Feed.",
-      pending: "Body processing is pending; current content is Feed content or summary.",
+        `Full web article fetching failed; current content is from the feed. ${error}`,
+      skipped: "Full web article content was not used; current content is from the feed.",
+      pending: "Body processing is pending; current content is feed content or summary.",
       noContent: "No body content is available."
     },
     noContent: "This article has no body content yet.",
@@ -2222,21 +2222,21 @@ export const enUS = {
       skipped: "Skipped"
     },
     noPreview: "No preview is available.",
-    noDbWrite: "This does not affect existing Feed content."
+    noDbWrite: "This does not affect existing feed content."
   },
   explanation: {
-    title: "Why recommended",
-    entryTitle: "Recommendation explanation",
-    open: "View full reasons",
-    teaser: "Shows understandable reasons without exposing raw internal scores.",
-    sortLabel: "Current sorting note",
-    sortTitle: "Current view sorting",
-    loading: "Generating recommendation explanation",
-    empty: "No clear recommendation signal yet.",
+    title: "Why this article",
+    entryTitle: "Why this article",
+    open: "View reasons",
+    teaser: "Shows the main signals without exposing raw internal scores.",
+    sortLabel: "Sorting note",
+    sortTitle: "How this view is sorted",
+    loading: "Loading reasons",
+    empty: "No clear ranking signal yet.",
     generatedAt: (date: string) => `Generated ${date}`,
     sorting: {
       latest: "This view is currently sorted by published time.",
-      recommended: "Recommended combines your profile card, source preference, freshness, and article state.",
+      recommended: "For You combines your profile card, source preference, freshness, and article state.",
       favorites: "Favorites are sorted by saved time by default and do not use personalized ranking.",
       read_later: "Read later still uses personalized ranking so likely useful items can rise first."
     },
@@ -2281,10 +2281,10 @@ export const enUS = {
       like: "Like this article",
       unlike: "Unlike this article",
       readLater: "Save this article for later",
-      removeReadLater: "Remove this article from read later",
+      removeReadLater: "Remove this article from Read Later",
       markRead: "Mark this article as read",
       markUnread: "Mark this article as unread",
-      notInterested: "Stop recommending similar articles",
+      notInterested: "Show me fewer articles like this",
       notInterestedActive: "Already marked not interested",
       group: "Article actions"
     },

@@ -61,7 +61,7 @@ describe("web i18n", () => {
       </DibaoI18nProvider>
     );
 
-    expect(html).toContain("Checking session");
+    expect(html).toContain("Checking your session");
     expect(html).toContain("Dibao");
     expect(html).not.toContain("正在检查登录状态");
   });
