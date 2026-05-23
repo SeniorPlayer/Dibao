@@ -46,7 +46,6 @@ describe("FeedRefreshService full content maintenance", () => {
     try {
       const feeds = new SqliteFeedRepository(db);
       const articles = new SqliteArticleRepository(db);
-      const changedCalls: string[][] = [];
       const extractor = {
         extract: vi.fn(async (url: string) =>
           url.endsWith("/broken")
@@ -76,7 +75,6 @@ describe("FeedRefreshService full content maintenance", () => {
         articles,
         fullContentExtractor: extractor,
         fetcher: feedFetcher(fixtureRss()),
-        onEffectiveContentChanged: (ids) => changedCalls.push(ids),
         now: () => 1000
       });
 
@@ -91,7 +89,6 @@ describe("FeedRefreshService full content maintenance", () => {
       expect(extractor.extract).toHaveBeenCalledTimes(2);
       expect(result.fullContent).toEqual({ attempted: 2, succeeded: 1, failed: 1, skipped: 0 });
       expect(result.effectiveContentChangedArticleIds).toHaveLength(1);
-      expect(changedCalls.at(-1)).toEqual(result.effectiveContentChangedArticleIds);
 
       const success = result.articleIds
         .map((id) => articles.findDetailById(id))

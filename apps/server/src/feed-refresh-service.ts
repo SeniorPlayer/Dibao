@@ -14,7 +14,6 @@ import type {
   FeedRow
 } from "@dibao/db";
 import type { FullContentExtractionService } from "./full-content-extraction-service.js";
-import type { ArticleRankingRecalculator } from "./ranking-service.js";
 
 export type FeedFetchResponse = {
   ok: boolean;
@@ -63,10 +62,8 @@ export type FeedRefreshServiceOptions = {
   db: DibaoDatabase;
   feeds: FeedRepository;
   articles: ArticleRepository;
-  ranking?: ArticleRankingRecalculator;
   fetcher?: FeedFetcher;
   fullContentExtractor?: Pick<FullContentExtractionService, "extract">;
-  onEffectiveContentChanged?: (articleIds: string[]) => void;
   now?: () => number;
 };
 
@@ -302,8 +299,6 @@ export class FeedRefreshService {
     }
 
     const effectiveContentChangedArticleIds = [...finalChangedIds];
-    this.options.onEffectiveContentChanged?.(effectiveContentChangedArticleIds);
-    this.options.ranking?.recalculateArticles(effectiveContentChangedArticleIds);
 
     return {
       jobId: result.jobId,

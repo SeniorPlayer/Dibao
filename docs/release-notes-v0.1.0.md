@@ -61,6 +61,7 @@ It is designed for people who want a local and controllable alternative to algor
 - User behavior updates positive and negative interest clusters.
 - Reader Command `mark_scope_read` is audited separately from behavior events and does not train the interest profile.
 - Full-content backfill is corpus maintenance, not user behavior: it does not write `behavior_events`, does not mark articles read/favorited/read-later, and does not directly train the user profile.
+- Full-content refresh/backfill side effects are centralized in the server coordinator: content services return changed article IDs, then embedding, ranking, and recommendation maintenance are enqueued once.
 - Recommended ranking combines interest match, source preference, freshness, state, and penalties.
 - Search v0 supports relevance, latest, and recommendation-aware ordering inside matched results.
 - The system falls back gracefully when provider, embedding, or profile data is unavailable.

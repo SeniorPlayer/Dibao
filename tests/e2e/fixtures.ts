@@ -7,8 +7,9 @@ export type FixtureServer = {
 };
 
 export async function startFixtureServer(): Promise<FixtureServer> {
+  let origin = "";
   const server = createServer((request, response) => {
-    void handleFixtureRequest(request, response);
+    void handleFixtureRequest(request, response, origin);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -20,7 +21,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
   });
 
   const address = server.address() as AddressInfo;
-  const origin = `http://127.0.0.1:${address.port}`;
+  origin = `http://127.0.0.1:${address.port}`;
 
   return {
     origin,
@@ -40,12 +41,38 @@ export async function startFixtureServer(): Promise<FixtureServer> {
 
 async function handleFixtureRequest(
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
+  origin: string
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://fixture.local");
 
   if (request.method === "GET" && url.pathname === "/feeds/main.xml") {
-    sendResponse(response, 200, "application/rss+xml; charset=utf-8", fixtureRss);
+    sendResponse(response, 200, "application/rss+xml; charset=utf-8", fixtureRss(origin));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/articles/alpha") {
+    sendResponse(response, 200, "text/html; charset=utf-8", fullArticlePage("Alpha"));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/articles/beta") {
+    sendResponse(response, 200, "text/html; charset=utf-8", fullArticlePage("Beta"));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/articles/broken-full-content") {
+    sendResponse(response, 500, "text/html; charset=utf-8", "<html><body>broken</body></html>");
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/articles/extra-")) {
+    sendResponse(
+      response,
+      200,
+      "text/html; charset=utf-8",
+      "<html><body><article><p>short extra content</p></article></body></html>"
+    );
     return;
   }
 
@@ -143,7 +170,7 @@ const extraFixtureItems = Array.from({ length: 58 })
     return `
     <item>
       <title>E2E Article Extra ${number}</title>
-      <link>http://127.0.0.1/articles/extra-${number}</link>
+      <link>{{origin}}/articles/extra-${number}</link>
       <guid>e2e-extra-${number}</guid>
       <author>Dibao Test</author>
       <pubDate>Wed, 13 May 2026 ${String(index % 24).padStart(2, "0")}:00:00 GMT</pubDate>
@@ -153,15 +180,16 @@ const extraFixtureItems = Array.from({ length: 58 })
   })
   .join("");
 
-const fixtureRss = `<?xml version="1.0"?>
+function fixtureRss(origin: string): string {
+  return `<?xml version="1.0"?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>E2E Fixture Feed</title>
-    <link>http://127.0.0.1/fixture</link>
+    <link>${origin}/fixture</link>
     <description>Local smoke test feed</description>
     <item>
       <title>E2E Article Alpha</title>
-      <link>http://127.0.0.1/articles/alpha</link>
+      <link>${origin}/articles/alpha</link>
       <guid>e2e-alpha</guid>
       <author>Dibao Test</author>
       <pubDate>Thu, 14 May 2026 07:30:00 GMT</pubDate>
@@ -170,16 +198,48 @@ const fixtureRss = `<?xml version="1.0"?>
     </item>
     <item>
       <title>E2E Article Beta</title>
-      <link>http://127.0.0.1/articles/beta</link>
+      <link>${origin}/articles/beta</link>
       <guid>e2e-beta</guid>
       <author>Dibao Test</author>
       <pubDate>Thu, 14 May 2026 08:00:00 GMT</pubDate>
       <description>Beta summary for the smoke suite.</description>
       <content:encoded><![CDATA[${longArticleBody}]]></content:encoded>
     </item>
-    ${extraFixtureItems}
+    <item>
+      <title>E2E Article Broken Full Content</title>
+      <link>${origin}/articles/broken-full-content</link>
+      <guid>e2e-broken-full-content</guid>
+      <author>Dibao Test</author>
+      <pubDate>Thu, 14 May 2026 07:45:00 GMT</pubDate>
+      <description>Broken full content summary for the smoke suite.</description>
+      <content:encoded><![CDATA[<p>Broken article feed body remains readable.</p>]]></content:encoded>
+    </item>
+    ${extraFixtureItems.replaceAll("{{origin}}", origin)}
   </channel>
 </rss>`;
+}
+
+function fullArticlePage(label: "Alpha" | "Beta"): string {
+  const repeated = Array.from({ length: label === "Alpha" ? 4 : 8 })
+    .map(
+      (_, index) =>
+        `<p>${label} extracted full content paragraph ${index + 1}. This page body comes from the fixture article HTML and is intentionally long enough for the Dibao full content extractor to accept it during E2E validation.</p>`
+    )
+    .join("");
+  return `<!doctype html>
+<html>
+  <head><title>${label} full page</title></head>
+  <body>
+    <nav>navigation should be removed</nav>
+    <article>
+      <h1>${label} full page</h1>
+      ${repeated}
+    </article>
+    <script>throw new Error("should be removed")</script>
+    <footer>footer should be removed</footer>
+  </body>
+</html>`;
+}
 
 const fixtureAtom = `<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom">

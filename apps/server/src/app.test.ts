@@ -3519,13 +3519,7 @@ describe("server API vertical slice", () => {
         "Second fixture article",
         "First fixture article"
       ]);
-      expect(
-        articleBody.data.every(
-          (article: { rank?: { score: number; calculatedAt: string } }) =>
-            typeof article.rank?.score === "number" &&
-            article.rank.calculatedAt === "2026-05-14T08:00:00.000Z"
-        )
-      ).toBe(true);
+      expect(jobCounts(db).ranking_recalculate).toBe(1);
 
       const detail = await app.inject({
         method: "GET",
@@ -3585,9 +3579,21 @@ describe("server API vertical slice", () => {
         }
       });
       expect(countTable(db, "behavior_events")).toBe(0);
+      expect(contentStatusCounts(db)).toMatchObject({
+        feed_only: 2
+      });
 
       const blocked = await postJson(app, `/api/feeds/${feedId}/full-content/backfill-current`, {});
       expect(blocked.statusCode).toBe(409);
+
+      await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "Backfill Provider",
+        baseUrl: "https://api.example.com/v1",
+        model: "fixture-embedding",
+        dimension: 3,
+        enabled: true
+      });
 
       const patch = await injectJson(app, "PATCH", `/api/feeds/${feedId}`, {
         fullContentMode: "fetch_full_content"
@@ -3595,6 +3601,8 @@ describe("server API vertical slice", () => {
       expect(patch.statusCode, patch.body).toBe(200);
       expect(patch.json().data.fullContentMode).toBe("fetch_full_content");
 
+      db.prepare("delete from jobs").run();
+      const jobsBefore = jobCounts(db);
       const backfill = await postJson(
         app,
         `/api/feeds/${feedId}/full-content/backfill-current`,
@@ -3614,7 +3622,73 @@ describe("server API vertical slice", () => {
       });
       expect(backfill.json().data.effectiveContentChangedArticleIds).toHaveLength(1);
       expect(countTable(db, "behavior_events")).toBe(0);
-      expect(countTable(db, "jobs")).toBeGreaterThan(0);
+      expect(contentStatusCounts(db)).toMatchObject({
+        failed: 1,
+        success: 1
+      });
+      const jobsAfter = jobCounts(db);
+      expect(jobsAfter.embedding_generate).toBe((jobsBefore.embedding_generate ?? 0) + 1);
+      expect(jobsAfter.ranking_recalculate).toBe((jobsBefore.ranking_recalculate ?? 0) + 1);
+      expectUniqueOpenEmbeddingArticleIds(db);
+      expect(openEmbeddingArticleIds(db)).toEqual(
+        expect.arrayContaining(backfill.json().data.effectiveContentChangedArticleIds)
+      );
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("refresh full content changes enqueue embedding and ranking once", async () => {
+    const db = createEmptyDatabase();
+    const app = buildServer({
+      db,
+      logger: false,
+      now: () => Date.parse("2026-05-14T08:00:00.000Z"),
+      feedFetcher: fixtureFetcher({ "https://example.com/feed.xml": fixtureRss }),
+      fullContentFetcher: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/second")) {
+          return new Response("broken", { status: 500, headers: { "content-type": "text/html" } });
+        }
+        return new Response(
+          `<html><body><article><p>${"Refresh full content body. ".repeat(16)}</p></article></body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
+    });
+
+    try {
+      const add = await postJson(app, "/api/feeds", {
+        feedUrl: "https://example.com/feed.xml"
+      });
+      const feedId = add.json().data.feed.id;
+      await postJson(app, "/api/embedding/providers", {
+        type: "openai_compatible",
+        name: "Refresh Provider",
+        baseUrl: "https://api.example.com/v1",
+        model: "fixture-embedding",
+        dimension: 3,
+        enabled: true
+      });
+      await injectJson(app, "PATCH", `/api/feeds/${feedId}`, {
+        fullContentMode: "fetch_full_content"
+      });
+
+      db.prepare("delete from jobs").run();
+      const jobsBefore = jobCounts(db);
+      const refresh = await app.inject({
+        method: "POST",
+        url: `/api/feeds/${feedId}/refresh`
+      });
+      expect(refresh.statusCode, refresh.body).toBe(200);
+
+      const jobsAfter = jobCounts(db);
+      expect(jobsAfter.embedding_generate).toBe((jobsBefore.embedding_generate ?? 0) + 1);
+      expect(jobsAfter.ranking_recalculate).toBe((jobsBefore.ranking_recalculate ?? 0) + 1);
+      expectUniqueOpenEmbeddingArticleIds(db);
+      expect(openEmbeddingArticleIds(db)).toHaveLength(1);
+      expect(countTable(db, "behavior_events")).toBe(0);
     } finally {
       await app.close();
       db.close();
@@ -6838,6 +6912,51 @@ function countTable(db: DibaoDatabase, tableName: string): number {
     | { count: number }
     | undefined;
   return row?.count ?? 0;
+}
+
+function jobCounts(db: DibaoDatabase): Record<string, number> {
+  const rows = db
+    .prepare(
+      `
+        select type, count(*) as count
+        from jobs
+        group by type
+      `
+    )
+    .all() as Array<{ type: string; count: number }>;
+  return Object.fromEntries(rows.map((row) => [row.type, row.count]));
+}
+
+function openEmbeddingArticleIds(db: DibaoDatabase): string[] {
+  const rows = db
+    .prepare(
+      `
+        select payload_json as payloadJson
+        from jobs
+        where type = 'embedding_generate'
+          and status in ('queued', 'running')
+      `
+    )
+    .all() as Array<{ payloadJson: string }>;
+  return rows.flatMap((row) => (JSON.parse(row.payloadJson) as { articleIds: string[] }).articleIds);
+}
+
+function expectUniqueOpenEmbeddingArticleIds(db: DibaoDatabase): void {
+  const articleIds = openEmbeddingArticleIds(db);
+  expect(new Set(articleIds).size).toBe(articleIds.length);
+}
+
+function contentStatusCounts(db: DibaoDatabase): Record<string, number> {
+  const rows = db
+    .prepare(
+      `
+        select extraction_status as status, count(*) as count
+        from article_contents
+        group by extraction_status
+      `
+    )
+    .all() as Array<{ status: string; count: number }>;
+  return Object.fromEntries(rows.map((row) => [row.status, row.count]));
 }
 
 function listBehaviorEventTypes(db: DibaoDatabase, articleId: string): string[] {

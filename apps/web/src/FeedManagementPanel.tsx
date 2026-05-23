@@ -81,6 +81,7 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
     () => props.feeds.find((feed) => feed.id === selectedFeedId) ?? null,
     [props.feeds, selectedFeedId]
   );
+  const selectedFeedIdentity = selectedFeed?.id ?? null;
   const folderById = useMemo(
     () => new Map(props.feedFolders.map((folder) => [folder.id, folder])),
     [props.feedFolders]
@@ -122,9 +123,12 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
 
   useEffect(() => {
     setFeedDraft(selectedFeed ? draftForFeed(selectedFeed) : emptyFeedDraft());
+  }, [selectedFeed]);
+
+  useEffect(() => {
     setConfirmDeleteFeedId(null);
     setBackfillResult(null);
-  }, [selectedFeed]);
+  }, [selectedFeedIdentity]);
 
   async function runManagementAction(action: PendingManagementAction, fn: () => Promise<void>) {
     setPendingAction(action);

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import Database from "better-sqlite3";
 import { resolve } from "node:path";
+import { startFixtureServer } from "./fixtures.js";
 
 const accessPassword = "correct horse battery";
 const e2eDatabasePath = resolve(".tmp/e2e/dibao.sqlite");
@@ -82,6 +83,43 @@ test("mobile feed diagnostics stay compact without horizontal overflow", async (
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth
   );
   expect(overflow).toBeLessThanOrEqual(4);
+});
+
+test("mobile full content settings and preview stay usable without horizontal overflow", async ({
+  page
+}) => {
+  const fixture = await startFixtureServer();
+  try {
+    await login(page);
+
+    await page.getByRole("button", { exact: true, name: "更多" }).click();
+    await page.getByRole("menuitem", { name: "订阅源" }).click();
+    await expect(page.getByRole("region", { name: "订阅源管理" })).toBeVisible();
+
+    await page.getByLabel("Feed URL").fill(`${fixture.origin}/feeds/main.xml`);
+    await page.getByRole("button", { name: "保存" }).click();
+    await expect(page.getByLabel("正文来源")).toBeVisible();
+    await expect(page.getByRole("button", { name: "预览全文抓取" })).toBeVisible();
+
+    const previewPagePromise = page.waitForEvent("popup");
+    await page.getByRole("button", { name: "预览全文抓取" }).click();
+    const previewPage = await previewPagePromise;
+    await previewPage.waitForLoadState("domcontentloaded");
+    await expect(
+      previewPage.locator('section[aria-labelledby="full-content-preview-title"]')
+    ).toBeVisible();
+    await expect(previewPage.getByText("Alpha extracted full content paragraph").first()).toBeVisible();
+    await previewPage.getByRole("button", { name: "返回订阅源管理" }).click();
+    await expect(previewPage.getByRole("region", { name: "订阅源管理" })).toBeVisible();
+    await previewPage.close();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(4);
+  } finally {
+    await fixture.close();
+  }
 });
 
 test("mobile unread debt control can cancel and confirm clearing without overflow", async ({

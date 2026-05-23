@@ -742,6 +742,7 @@ enabled=true|false
 - 单篇抓取失败不中断整体回溯；失败/跳过文章保留 Feed 内容并记录 `extraction_status` / `extraction_error`。
 - 全文成功会更新文章有效正文和 `articles.content_hash`；hash 变化会 enqueue embedding regeneration，并 enqueue ranking recalculation。
 - 回溯是 content maintenance / corpus update：不写 `behavior_events`，不调用 article action，不作为用户偏好信号。若受影响文章存在历史行为，只能触发推荐维护重算，不伪造新行为。
+- 内容变化后的 embedding、ranking 和 recommendation maintenance 副作用统一由 server/coordinator 层处理；feed refresh service 只返回 `effectiveContentChangedArticleIds`。
 
 响应：
 

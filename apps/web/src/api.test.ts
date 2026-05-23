@@ -712,6 +712,7 @@ describe("web API client", () => {
       fullContentMode: "fetch_full_content",
       sourceWeight: 0.2
     });
+    await api.previewFeedFullContent("feed/design");
     await api.previewFeedFullContent("feed/design", "https://example.com/article");
     await api.backfillCurrentFeedFullContent("feed/design");
     await api.deleteFeed("feed/design");
@@ -756,6 +757,11 @@ describe("web API client", () => {
           fullContentMode: "fetch_full_content",
           sourceWeight: 0.2
         }
+      },
+      {
+        path: "/api/feeds/feed%2Fdesign/full-content/preview",
+        method: "POST",
+        body: {}
       },
       {
         path: "/api/feeds/feed%2Fdesign/full-content/preview",

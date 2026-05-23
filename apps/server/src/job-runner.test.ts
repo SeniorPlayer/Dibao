@@ -341,7 +341,6 @@ describe("job runner foundation", () => {
     const vectorStore = new SqliteVecVectorStore(db);
     const embeddings = new SqliteEmbeddingRepository(db);
     const rankings = new SqliteRankingRepository(db);
-    const recalculatedArticleIds: string[] = [];
     const now = Date.parse("2026-05-15T00:00:00.000Z");
 
     try {
@@ -358,28 +357,15 @@ describe("job runner foundation", () => {
         fetcher: fixtureFetcher({
           "https://example.com/retention.xml": retentionFixtureRss
         }),
-        ranking: {
-          recalculateArticle(articleId: string) {
-            recalculatedArticleIds.push(articleId);
-            return 1;
-          },
-          recalculateArticles(articleIds: string[]) {
-            recalculatedArticleIds.push(...articleIds);
-            return articleIds.length;
-          },
-          recalculateAll() {
-            return 0;
-          }
-        },
         now: () => now
       });
 
-      await refreshService.refreshFeed("feed_retention");
+      const firstRefresh = await refreshService.refreshFeed("feed_retention");
       const article = articles.list({ feedId: "feed_retention" }).items[0];
       expect(article).toMatchObject({
         title: "Retention deleted article"
       });
-      expect(recalculatedArticleIds).toEqual([article.id]);
+      expect(firstRefresh.effectiveContentChangedArticleIds).toEqual([article.id]);
 
       rankings.upsertBaseScore({
         articleId: article.id,
@@ -435,8 +421,7 @@ describe("job runner foundation", () => {
       expect(countRows(db, "article_embeddings", article.id)).toBe(0);
       expect(countRows(db, "article_rank_scores", article.id)).toBe(0);
 
-      recalculatedArticleIds.length = 0;
-      await refreshService.refreshFeed("feed_retention");
+      const secondRefresh = await refreshService.refreshFeed("feed_retention");
 
       expect(articles.findById(article.id)).toMatchObject({
         status: "deleted",
@@ -447,7 +432,7 @@ describe("job runner foundation", () => {
       expect(countRows(db, "article_contents", article.id)).toBe(0);
       expect(countRows(db, "article_embeddings", article.id)).toBe(0);
       expect(countRows(db, "article_rank_scores", article.id)).toBe(0);
-      expect(recalculatedArticleIds).toEqual([]);
+      expect(secondRefresh.effectiveContentChangedArticleIds).toEqual([]);
     } finally {
       db.close();
     }

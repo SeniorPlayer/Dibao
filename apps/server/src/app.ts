@@ -466,10 +466,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     db,
     feeds,
     articles,
-    ranking: rankingService,
     fetcher: options.feedFetcher,
     fullContentExtractor,
-    onEffectiveContentChanged: handleEffectiveContentChanged,
     now: options.now
   });
   const feedFullContentService = new FeedFullContentService({
@@ -1357,7 +1355,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     try {
       feedManagementService.validateFolderReference(parsed.input.folderId);
       const result = await feedRefreshService.addFeed(parsed.input);
-      enqueueEmbeddingArticles(result.articleIds);
+      handleEffectiveContentChanged(result.effectiveContentChangedArticleIds);
 
       return {
         data: {
@@ -1412,6 +1410,7 @@ export function buildServer(options: BuildServerOptions = {}) {
         const result = await feedFullContentService.backfillCurrentFeedFullContent(
           request.params.id
         );
+        handleEffectiveContentChanged(result.effectiveContentChangedArticleIds);
         drainBackgroundJobs();
         return {
           data: mapFullContentBackfill(result)

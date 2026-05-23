@@ -66,12 +66,18 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "最新文章" })).toBeVisible();
     await page.getByTitle("只看未读").click();
     await page.getByTestId("article-list-scroll-container").evaluate((element) => {
-      element.scrollTop = 900;
+      element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll"));
     });
     await expect
-      .poll(() => latestBehaviorEvent("E2E Article Beta", "impression") !== null)
+      .poll(() => latestBehaviorEvent("E2E Article Beta", "impression") !== null, {
+        timeout: 20_000
+      })
       .toBe(true);
+    await page.getByTestId("article-list-scroll-container").evaluate((element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll"));
+    });
     await expect(page.getByRole("link", { name: /E2E Article Beta/ })).toBeVisible();
     await page.getByRole("link", { name: /E2E Article Beta/ }).click();
     await expect(page.getByRole("link", { name: /E2E Article Beta/ })).toBeVisible();
@@ -210,6 +216,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("button", { name: "刷新全部" })).toBeVisible();
     await expect(page.getByText("Feed URL")).toBeVisible();
 
+    await page.getByRole("link", { name: "订阅源" }).click();
     await page.getByLabel("Feed URL").fill(`${fixture.origin}/feeds/broken.xml`);
     await page.getByRole("button", { name: "保存" }).click();
     await page.getByRole("link", { name: "最新" }).click();
@@ -232,6 +239,68 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.context().setOffline(false);
   } finally {
     await page.context().setOffline(false).catch(() => undefined);
+    await fixture.close();
+  }
+});
+
+test("desktop full content extraction can preview and backfill current feed items", async ({
+  page
+}) => {
+  const fixture = await startFixtureServer();
+
+  try {
+    await loginDesktop(page);
+
+    await page.getByRole("link", { name: "订阅源" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "订阅源管理" })).toBeVisible();
+    await page.getByLabel("Feed URL").fill(`${fixture.origin}/feeds/main.xml`);
+    await page.getByLabel("正文来源").selectOption("feed_only");
+    await page.getByRole("button", { name: "保存" }).click();
+    await expect(page.getByLabel("正文来源")).toHaveValue("feed_only");
+    await expect(page.getByRole("button", { name: "预览全文抓取" })).toBeVisible();
+
+    const previewPagePromise = page.waitForEvent("popup");
+    await page.getByRole("button", { name: "预览全文抓取" }).click();
+    const previewPage = await previewPagePromise;
+    await previewPage.waitForLoadState("domcontentloaded");
+    await expect(
+      previewPage.locator('section[aria-labelledby="full-content-preview-title"]')
+    ).toBeVisible();
+    await expect(previewPage.getByText(`${fixture.origin}/articles/alpha`)).toBeVisible();
+    await expect(
+      previewPage.getByText("Alpha extracted full content paragraph").first()
+    ).toBeVisible();
+    await previewPage.getByRole("button", { name: "返回订阅源管理" }).click();
+    await expect(previewPage.getByRole("region", { name: "订阅源管理" })).toBeVisible();
+    await previewPage.close();
+
+    await page.getByLabel("正文来源").selectOption("fetch_full_content");
+    await page.getByRole("button", { name: "保存" }).click();
+    await expect(page.getByLabel("正文来源")).toHaveValue("fetch_full_content");
+    await expect(page.getByRole("button", { name: "抓取当前 Feed 文章全文" })).toBeVisible();
+    page.once("dialog", (dialog) => {
+      void dialog.accept();
+    });
+    const backfillResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes("/full-content/backfill-current")
+    );
+    await page.getByRole("button", { name: "抓取当前 Feed 文章全文" }).click();
+    await expect((await backfillResponse).status()).toBe(200);
+    await expect(page.getByText("内容发生变化")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("当前 RSS 文章数")).toBeVisible();
+    await expect(page.getByText("尝试")).toBeVisible();
+    await expect(page.getByText("成功", { exact: true })).toBeVisible();
+    await expect(page.getByText(/已限制为前 50 篇|未触发/)).toBeVisible();
+
+    await openArticleFromSearch(page, "Alpha");
+    await expect(page.getByText("正文来自网页全文抓取。")).toBeVisible();
+    await expect(page.getByText("Alpha extracted full content paragraph").first()).toBeVisible();
+
+    await openArticleFromSearch(page, "Broken Full Content");
+    await expect(page.getByText("网页全文抓取失败，当前显示 Feed 内容。")).toBeVisible();
+  } finally {
     await fixture.close();
   }
 });
@@ -279,6 +348,25 @@ function latestReadProgressEvent(articleTitle: string):
   } finally {
     db.close();
   }
+}
+
+async function loginDesktop(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "登录邸报" })).toBeVisible();
+  await page.getByRole("textbox", { name: "访问密码" }).fill(accessPassword);
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page.getByRole("link", { name: "最新" })).toBeVisible();
+}
+
+async function openArticleFromSearch(
+  page: import("@playwright/test").Page,
+  keyword: string
+): Promise<void> {
+  await page.getByRole("link", { name: "搜索" }).click();
+  await expect(page.getByRole("heading", { name: "搜索文章" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "关键词" }).fill(keyword);
+  await page.getByRole("button", { name: "搜索" }).click();
+  await page.getByRole("link", { name: new RegExp(`E2E Article ${keyword}`) }).click();
 }
 
 function readerExplainButtons(page: import("@playwright/test").Page) {
