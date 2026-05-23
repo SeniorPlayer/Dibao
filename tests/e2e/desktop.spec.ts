@@ -59,7 +59,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
     await page.getByRole("link", { name: "最新" }).click();
     await expect(page.getByRole("heading", { name: "最新文章" })).toBeVisible();
-    await page.getByRole("button", { name: "只看未读" }).click();
+    await page.getByTitle("只看未读").click();
     await page.getByTestId("article-list-scroll-container").evaluate((element) => {
       element.scrollTop = 900;
       element.dispatchEvent(new Event("scroll"));
@@ -130,7 +130,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await readerPanel.getByRole("button", { name: "不再推荐类似文章" }).first().click();
     await expect(readerPanel.getByRole("button", { name: "已标记不感兴趣" }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: "只看未读" }).click();
+    await page.getByTitle("只看未读").click();
     await page.getByRole("link", { name: "推荐" }).click();
     await expect(page.getByRole("heading", { name: "推荐文章" })).toBeVisible();
     await expect(page.getByText("推荐状态", { exact: true })).toBeVisible();
@@ -148,6 +148,31 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByRole("button", { name: "打开来源" }).click();
     await page.getByTitle("刷新 E2E Fixture Feed").click();
     await expect(page.getByText("已刷新：E2E Fixture Feed")).toBeVisible();
+
+    await page.getByRole("link", { name: "最新" }).click();
+    await expect(page.getByRole("button", { name: /未读 \d+/ }).first()).toBeVisible();
+    await page.getByRole("link", { name: /E2E Article Alpha/ }).click();
+    await page
+      .getByTestId("reader-scroll-container")
+      .getByRole("button", { name: "稍后读这篇文章" })
+      .first()
+      .click();
+    await expect(
+      page
+        .getByTestId("reader-scroll-container")
+        .getByRole("button", { name: "移出稍后读" })
+        .first()
+    ).toBeVisible();
+    await page.getByTitle("只看未读").click();
+    await expect(page.getByTitle("只看未读")).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "清账" }).click();
+    await expect(page.getByRole("heading", { name: "清理未读" })).toBeVisible();
+    await expect(page.getByText("这不会清除收藏或稍后读，也不会作为推荐正反馈。")).toBeVisible();
+    await page.getByRole("button", { name: "标记已读" }).click();
+    await expect(page.getByText(/已将当前范围内 \d+ 篇文章标记为已读。|当前范围没有未读文章。/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "清账" })).toBeDisabled();
+    await page.getByRole("link", { name: "稍后读" }).click();
+    await expect(page.getByRole("link", { name: /E2E Article Alpha/ })).toBeVisible();
 
     await page.getByRole("link", { name: "设置" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "设置" })).toBeVisible();

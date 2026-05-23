@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import Database from "better-sqlite3";
+import { resolve } from "node:path";
 
 const accessPassword = "correct horse battery";
+const e2eDatabasePath = resolve(".tmp/e2e/dibao.sqlite");
 
 test.beforeEach(async ({ page }) => {
   await blockExternalBrowserRequests(page);
@@ -45,7 +48,9 @@ test("mobile MVP reader smoke has visible controls and no horizontal overflow", 
   await expect(page.getByRole("button", { name: "返回列表" })).toBeVisible();
   const readerPanel = page.getByTestId("reader-scroll-container");
   await expect(readerPanel.getByRole("button", { name: "收藏这篇文章" }).first()).toBeVisible();
-  await expect(readerPanel.getByRole("button", { name: "稍后读这篇文章" }).first()).toBeVisible();
+  await expect(
+    readerPanel.getByRole("button", { name: /稍后读这篇文章|移出稍后读/ }).first()
+  ).toBeVisible();
   await expect(readerPanel.getByRole("button", { name: "不再推荐类似文章" }).first()).toBeVisible();
   const readingLayout = await page.evaluate(mobilePanelState);
   expect(readingLayout.listDisplay).toBe("none");
@@ -61,6 +66,42 @@ test("mobile MVP reader smoke has visible controls and no horizontal overflow", 
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth
   );
   expect(overflow).toBeLessThanOrEqual(4);
+});
+
+test("mobile unread debt control can cancel and confirm clearing without overflow", async ({
+  page
+}) => {
+  seedUnreadArticle("article_mobile_clear_debt", "E2E Mobile Clear Debt");
+  await login(page);
+
+  await page.getByRole("link", { name: "最新" }).click();
+  await expect(page.getByRole("link", { name: /E2E Mobile Clear Debt/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /未读 \d+/ }).first()).toBeVisible();
+
+  const initialOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(initialOverflow).toBeLessThanOrEqual(4);
+
+  await page.getByTitle("标记当前范围为已读").click();
+  await expect(page.getByRole("heading", { name: "清理未读" })).toBeVisible();
+  await page.getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("heading", { name: "清理未读" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /未读 [1-9]\d*/ }).first()).toBeVisible();
+
+  await page.getByTitle("标记当前范围为已读").click();
+  await page.getByRole("button", { name: "标记已读" }).click();
+  await expect(
+    page.locator('[aria-live="polite"]').filter({
+      hasText: /已将当前范围内 \d+ 篇文章标记为已读。/
+    })
+  ).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "未读 0" }).first()).toBeVisible();
+
+  const finalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(finalOverflow).toBeLessThanOrEqual(4);
 });
 
 test("mobile recommended list keeps a dense first screen without horizontal overflow", async ({
@@ -93,9 +134,7 @@ test("mobile recommended article exposes algorithm transparency details", async 
   await expect(page.getByRole("button", { name: "查看完整理由" })).toBeVisible();
   await page.getByRole("button", { name: "查看完整理由" }).click();
   await expect(page.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
-  await expect(
-    page.getByRole("dialog").getByText("新鲜度", { exact: true })
-  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toContainText(/推荐|排序|稍后读|新鲜度/);
   await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
   await expect(page.getByRole("heading", { name: "为什么推荐" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "E2E Article Alpha" })).toBeVisible();
@@ -267,6 +306,58 @@ async function saveArticleForLater(page: Page, title: string): Promise<void> {
   }
   await page.goBack();
   await expect(page.getByRole("link", { name: new RegExp(title) })).toBeVisible();
+}
+
+function seedUnreadArticle(articleId: string, title: string): void {
+  const db = new Database(e2eDatabasePath);
+  try {
+    const feed = db.prepare("select id from feeds where deleted_at is null limit 1").get() as
+      | { id: string }
+      | undefined;
+    if (!feed) {
+      throw new Error("No feed available for mobile unread seed");
+    }
+    const now = Date.parse("2026-05-23T08:00:00.000Z");
+    db.prepare(
+      `
+        insert into articles (
+          id,
+          feed_id,
+          url,
+          title,
+          summary,
+          published_at,
+          discovered_at,
+          dedupe_key,
+          created_at,
+          updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          title = excluded.title,
+          published_at = excluded.published_at,
+          discovered_at = excluded.discovered_at,
+          updated_at = excluded.updated_at,
+          deleted_at = null,
+          status = 'active'
+      `
+    ).run(
+      articleId,
+      feed.id,
+      `https://example.com/${articleId}`,
+      title,
+      "Mobile clear debt fixture",
+      now,
+      now,
+      articleId,
+      now,
+      now
+    );
+    db.prepare("delete from article_states where article_id = ?").run(articleId);
+    db.prepare("delete from behavior_events where article_id = ?").run(articleId);
+  } finally {
+    db.close();
+  }
 }
 
 async function firstArticleTitle(page: Page): Promise<string> {

@@ -450,6 +450,24 @@ export const zhCN = {
       readLater: "稍后读"
     }
   },
+  readerCommands: {
+    markScopeRead: {
+      unreadWithCount: (count: number) => `未读 ${count}`,
+      toggleUnread: "只看未读",
+      clear: "清账",
+      clearShort: "✓",
+      clearTitle: "标记当前范围为已读",
+      confirmTitle: "清理未读",
+      confirmBody: (count: number) => `将当前范围内 ${count} 篇未读文章标记为已读？`,
+      confirmHint: "这不会清除收藏或稍后读，也不会作为推荐正反馈。",
+      cancel: "取消",
+      confirm: "标记已读",
+      clearing: "清账中",
+      cleared: (count: number) => `已将当前范围内 ${count} 篇文章标记为已读。`,
+      nothingToClear: "当前范围没有未读文章。",
+      error: "批量标记已读失败，请稍后重试。"
+    }
+  },
   algorithmTransparency: {
     pageTitle: "算法透明说明",
     status: "算法说明已就绪",
@@ -1439,6 +1457,25 @@ export const enUS = {
       favorited: "Favorited",
       liked: "Liked",
       readLater: "Read later"
+    }
+  },
+  readerCommands: {
+    markScopeRead: {
+      unreadWithCount: (count: number) => `Unread ${count}`,
+      toggleUnread: "Only unread",
+      clear: "Clear",
+      clearShort: "✓",
+      clearTitle: "Mark current scope as read",
+      confirmTitle: "Clear unread",
+      confirmBody: (count: number) => `Mark ${count} unread articles in the current scope as read?`,
+      confirmHint:
+        "This will not clear favorites or read-later items, and it will not count as positive recommendation feedback.",
+      cancel: "Cancel",
+      confirm: "Mark read",
+      clearing: "Clearing",
+      cleared: (count: number) => `Marked ${count} articles in the current scope as read.`,
+      nothingToClear: "There are no unread articles in the current scope.",
+      error: "Bulk mark read failed. Please try again."
     }
   },
   algorithmTransparency: {

@@ -725,6 +725,112 @@ describe("web API client", () => {
     expect(first.meta.unreadCount).toBe(0);
   });
 
+  it("posts reader mark-scope-read commands", async () => {
+    const calls: Array<{ path: string; method: string | undefined; body: unknown }> = [];
+    const api = createDibaoApi(async (input, init) => {
+      calls.push({
+        path: String(input),
+        method: init?.method,
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      });
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            ok: true,
+            commandId: "cmd_test",
+            markedReadCount: 42
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await expect(
+      api.markScopeRead({
+        type: "article_list",
+        view: "latest",
+        feedId: "feed_1",
+        timeWindow: "7d"
+      })
+    ).resolves.toEqual({
+      ok: true,
+      commandId: "cmd_test",
+      markedReadCount: 42
+    });
+    await api.markScopeRead({
+      type: "search",
+      q: "AI",
+      folderId: "folder_1",
+      from: "2026-05-01",
+      to: "2026-05-23",
+      state: "unread"
+    });
+
+    expect(calls).toEqual([
+      {
+        path: "/api/reader/commands/mark-scope-read",
+        method: "POST",
+        body: {
+          scope: {
+            type: "article_list",
+            view: "latest",
+            feedId: "feed_1",
+            timeWindow: "7d"
+          }
+        }
+      },
+      {
+        path: "/api/reader/commands/mark-scope-read",
+        method: "POST",
+        body: {
+          scope: {
+            type: "search",
+            q: "AI",
+            folderId: "folder_1",
+            from: "2026-05-01",
+            to: "2026-05-23",
+            state: "unread"
+          }
+        }
+      }
+    ]);
+  });
+
+  it("surfaces ApiRequestError for reader command failures", async () => {
+    const api = createDibaoApi(async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "scope.type must be article_list or search"
+          }
+        }),
+        {
+          status: 400,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+
+    await expect(
+      api.markScopeRead({
+        type: "article_list",
+        view: "recommended"
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "VALIDATION_ERROR"
+    });
+  });
+
   it("imports OPML without forcing a JSON content type", async () => {
     const calls: Array<{
       path: string;

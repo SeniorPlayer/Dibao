@@ -259,6 +259,55 @@ export type ArticleSearchInput = {
   rankContext?: string;
 };
 
+export type ReaderCommandType = "mark_scope_read";
+
+export type ArticleScope =
+  | {
+      type: "article_list";
+      view: "latest" | "recommended";
+      feedId?: string;
+      folderId?: string;
+      timeWindow?: "all" | "24h" | "7d" | "30d";
+      todayStartAt?: number;
+      todayEndAt?: number;
+    }
+  | {
+      type: "search";
+      query: string;
+      feedId?: string;
+      folderId?: string;
+      from?: number;
+      to?: number;
+      state?: ArticleSearchState;
+    };
+
+export type MarkScopeReadCommandInput = {
+  scope: ArticleScope;
+  now?: number;
+};
+
+export type MarkScopeReadCommandResult = {
+  commandId: string;
+  markedReadCount: number;
+  affectedArticleIds?: string[];
+};
+
+export type ReaderCommandEventRow = {
+  id: string;
+  commandType: ReaderCommandType;
+  scopeJson: string;
+  resultJson: string | null;
+  createdAt: number;
+};
+
+export type RecordReaderCommandEventInput = {
+  id: string;
+  commandType: ReaderCommandType;
+  scope: ArticleScope;
+  result: Omit<MarkScopeReadCommandResult, "commandId">;
+  createdAt: number;
+};
+
 export type ArticleStateSnapshot = {
   read: boolean;
   favorited: boolean;

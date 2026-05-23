@@ -39,6 +39,9 @@ const geminiEmbeddingProviderPath = fileURLToPath(
 const embeddingProviderLimitsPath = fileURLToPath(
   new URL("../migrations/013_embedding_provider_limits.sql", import.meta.url)
 );
+const readerCommandEventsPath = fileURLToPath(
+  new URL("../migrations/014_reader_command_events.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -101,6 +104,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "013",
       name: "embedding_provider_limits",
       sql: readFileSync(embeddingProviderLimitsPath, "utf8")
+    },
+    {
+      version: "014",
+      name: "reader_command_events",
+      sql: readFileSync(readerCommandEventsPath, "utf8")
     }
   ];
 }

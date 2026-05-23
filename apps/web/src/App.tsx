@@ -35,6 +35,7 @@ import {
   type RecommendationMaintenanceTaskResponse,
   type ClusterLabelLexiconResponse,
   type ClusterLabelLexiconOverrides,
+  type ReaderCommandScope,
   type SetupStatus,
   type UpdateFeedFolderInput,
   type UpdateFeedInput,
@@ -92,7 +93,8 @@ type Notice =
   | { type: "embeddingProviderDeleted" }
   | { type: "embeddingIndexRebuildQueued" }
   | { type: "embeddingIndexBackfillQueued" }
-  | { type: "recommendationMaintenanceQueued"; label: string; existing: boolean };
+  | { type: "recommendationMaintenanceQueued"; label: string; existing: boolean }
+  | { type: "readerCommandMarkScopeRead"; count: number };
 
 type PwaUpdateAvailableEvent = CustomEvent<{
   applyUpdate: () => void;
@@ -309,6 +311,8 @@ export function App() {
   const [explanationError, setExplanationError] = useState<string | null>(null);
   const [listExplanationError, setListExplanationError] = useState<string | null>(null);
   const [articleActionError, setArticleActionError] = useState<string | null>(null);
+  const [readerCommandError, setReaderCommandError] = useState<string | null>(null);
+  const [isMarkingScopeRead, setIsMarkingScopeRead] = useState(false);
   const [opmlSummary, setOpmlSummary] = useState<OpmlImportResponse | null>(null);
   const [nextArticleCursor, setNextArticleCursor] = useState<string | null>(null);
   const [pendingArticleAction, setPendingArticleAction] = useState<PendingArticleAction | null>(
@@ -422,6 +426,7 @@ export function App() {
     clearSelectedArticle();
     clearListExplanation();
     setArticleError(null);
+    setReaderCommandError(null);
     setLoadMoreError(null);
     setIsLoadingMoreArticles(false);
   }
@@ -543,6 +548,8 @@ export function App() {
     setDetailError(null);
     setExplanationError(null);
     setArticleActionError(null);
+    setReaderCommandError(null);
+    setIsMarkingScopeRead(false);
     setSetupSourceError(null);
     setAppSettings(defaultAppSettings);
     setIsSettingsLoading(false);
@@ -1784,6 +1791,66 @@ export function App() {
     }
   }
 
+  async function handleMarkCurrentArticleListScopeRead() {
+    if (currentArticleView !== "latest" && currentArticleView !== "recommended") {
+      return;
+    }
+
+    await markScopeRead(
+      {
+        type: "article_list",
+        view: currentArticleView,
+        ...articleQueryFor(sourceSelection),
+        timeWindow
+      },
+      () =>
+        loadArticles(
+          sourceSelection,
+          currentArticleView,
+          unreadOnly,
+          favoriteSort,
+          readLaterSort,
+          timeWindow
+        )
+    );
+  }
+
+  async function handleMarkCurrentSearchScopeRead() {
+    if (!hasSubmittedSearch || submittedSearchForm.q.trim().length === 0) {
+      return;
+    }
+
+    await markScopeRead(
+      {
+        type: "search",
+        ...articleQueryFor(submittedSearchForm.sourceSelection),
+        q: submittedSearchForm.q.trim(),
+        state: submittedSearchForm.state,
+        from: submittedSearchForm.from || null,
+        to: submittedSearchForm.to || null
+      },
+      () => loadSearchArticles(submittedSearchForm)
+    );
+  }
+
+  async function markScopeRead(scope: ReaderCommandScope, reload: () => Promise<void>) {
+    setIsMarkingScopeRead(true);
+    setReaderCommandError(null);
+    setNotice(null);
+
+    try {
+      const result = await dibaoApi.markScopeRead(scope);
+      setNotice({ type: "readerCommandMarkScopeRead", count: result.markedReadCount });
+      articleStateById.current.clear();
+      locallyUpdatedArticleIds.current.clear();
+      await reload();
+    } catch {
+      setReaderCommandError(t.readerCommands.markScopeRead.error);
+    } finally {
+      setIsMarkingScopeRead(false);
+    }
+  }
+
   async function handleArticleAction(article: ArticleActionTarget, intent: ArticleActionIntent) {
     setPendingArticleAction({ articleId: article.id, intent });
     setArticleActionError(null);
@@ -2293,6 +2360,7 @@ export function App() {
               form={searchForm}
               hasSubmitted={hasSubmittedSearch}
               isArticlesLoading={isArticlesLoading}
+              isMarkingScopeRead={isMarkingScopeRead}
               isLoadingMore={isLoadingMoreArticles}
               loadMoreError={loadMoreError}
               nextCursor={nextArticleCursor}
@@ -2302,9 +2370,11 @@ export function App() {
                 void handleOpenListExplanation(articleId);
               }}
               onLoadMore={handleLoadMoreArticles}
+              onMarkScopeRead={handleMarkCurrentSearchScopeRead}
               onSelectArticle={handleSelectArticle}
               onSubmit={handleSearchSubmit}
               pendingAction={pendingArticleAction}
+              readerCommandError={readerCommandError}
               resultUrlForm={submittedSearchForm}
               selectedArticleId={selectedArticleId}
               unreadCount={unreadCount}
@@ -2385,12 +2455,14 @@ export function App() {
                 !(selectedArticleId && isMobileArticleHistoryEnabled())
               }
               isArticlesLoading={isArticlesLoading}
+              isMarkingScopeRead={isMarkingScopeRead}
               isLoadingMore={isLoadingMoreArticles}
               listScrollKey={articleListScrollKey}
               loadMoreError={loadMoreError}
               nextCursor={nextArticleCursor}
               onIgnoreArticle={handleIgnoreArticle}
               onLoadMore={handleLoadMoreArticles}
+              onMarkScopeRead={handleMarkCurrentArticleListScopeRead}
               onOpenSources={() => setIsSourceDrawerOpen(true)}
               onArticleAction={handleArticleAction}
               onSelectArticle={handleSelectArticle}
@@ -2410,6 +2482,7 @@ export function App() {
               recommendationStatusError={
                 currentArticleView === "recommended" ? recommendationStatusError : null
               }
+              readerCommandError={readerCommandError}
               selectedArticleId={selectedArticleId}
               selectedFeed={selectedFeed}
               selectedFolder={selectedFolder}
@@ -4510,6 +4583,7 @@ export function ArticleListPanel(props: {
   isIgnoreTelemetryEnabled: boolean;
   isArticlesLoading: boolean;
   isLoadingMore: boolean;
+  isMarkingScopeRead: boolean;
   isRecommendationStatusLoading: boolean;
   listScrollKey?: string;
   loadMoreError: string | null;
@@ -4519,6 +4593,7 @@ export function ArticleListPanel(props: {
   onReadLaterSortChange: (sort: ReadLaterArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
   onLoadMore: () => void;
+  onMarkScopeRead: () => void;
   onOpenSources: () => void;
   onExplainArticle: (articleId: string) => void;
   onSelectArticle: (articleId: string) => void;
@@ -4527,6 +4602,7 @@ export function ArticleListPanel(props: {
   pendingAction?: PendingArticleAction | null;
   recommendationStatus: RecommendationStatus | null;
   recommendationStatusError: string | null;
+  readerCommandError: string | null;
   selectedArticleId: string | null;
   selectedFeed: Feed | null;
   selectedFolder: FeedFolder | null;
@@ -4619,18 +4695,15 @@ export function ArticleListPanel(props: {
                 onChange={props.onTimeWindowChange}
                 timeWindow={props.timeWindow}
               />
-              <button
-                aria-pressed={props.unreadOnly}
-                className={props.unreadOnly ? styles.articleFilterActive : styles.articleFilter}
-                onClick={() => props.onUnreadOnlyChange(!props.unreadOnly)}
-                title={t.articles.filters.unreadTitle}
-                type="button"
-              >
-                {t.articles.unreadOnly}
-              </button>
+              <UnreadDebtControl
+                isClearing={props.isMarkingScopeRead}
+                onConfirmClear={props.onMarkScopeRead}
+                onToggleUnreadOnly={() => props.onUnreadOnlyChange(!props.unreadOnly)}
+                unreadCount={props.unreadCount}
+                unreadOnly={props.unreadOnly}
+              />
             </div>
           ) : null}
-          <span className={styles.count}>{props.unreadCount}</span>
         </div>
       </div>
 
@@ -4643,6 +4716,9 @@ export function ArticleListPanel(props: {
       ) : null}
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
+      {props.readerCommandError ? (
+        <p className={styles.errorText}>{props.readerCommandError}</p>
+      ) : null}
 
       <div className={styles.list} aria-live="polite">
         {props.isArticlesLoading ? <SkeletonRows count={10} /> : null}
@@ -4739,6 +4815,128 @@ export function ArticleListPanel(props: {
   );
 }
 
+function UnreadDebtControl(props: {
+  unreadCount: number;
+  unreadOnly: boolean;
+  isClearing: boolean;
+  onToggleUnreadOnly: () => void;
+  onConfirmClear: () => void;
+}) {
+  const { t } = useI18n();
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  return (
+    <div className={styles.unreadDebtControl}>
+      <button
+        aria-pressed={props.unreadOnly}
+        className={props.unreadOnly ? styles.unreadDebtToggleActive : styles.unreadDebtToggle}
+        onClick={props.onToggleUnreadOnly}
+        title={t.readerCommands.markScopeRead.toggleUnread}
+        type="button"
+      >
+        {t.readerCommands.markScopeRead.unreadWithCount(props.unreadCount)}
+      </button>
+      <button
+        className={styles.unreadDebtClear}
+        disabled={props.unreadCount === 0 || props.isClearing}
+        onClick={() => setIsConfirmOpen(true)}
+        title={t.readerCommands.markScopeRead.clearTitle}
+        type="button"
+      >
+        <span className={styles.unreadDebtClearLabel}>
+          {props.isClearing
+            ? t.readerCommands.markScopeRead.clearing
+            : t.readerCommands.markScopeRead.clear}
+        </span>
+        <span className={styles.unreadDebtClearShort}>
+          {t.readerCommands.markScopeRead.clearShort}
+        </span>
+      </button>
+      <MarkScopeReadConfirmDialog
+        isOpen={isConfirmOpen}
+        onCancel={() => setIsConfirmOpen(false)}
+        onConfirm={() => {
+          setIsConfirmOpen(false);
+          props.onConfirmClear();
+        }}
+        unreadCount={props.unreadCount}
+      />
+    </div>
+  );
+}
+
+function SearchUnreadDebtControl(props: {
+  unreadCount: number;
+  isClearing: boolean;
+  onConfirmClear: () => void;
+}) {
+  const { t } = useI18n();
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  return (
+    <span className={styles.searchUnreadDebtControl}>
+      <button
+        className={styles.searchUnreadDebtButton}
+        disabled={props.unreadCount === 0 || props.isClearing}
+        onClick={() => setIsConfirmOpen(true)}
+        title={t.readerCommands.markScopeRead.clearTitle}
+        type="button"
+      >
+        {t.readerCommands.markScopeRead.unreadWithCount(props.unreadCount)}
+      </button>
+      <MarkScopeReadConfirmDialog
+        isOpen={isConfirmOpen}
+        onCancel={() => setIsConfirmOpen(false)}
+        onConfirm={() => {
+          setIsConfirmOpen(false);
+          props.onConfirmClear();
+        }}
+        unreadCount={props.unreadCount}
+      />
+    </span>
+  );
+}
+
+function MarkScopeReadConfirmDialog(props: {
+  isOpen: boolean;
+  unreadCount: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+
+  if (!props.isOpen) {
+    return null;
+  }
+
+  return (
+    <div className={styles.readerCommandDialogBackdrop}>
+      <div
+        aria-modal="true"
+        className={styles.readerCommandDialog}
+        role="dialog"
+        aria-labelledby="reader-command-dialog-title"
+      >
+        <h3 id="reader-command-dialog-title">
+          {t.readerCommands.markScopeRead.confirmTitle}
+        </h3>
+        <p>{t.readerCommands.markScopeRead.confirmBody(props.unreadCount)}</p>
+        <p className={styles.readerCommandDialogHint}>
+          {t.readerCommands.markScopeRead.confirmHint}
+        </p>
+        <div className={styles.readerCommandDialogActions}>
+          <button className={styles.secondaryButton} onClick={props.onCancel} type="button">
+            {t.readerCommands.markScopeRead.cancel}
+          </button>
+          <button className={styles.primaryButton} onClick={props.onConfirm} type="button">
+            {t.readerCommands.markScopeRead.confirm}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SearchResultsPanel(props: {
   articleError: string | null;
   articles: ArticleListItem[];
@@ -4748,15 +4946,18 @@ export function SearchResultsPanel(props: {
   hasSubmitted: boolean;
   isArticlesLoading: boolean;
   isLoadingMore: boolean;
+  isMarkingScopeRead: boolean;
   loadMoreError: string | null;
   nextCursor: string | null;
   onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
   onChange: (form: SearchFormState) => void;
   onExplainArticle: (articleId: string) => void;
   onLoadMore: () => void;
+  onMarkScopeRead: () => void;
   onSelectArticle: (articleId: string) => void;
   onSubmit: (form: SearchFormState) => void;
   pendingAction?: PendingArticleAction | null;
+  readerCommandError: string | null;
   resultUrlForm: SearchFormState;
   selectedArticleId: string | null;
   unreadCount: number;
@@ -4917,6 +5118,9 @@ export function SearchResultsPanel(props: {
       </form>
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
+      {props.readerCommandError ? (
+        <p className={styles.errorText}>{props.readerCommandError}</p>
+      ) : null}
 
       <div className={styles.list} aria-live="polite">
         {props.isArticlesLoading ? <SkeletonRows count={10} /> : null}
@@ -4930,10 +5134,15 @@ export function SearchResultsPanel(props: {
         ) : null}
 
         {!props.isArticlesLoading && props.articles.length > 0 ? (
-          <p className={styles.searchResultCount}>
-            {t.search.resultsCount(props.articles.length)}
-            {props.unreadCount > 0 ? ` · ${t.articles.state.unread} ${props.unreadCount}` : ""}
-          </p>
+          <div className={styles.searchResultCount}>
+            <span>{t.search.resultsCount(props.articles.length)}</span>
+            <span aria-hidden="true">·</span>
+            <SearchUnreadDebtControl
+              isClearing={props.isMarkingScopeRead}
+              onConfirmClear={props.onMarkScopeRead}
+              unreadCount={props.unreadCount}
+            />
+          </div>
         ) : null}
 
         {!props.isArticlesLoading &&
@@ -6973,6 +7182,10 @@ function noticeTextFor(notice: Notice, t: Dictionary): string {
       return t.settings.sections.provider.notices.backfillQueued;
     case "recommendationMaintenanceQueued":
       return t.algorithmTransparency.maintenance.notice(notice.label, notice.existing);
+    case "readerCommandMarkScopeRead":
+      return notice.count > 0
+        ? t.readerCommands.markScopeRead.cleared(notice.count)
+        : t.readerCommands.markScopeRead.nothingToClear;
   }
 }
 

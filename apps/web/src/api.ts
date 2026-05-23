@@ -156,6 +156,30 @@ export type ArticleListResponse = {
   };
 };
 
+export type ReaderCommandMarkScopeReadResponse = {
+  ok: true;
+  commandId: string;
+  markedReadCount: number;
+};
+
+export type ReaderCommandScope =
+  | {
+      type: "article_list";
+      view: "latest" | "recommended";
+      feedId?: string | null;
+      folderId?: string | null;
+      timeWindow?: ArticleTimeWindow;
+    }
+  | {
+      type: "search";
+      q: string;
+      feedId?: string | null;
+      folderId?: string | null;
+      from?: string | null;
+      to?: string | null;
+      state?: ArticleSearchState;
+    };
+
 export type OpmlImportResponse = {
   foldersCreated: number;
   feedsCreated: number;
@@ -1268,6 +1292,20 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
           unreadCount: response.meta?.unreadCount ?? response.data.length
         }
       };
+    },
+
+    async markScopeRead(
+      scope: ReaderCommandScope
+    ): Promise<ReaderCommandMarkScopeReadResponse> {
+      return (
+        await request<ReaderCommandMarkScopeReadResponse>(
+          "/api/reader/commands/mark-scope-read",
+          {
+            method: "POST",
+            body: JSON.stringify({ scope })
+          }
+        )
+      ).data;
     },
 
     async getArticle(articleId: string): Promise<ArticleDetail> {

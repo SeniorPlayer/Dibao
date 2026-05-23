@@ -13,6 +13,7 @@ It is designed for people who want a local and controllable alternative to algor
 - Feed and folder management.
 - Search UI for local title, summary, and full-text article search.
 - Article actions: favorite, read later, read/unread, not interested, and read progress.
+- Reader Command cleanup for marking the current unread scope as read without recommendation feedback pollution.
 - Background feed refresh, retention cleanup, embedding, ranking, and profile jobs.
 - Settings for language, reader typography, retention, and embedding providers.
 - OpenAI-compatible and Ollama embedding provider support.
@@ -33,6 +34,7 @@ It is designed for people who want a local and controllable alternative to algor
 - Use article actions and reader scroll progress to shape future recommendations.
 - Load more article list pages through cursor pagination.
 - Search the local article library by keyword, filter by feed/folder/state/date, and open results in the existing reader.
+- Clear unread debt in latest, recommended, or submitted search scopes through a confirmed Reader Command.
 - Desktop feed/list/reader columns scroll independently.
 
 ### Subscriptions
@@ -51,6 +53,7 @@ It is designed for people who want a local and controllable alternative to algor
 - Active embedding indexes can be backfilled for missing/stale vectors.
 - sqlite-vec indexes can be rebuilt from the SQLite authority table without calling the provider.
 - User behavior updates positive and negative interest clusters.
+- Reader Command `mark_scope_read` is audited separately from behavior events and does not train the interest profile.
 - Recommended ranking combines interest match, source preference, freshness, state, and penalties.
 - Search v0 supports relevance, latest, and recommendation-aware ordering inside matched results.
 - The system falls back gracefully when provider, embedding, or profile data is unavailable.
@@ -99,6 +102,8 @@ The E2E and Docker smoke suites use local RSS and embedding fixtures and do not 
 - No advanced diversity reranking or duplicate penalties yet.
 - No full model migration UX for changing embedding dimensions/models.
 - Search v0 does not support semantic search, complex search syntax, or external search services.
+- Bulk reader cleanup only supports marking unread articles as read; it does not support bulk delete, bulk favorite, bulk read-later, or bulk not-interested.
+- Reader Command cleanup has no complex undo history.
 - Recommendation quality is still early and benefits from explicit user behavior and complete embedding coverage.
 
 ## Upgrade Notes

@@ -22,6 +22,7 @@ import {
   SqliteJobRepository,
   SqliteProfileRepository,
   SqliteRankingRepository,
+  SqliteReaderCommandEventRepository,
   SqliteSessionRepository,
   SqliteVecVectorStore,
   fromVectorBlob,
@@ -31,6 +32,7 @@ import {
   type ArticleListItemRow,
   type ArticleListView,
   type ArticleReadStatus,
+  type ArticleScope,
   type ArticleSearchInput,
   type ArticleSearchSort,
   type ArticleSearchState,
@@ -113,6 +115,10 @@ import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_JOB_TYPE
 } from "./ranking-job-service.js";
+import {
+  ReaderCommandService,
+  ReaderCommandServiceError
+} from "./reader-command-service.js";
 import {
   ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE,
   DUPLICATE_GROUP_REBUILD_JOB_TYPE,
@@ -224,6 +230,10 @@ type ArticleActionBody = {
   metadata?: unknown;
 };
 
+type ReaderCommandBody = {
+  scope?: unknown;
+};
+
 type EmbeddingProviderParams = {
   id: string;
 };
@@ -296,6 +306,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const feeds = new SqliteFeedRepository(db);
   const jobs = new SqliteJobRepository(db);
   const articles = new SqliteArticleRepository(db);
+  const readerCommandEvents = new SqliteReaderCommandEventRepository(db);
   const embeddings = new SqliteEmbeddingRepository(db);
   const articleActions = new SqliteArticleActionRepository(db);
   const rankings = new SqliteRankingRepository(db);
@@ -338,6 +349,12 @@ export function buildServer(options: BuildServerOptions = {}) {
   const rankingJobService = new RankingRecalculateJobService({
     jobs,
     ranking: rankingService,
+    now: options.now
+  });
+  const readerCommandService = new ReaderCommandService({
+    articles,
+    commandEvents: readerCommandEvents,
+    rankingJobs: rankingJobService,
     now: options.now
   });
   const clusterLabelService = new InterestClusterLabelService({
@@ -1357,6 +1374,41 @@ export function buildServer(options: BuildServerOptions = {}) {
       }
     };
   });
+
+  async function handleMarkScopeRead(request: FastifyRequest<{ Body: ReaderCommandBody }>, reply: FastifyReply) {
+    const parsed = parseReaderCommandMarkScopeReadBody(request.body);
+    if (!parsed.ok) {
+      return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+    }
+
+    try {
+      const result = readerCommandService.markScopeRead({
+        scope: parsed.scope,
+        now: options.now?.() ?? Date.now()
+      });
+      drainBackgroundJobs();
+
+      return {
+        data: {
+          ok: true,
+          commandId: result.commandId,
+          markedReadCount: result.markedReadCount
+        }
+      };
+    } catch (error) {
+      return sendReaderCommandError(reply, error);
+    }
+  }
+
+  app.post<{ Body: ReaderCommandBody }>(
+    "/api/reader/commands/mark-scope-read",
+    handleMarkScopeRead
+  );
+
+  app.post<{ Body: ReaderCommandBody }>(
+    "/api/articles/bulk/mark-read",
+    handleMarkScopeRead
+  );
 
   app.get<{ Params: ArticleParams }>("/api/articles/:id", async (request, reply) => {
     const article = articles.findDetailById(request.params.id, {
@@ -3284,6 +3336,250 @@ function parseSearchQuery(query: SearchQuery):
   };
 }
 
+function parseReaderCommandMarkScopeReadBody(body: ReaderCommandBody | undefined):
+  | { ok: true; scope: ArticleScope }
+  | { ok: false; message: string; details?: unknown } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, message: "request body must be an object" };
+  }
+
+  const rawScope = body.scope;
+  if (!rawScope || typeof rawScope !== "object" || Array.isArray(rawScope)) {
+    return {
+      ok: false,
+      message: "scope is required",
+      details: { field: "scope" }
+    };
+  }
+
+  const scope = rawScope as Record<string, unknown>;
+  if (scope.type === "article_list") {
+    return parseReaderCommandArticleListScope(scope);
+  }
+  if (scope.type === "search") {
+    return parseReaderCommandSearchScope(scope);
+  }
+
+  return {
+    ok: false,
+    message: "scope.type must be article_list or search",
+    details: { field: "scope.type" }
+  };
+}
+
+function parseReaderCommandArticleListScope(
+  scope: Record<string, unknown>
+): { ok: true; scope: ArticleScope } | { ok: false; message: string; details?: unknown } {
+  const view = scope.view;
+  if (view !== "latest" && view !== "recommended") {
+    return {
+      ok: false,
+      message: "view must be latest or recommended",
+      details: { field: "scope.view" }
+    };
+  }
+
+  const source = parseReaderCommandSource(scope);
+  if (!source.ok) {
+    return source;
+  }
+
+  const timeWindow = parseArticleTimeWindowValue(scope.timeWindow);
+  if (timeWindow === null) {
+    return {
+      ok: false,
+      message: "timeWindow must be all, 24h, 7d, or 30d",
+      details: { field: "scope.timeWindow" }
+    };
+  }
+
+  return {
+    ok: true,
+    scope: {
+      type: "article_list",
+      view,
+      timeWindow: timeWindow ?? "all",
+      ...source.source
+    }
+  };
+}
+
+function parseReaderCommandSearchScope(
+  scope: Record<string, unknown>
+): { ok: true; scope: ArticleScope } | { ok: false; message: string; details?: unknown } {
+  const queryValue = scope.q ?? scope.query;
+  if (typeof queryValue !== "string" || queryValue.trim() === "") {
+    return {
+      ok: false,
+      message: "q is required",
+      details: { field: "scope.q" }
+    };
+  }
+
+  const query = queryValue.trim();
+  if (query.length > 256) {
+    return {
+      ok: false,
+      message: "q must be 256 characters or fewer",
+      details: { field: "scope.q", maxLength: 256 }
+    };
+  }
+
+  const source = parseReaderCommandSource(scope);
+  if (!source.ok) {
+    return source;
+  }
+
+  const state = parseSearchStateValue(scope.state);
+  if (state === null) {
+    return {
+      ok: false,
+      message: "state must be all, unread, read, favorites, or read_later",
+      details: { field: "scope.state" }
+    };
+  }
+
+  const from = parseSearchTimestampValue(scope.from);
+  if (from === null) {
+    return {
+      ok: false,
+      message: "from must be an ISO 8601 date or YYYY-MM-DD",
+      details: { field: "scope.from" }
+    };
+  }
+
+  const to = parseSearchTimestampValue(scope.to);
+  if (to === null) {
+    return {
+      ok: false,
+      message: "to must be an ISO 8601 date or YYYY-MM-DD",
+      details: { field: "scope.to" }
+    };
+  }
+
+  if (typeof from === "number" && typeof to === "number" && from > to) {
+    return {
+      ok: false,
+      message: "from must be before to",
+      details: { field: "scope.from" }
+    };
+  }
+
+  return {
+    ok: true,
+    scope: {
+      type: "search",
+      query,
+      state: state ?? "all",
+      ...(typeof from === "number" ? { from } : {}),
+      ...(typeof to === "number" ? { to } : {}),
+      ...source.source
+    }
+  };
+}
+
+function parseReaderCommandSource(
+  scope: Record<string, unknown>
+):
+  | { ok: true; source: { feedId?: string; folderId?: string } }
+  | { ok: false; message: string; details?: unknown } {
+  const feedId = parseOptionalScopeString(scope.feedId);
+  if (feedId === null) {
+    return {
+      ok: false,
+      message: "feedId must be a string",
+      details: { field: "scope.feedId" }
+    };
+  }
+
+  const folderId = parseOptionalScopeString(scope.folderId);
+  if (folderId === null) {
+    return {
+      ok: false,
+      message: "folderId must be a string",
+      details: { field: "scope.folderId" }
+    };
+  }
+
+  if (feedId && folderId) {
+    return {
+      ok: false,
+      message: "feedId and folderId cannot be used together",
+      details: { fields: ["scope.feedId", "scope.folderId"] }
+    };
+  }
+
+  return {
+    ok: true,
+    source: {
+      ...(feedId ? { feedId } : {}),
+      ...(folderId ? { folderId } : {})
+    }
+  };
+}
+
+function parseOptionalScopeString(value: unknown): string | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function parseArticleTimeWindowValue(
+  value: unknown
+): "all" | "24h" | "7d" | "30d" | undefined | null {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (value === "all" || value === "24h" || value === "7d" || value === "30d") {
+    return value;
+  }
+
+  return null;
+}
+
+function parseSearchStateValue(value: unknown): ArticleSearchState | undefined | null {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (
+    value === "all" ||
+    value === "unread" ||
+    value === "read" ||
+    value === "favorites" ||
+    value === "read_later"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function parseSearchTimestampValue(value: unknown): number | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || value.trim() === "") {
+    return value === "" ? undefined : null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function parseArticleTimeWindow(
   value: string | undefined,
   todayOnly: boolean | undefined
@@ -3880,6 +4176,14 @@ function sendAuthError(reply: FastifyReply, error: unknown) {
 
 function sendArticleActionError(reply: FastifyReply, error: unknown) {
   if (error instanceof ArticleActionServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendReaderCommandError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ReaderCommandServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

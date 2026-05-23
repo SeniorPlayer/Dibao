@@ -5,7 +5,7 @@
 当前 MVP 边界：
 
 - 单用户、自托管、本地 SQLite 数据库。
-- 支持首次设置密码、OPML 导入/导出、手动添加 RSS、后台刷新、文章动作、基础排序、OpenAI-compatible 和 Ollama embedding provider。
+- 支持首次设置密码、OPML 导入/导出、手动添加 RSS、后台刷新、文章动作、未读清账 Reader Command、基础排序、OpenAI-compatible 和 Ollama embedding provider。
 - 支持浏览器安装到主屏幕 / Dock，以及网络临时不可用时打开已缓存应用壳。
 - 不提供多用户、官方托管、OAuth、云同步、离线全文阅读或移动端 App 打包。
 
@@ -71,6 +71,8 @@ Dockerfile 内置 HEALTHCHECK 不依赖 `curl`/`wget`，而是用 Node `fetch()`
 3. 导入 OPML，或手动添加一个 RSS / Atom feed。
 4. Embedding provider 可以稍后配置；未配置时邸报继续使用基础排序。
 5. 进入阅读器后，可以刷新订阅源、打开文章、收藏、稍后读或标记不感兴趣。
+
+阅读器的“清账”会把当前 latest / recommended / search 范围内的未读文章批量标记为已读。它是 Reader Command，不是 Behavior Event，不会作为推荐正反馈，也不会清除收藏或稍后读状态。
 
 ## OPML、RSS 和刷新
 

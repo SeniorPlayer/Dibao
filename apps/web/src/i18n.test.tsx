@@ -317,6 +317,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor="cursor_1"
@@ -324,6 +325,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -331,6 +333,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={{
@@ -372,6 +375,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={true}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -379,6 +383,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -415,6 +420,7 @@ describe("web i18n", () => {
             warnings: []
           }}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
@@ -470,6 +476,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -477,6 +484,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -484,6 +492,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
@@ -514,6 +523,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -521,6 +531,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -528,6 +539,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
@@ -551,6 +563,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -558,6 +571,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -565,6 +579,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
@@ -595,6 +610,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -602,6 +618,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -609,6 +626,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
@@ -632,6 +650,7 @@ describe("web i18n", () => {
           isIgnoreTelemetryEnabled={false}
           isArticlesLoading={false}
           isLoadingMore={false}
+          isMarkingScopeRead={false}
           isRecommendationStatusLoading={false}
           loadMoreError={null}
           nextCursor={null}
@@ -639,6 +658,7 @@ describe("web i18n", () => {
           onReadLaterSortChange={() => undefined}
           onIgnoreArticle={() => undefined}
           onLoadMore={() => undefined}
+          onMarkScopeRead={() => undefined}
           onOpenSources={() => undefined}
           onExplainArticle={() => undefined}
           onSelectArticle={() => undefined}
@@ -646,6 +666,7 @@ describe("web i18n", () => {
           onUnreadOnlyChange={() => undefined}
           recommendationStatus={null}
           recommendationStatusError={null}
+          readerCommandError={null}
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}

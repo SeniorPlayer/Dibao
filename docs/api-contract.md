@@ -860,6 +860,83 @@ read_progress
 
 响应只返回最新 `state`；行为事件 ID 保留在服务端内部，不暴露给客户端。
 
+### POST /api/reader/commands/mark-scope-read
+
+Reader Command。将当前阅读器 scope 内的未读文章批量标记为已读。
+
+该接口需要认证。
+
+请求：
+
+```json
+{
+  "scope": {
+    "type": "article_list",
+    "view": "latest",
+    "feedId": "optional",
+    "folderId": "optional",
+    "timeWindow": "all"
+  }
+}
+```
+
+搜索 scope：
+
+```json
+{
+  "scope": {
+    "type": "search",
+    "q": "AI",
+    "feedId": "optional",
+    "folderId": "optional",
+    "from": "2026-05-01",
+    "to": "2026-05-23",
+    "state": "all"
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "data": {
+    "ok": true,
+    "commandId": "cmd_...",
+    "markedReadCount": 42
+  }
+}
+```
+
+语义约束：
+
+- `mark_scope_read` 是 Reader Command，不是 Behavior Event。
+- 它写入 `reader_command_events`，记录 command type、scope 和 result。
+- 它不写入 `behavior_events`，不作为 `mark_read` 正反馈。
+- 它不进入 profile event process，不更新兴趣簇，不触发强行为维护任务。
+- 它会更新 `article_states.read_at`、`article_states.reading_progress=1`、`article_states.updated_at`。
+- 它可以 enqueue ranking recalculation，使 read state 影响后续列表排序。
+- 收藏、点赞、稍后读、不感兴趣等状态不会被清除。
+- 当前批量操作只支持批量已读；不支持批量删除、批量收藏、批量不感兴趣。
+
+校验：
+
+- `scope.type` 必须是 `article_list` 或 `search`。
+- `article_list.view` 只能是 `latest` 或 `recommended`。
+- `article_list.timeWindow` 默认为 `all`，可选 `24h`、`7d`、`30d`。
+- `feedId` 与 `folderId` 不能同时传。
+- `search.q` 必填，trim 后最长 256。
+- `search.state` 默认为 `all`。
+- `search.from` / `search.to` 支持 ISO 或 `YYYY-MM-DD`；`from > to` 返回 `VALIDATION_ERROR`。
+
+兼容 alias：
+
+```text
+POST /api/articles/bulk/mark-read
+```
+
+该 alias 只转发同一个 `ReaderCommandService`，不得直接更新 SQL。
+
 ### GET /api/articles/:id/explanation
 
 获取推荐解释。

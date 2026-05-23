@@ -9,6 +9,7 @@ import type {
   ArticleRetentionCandidateRow,
   ArticleRetentionCleanupResult,
   ArticleRow,
+  ArticleScope,
   ArticleSearchInput,
   ArticleSearchResult,
   DibaoDatabase,
@@ -69,8 +70,10 @@ type ArticleDetailDbRow = ArticleReadDbRow & {
 
 export interface ArticleRepository {
   cleanupForRetention(articleIds: string[], now: number): ArticleRetentionCleanupResult;
+  countUnreadForScope(scope: ArticleScope): number;
   findById(id: string): ArticleRow | null;
   findDetailById(id: string, input?: { rankContext?: string }): ArticleDetailRow | null;
+  listUnreadArticleIdsForScope(scope: ArticleScope, limit?: number): string[];
   listEmbeddingCandidates(input: {
     embeddingIndexId: string;
     articleIds?: string[];
@@ -83,6 +86,7 @@ export interface ArticleRepository {
     limit?: number;
   }): ArticleRetentionCandidateRow[];
   list(input?: ArticleListInput): ArticleListResult;
+  markArticleIdsRead(articleIds: string[], now: number): number;
   search(input: ArticleSearchInput): ArticleSearchResult;
   upsert(input: UpsertArticleInput): ArticleRow;
   upsertContent(input: UpsertArticleContentInput): void;
@@ -93,6 +97,90 @@ export class SqliteArticleRepository implements ArticleRepository {
 
   constructor(private readonly db: DibaoDatabase) {
     this.fts = new SqliteArticleFtsIndex(db);
+  }
+
+  countUnreadForScope(scope: ArticleScope): number {
+    const candidates = buildArticleScopeUnreadCandidates(scope);
+    const row = this.db
+      .prepare(
+        `
+          ${candidates.sql}
+          select count(*) as count
+          from candidates
+        `
+      )
+      .get(...candidates.params) as { count: number } | undefined;
+
+    return row?.count ?? 0;
+  }
+
+  listUnreadArticleIdsForScope(scope: ArticleScope, limit?: number): string[] {
+    const candidates = buildArticleScopeUnreadCandidates(scope);
+    const limitClause =
+      typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? "limit ?" : "";
+    const params = limitClause ? [...candidates.params, limit] : candidates.params;
+    const rows = this.db
+      .prepare(
+        `
+          ${candidates.sql}
+          select article_id as articleId
+          from candidates
+          order by article_id
+          ${limitClause}
+        `
+      )
+      .all(...params) as Array<{ articleId: string }>;
+
+    return rows.map((row) => row.articleId);
+  }
+
+  markArticleIdsRead(articleIds: string[], now: number): number {
+    const uniqueArticleIds = uniqueStrings(articleIds);
+    if (uniqueArticleIds.length === 0) {
+      return 0;
+    }
+
+    const insertState = this.db.prepare(
+      `
+        insert into article_states (
+          article_id,
+          read_at,
+          favorited_at,
+          liked_at,
+          read_later_at,
+          hidden_at,
+          not_interested_at,
+          reading_progress,
+          last_opened_at,
+          updated_at
+        )
+        values (?, null, null, null, null, null, null, 0, null, ?)
+        on conflict(article_id) do nothing
+      `
+    );
+
+    for (const articleId of uniqueArticleIds) {
+      insertState.run(articleId, now);
+    }
+
+    let changed = 0;
+    for (const chunk of chunkStrings(uniqueArticleIds, 400)) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      changed += this.db
+        .prepare(
+          `
+            update article_states
+            set
+              read_at = ?,
+              reading_progress = 1,
+              updated_at = ?
+            where article_id in (${placeholders})
+          `
+        )
+        .run(now, now, ...chunk).changes;
+    }
+
+    return changed;
   }
 
   cleanupForRetention(articleIds: string[], now: number): ArticleRetentionCleanupResult {
@@ -623,6 +711,141 @@ export class SqliteArticleRepository implements ArticleRepository {
   }
 }
 
+type ArticleScopeUnreadCandidates = {
+  sql: string;
+  params: unknown[];
+};
+
+function buildArticleScopeUnreadCandidates(scope: ArticleScope): ArticleScopeUnreadCandidates {
+  if (scope.type === "search") {
+    return buildSearchUnreadCandidates(scope);
+  }
+
+  return buildArticleListUnreadCandidates(scope);
+}
+
+function buildArticleListUnreadCandidates(
+  scope: Extract<ArticleScope, { type: "article_list" }>
+): ArticleScopeUnreadCandidates {
+  const conditions = [
+    "a.deleted_at is null",
+    "a.status != 'deleted'",
+    "f.deleted_at is null",
+    "s.hidden_at is null",
+    "s.not_interested_at is null",
+    unreadArticleCondition()
+  ];
+  const params: unknown[] = [];
+
+  if (scope.feedId) {
+    conditions.push("a.feed_id = ?");
+    params.push(scope.feedId);
+  }
+
+  if (scope.folderId) {
+    conditions.push("f.folder_id = ?");
+    params.push(scope.folderId);
+  }
+
+  if (typeof scope.todayStartAt === "number" && typeof scope.todayEndAt === "number") {
+    conditions.push("coalesce(a.published_at, a.discovered_at) >= ?");
+    params.push(scope.todayStartAt);
+    conditions.push("coalesce(a.published_at, a.discovered_at) < ?");
+    params.push(scope.todayEndAt);
+  }
+
+  return {
+    sql: `
+      with candidates as (
+        select a.id as article_id
+        from articles a
+        join feeds f on f.id = a.feed_id
+        left join article_states s on s.article_id = a.id
+        where ${conditions.join("\n          and ")}
+      )
+    `,
+    params
+  };
+}
+
+function buildSearchUnreadCandidates(
+  scope: Extract<ArticleScope, { type: "search" }>
+): ArticleScopeUnreadCandidates {
+  const query = scope.query.trim();
+  if (!query || (scope.state ?? "all") === "read") {
+    return {
+      sql: `
+        with candidates as (
+          select a.id as article_id
+          from articles a
+          where 1 = 0
+        )
+      `,
+      params: []
+    };
+  }
+
+  const search = buildSearchHitsCte(query);
+  const conditions = [
+    "a.deleted_at is null",
+    "a.status != 'deleted'",
+    "f.deleted_at is null",
+    "s.hidden_at is null",
+    "s.not_interested_at is null",
+    unreadArticleCondition()
+  ];
+  const filterParams: unknown[] = [];
+
+  if (scope.feedId) {
+    conditions.push("a.feed_id = ?");
+    filterParams.push(scope.feedId);
+  }
+
+  if (scope.folderId) {
+    conditions.push("f.folder_id = ?");
+    filterParams.push(scope.folderId);
+  }
+
+  if (typeof scope.from === "number") {
+    conditions.push("coalesce(a.published_at, a.discovered_at) >= ?");
+    filterParams.push(scope.from);
+  }
+
+  if (typeof scope.to === "number") {
+    conditions.push("coalesce(a.published_at, a.discovered_at) <= ?");
+    filterParams.push(scope.to);
+  }
+
+  switch (scope.state ?? "all") {
+    case "favorites":
+      conditions.push("s.favorited_at is not null");
+      break;
+    case "read_later":
+      conditions.push("s.read_later_at is not null");
+      break;
+    case "unread":
+    case "all":
+      break;
+    case "read":
+      break;
+  }
+
+  return {
+    sql: `
+      ${search.sql},
+      candidates as (
+        select a.id as article_id
+        from articles a
+        join feeds f on f.id = a.feed_id
+        left join article_states s on s.article_id = a.id
+        join search_hits on search_hits.article_id = a.id
+        where ${conditions.join("\n          and ")}
+      )
+    `,
+    params: [...search.params, ...filterParams]
+  };
+}
+
 function baseArticleSelect(): string {
   return `
     select
@@ -895,6 +1118,18 @@ function containsHanScript(value: string): boolean {
 
 function escapeLikePattern(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function chunkStrings(values: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function orderByForSearch(sort: ArticleSearchInput["sort"]): string {

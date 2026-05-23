@@ -17,6 +17,9 @@ packages/db/migrations/007_embedding_usage_and_profile_evidence_snapshots.sql
 packages/db/migrations/008_interest_cluster_labels.sql
 packages/db/migrations/009_interest_cluster_merge_candidates.sql
 packages/db/migrations/011_remove_corpus_topic_snapshots.sql
+packages/db/migrations/012_gemini_embedding_provider.sql
+packages/db/migrations/013_embedding_provider_limits.sql
+packages/db/migrations/014_reader_command_events.sql
 ```
 
 实现时可以根据具体库和 sqlite-vec 版本调整语法，但不得改变这里定义的数据边界和所有权原则。
@@ -426,6 +429,43 @@ idx_behavior_events_created_at(created_at)
 
 - 行为日志用于更新画像，也用于生成长期行为摘要。
 - 旧文章物理删除前，可先将关键统计沉淀到摘要表。
+
+## Reader Commands
+
+### reader_command_events
+
+`014_reader_command_events` 新增。该表记录用户触发的阅读器状态管理命令，是 command audit，不是行为偏好日志。
+
+```text
+id TEXT PRIMARY KEY
+command_type TEXT NOT NULL
+scope_json TEXT NOT NULL
+result_json TEXT
+created_at INTEGER NOT NULL
+```
+
+索引：
+
+```text
+idx_reader_command_events_type(command_type)
+idx_reader_command_events_created_at(created_at)
+```
+
+当前 `command_type`：
+
+```text
+mark_scope_read
+```
+
+语义：
+
+- `mark_scope_read` 将一个 `article_list` 或 `search` scope 内的未读文章标记为已读。
+- 它只更新 reader state：`article_states.read_at`、`reading_progress=1`、`updated_at`。
+- 它不写入 `behavior_events`，不作为推荐正反馈。
+- 它不被 `profile_event_process` 消费，不更新兴趣簇。
+- 它可以触发 ranking recalculation，使已读状态影响后续列表排序。
+- `scope_json` 保存命令 scope；`result_json` 保存 `markedReadCount` 和必要的 affected article ids。
+- 当前批量命令只支持批量已读，不支持批量删除、批量收藏、批量不感兴趣。
 
 ### article_behavior_summaries
 

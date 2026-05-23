@@ -8,3 +8,4 @@ export * from "./feeds.js";
 export * from "./jobs.js";
 export * from "./profile.js";
 export * from "./ranking.js";
+export * from "./reader-commands.js";

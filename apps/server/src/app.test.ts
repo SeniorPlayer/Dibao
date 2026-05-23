@@ -4592,6 +4592,160 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("marks the current article list scope read through the reader command API", async () => {
+    const db = createFixtureDatabase();
+    const app = buildServer({ db, logger: false, now: () => 6000 });
+
+    try {
+      const before = await app.inject({
+        method: "GET",
+        url: "/api/articles?view=latest&unreadOnly=true"
+      });
+      const behaviorCountBefore = countTable(db, "behavior_events");
+
+      const response = await postJson(app, "/api/reader/commands/mark-scope-read", {
+        scope: {
+          type: "article_list",
+          view: "latest",
+          timeWindow: "all"
+        }
+      });
+      const after = await app.inject({
+        method: "GET",
+        url: "/api/articles?view=latest&unreadOnly=true"
+      });
+
+      expect(before.statusCode, before.body).toBe(200);
+      expect(before.json().meta).toEqual({ unreadCount: 1 });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data).toMatchObject({
+        ok: true,
+        markedReadCount: 1
+      });
+      expect(response.json().data.commandId).toMatch(/^cmd_/);
+      expect(after.statusCode, after.body).toBe(200);
+      expect(after.json().meta).toEqual({ unreadCount: 0 });
+      expect(after.json().data).toEqual([]);
+      expect(getArticleStateRow(db, "article_recommended")).toMatchObject({
+        readAt: 6000,
+        readingProgress: 1,
+        updatedAt: 6000
+      });
+      expect(countTable(db, "behavior_events")).toBe(behaviorCountBefore);
+      expect(listBehaviorEventTypes(db, "article_recommended")).not.toContain("mark_read");
+      expect(
+        db.prepare("select command_type as commandType from reader_command_events").get()
+      ).toEqual({ commandType: "mark_scope_read" });
+      expect(
+        db.prepare("select type from jobs where type = 'ranking_recalculate'").get()
+      ).toEqual({ type: "ranking_recalculate" });
+      expect(getArticleStateRow(db, "article_recent")).toMatchObject({
+        favoritedAt: 3500
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("marks submitted search scope read without profile behavior events", async () => {
+    const db = createEmptyDatabase();
+    const feeds = new SqliteFeedRepository(db);
+    const articles = new SqliteArticleRepository(db);
+    const app = buildServer({ db, logger: false, now: () => 8000 });
+
+    feeds.upsert({
+      id: "feed_reader_command_search",
+      title: "Reader Command Search",
+      feedUrl: "https://example.com/reader-command-search.xml",
+      now: 1000
+    });
+    for (const [id, title] of [
+      ["article_command_search_one", "Command search apple"],
+      ["article_command_search_two", "Command search apple second"]
+    ] as const) {
+      articles.upsert({
+        id,
+        feedId: "feed_reader_command_search",
+        url: `https://example.com/${id}`,
+        title,
+        summary: "Reader command search fixture",
+        publishedAt: 2000,
+        discoveredAt: 2000,
+        dedupeKey: id,
+        now: 2000
+      });
+      articles.upsertContent({
+        articleId: id,
+        contentText: `${title} body`,
+        extractionStatus: "success",
+        extractedAt: 2000,
+        now: 2000
+      });
+    }
+
+    try {
+      const response = await postJson(app, "/api/reader/commands/mark-scope-read", {
+        scope: {
+          type: "search",
+          q: "apple",
+          feedId: "feed_reader_command_search",
+          state: "all"
+        }
+      });
+      const unread = await app.inject({
+        method: "GET",
+        url: "/api/search?q=apple&state=unread"
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data.markedReadCount).toBe(2);
+      expect(unread.statusCode, unread.body).toBe(200);
+      expect(unread.json().meta).toEqual({ unreadCount: 0 });
+      expect(countTable(db, "behavior_events")).toBe(0);
+      expect(countTable(db, "reader_command_events")).toBe(1);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("validates reader command scopes and protects the route when auth is required", async () => {
+    const db = createFixtureDatabase();
+    const app = buildServer({ db, logger: false });
+    const protectedDb = createFixtureDatabase();
+    const protectedApp = buildRealServer({ db: protectedDb, logger: false });
+
+    try {
+      for (const payload of [
+        { scope: { type: "article_list", view: "favorites" } },
+        { scope: { type: "search", q: "" } },
+        { scope: { type: "missing" } }
+      ]) {
+        const response = await postJson(app, "/api/reader/commands/mark-scope-read", payload);
+        expect(response.statusCode, response.body).toBe(400);
+        expect(response.json().error.code).toBe("VALIDATION_ERROR");
+      }
+
+      const unauthenticated = await protectedApp.inject({
+        method: "POST",
+        url: "/api/reader/commands/mark-scope-read",
+        payload: {
+          scope: {
+            type: "article_list",
+            view: "latest"
+          }
+        }
+      });
+      expect(unauthenticated.statusCode, unauthenticated.body).toBe(401);
+    } finally {
+      await app.close();
+      await protectedApp.close();
+      db.close();
+      protectedDb.close();
+    }
+  });
+
   it("filters latest and recommended lists to articles from today", async () => {
     const db = createFixtureDatabase();
     const articles = new SqliteArticleRepository(db);
@@ -6271,6 +6425,13 @@ function getArticleStateRow(db: DibaoDatabase, articleId: string) {
       `
     )
     .get(articleId);
+}
+
+function countTable(db: DibaoDatabase, tableName: string): number {
+  const row = db.prepare(`select count(*) as count from ${tableName}`).get() as
+    | { count: number }
+    | undefined;
+  return row?.count ?? 0;
 }
 
 function listBehaviorEventTypes(db: DibaoDatabase, articleId: string): string[] {

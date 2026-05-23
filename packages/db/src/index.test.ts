@@ -14,6 +14,7 @@ import {
   SqliteJobRepository,
   SqliteProfileRepository,
   SqliteRankingRepository,
+  SqliteReaderCommandEventRepository,
   SqliteSessionRepository,
   SqliteVecVectorStore,
   checksumSql,
@@ -149,6 +150,7 @@ describe("db package", () => {
         "recommendation_maintenance_schedule_state",
         "embedding_usage_events",
         "interest_cluster_merge_candidates",
+        "reader_command_events",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -167,6 +169,7 @@ describe("db package", () => {
       expect(hasColumn(db, "interest_cluster_labels", "label_diagnostics_json")).toBe(true);
       expect(hasIndex(db, "idx_interest_cluster_labels_source")).toBe(true);
       expect(hasIndex(db, "idx_interest_cluster_merge_candidates_status")).toBe(true);
+      expect(hasIndex(db, "idx_reader_command_events_created_at")).toBe(true);
       expect(hasIndex(db, "idx_profile_terms_polarity_scope_weight")).toBe(true);
     } finally {
       db.close();
@@ -193,7 +196,8 @@ describe("db package", () => {
         "009",
         "011",
         "012",
-        "013"
+        "013",
+        "014"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
@@ -208,6 +212,7 @@ describe("db package", () => {
       expect(hasColumn(db, "embedding_providers", "requests_per_minute")).toBe(true);
       expect(hasColumn(db, "embedding_providers", "requests_per_day")).toBe(true);
       expect(hasColumn(db, "embedding_indexes", "text_max_chars")).toBe(true);
+      expect(hasTableOrView(db, "reader_command_events")).toBe(true);
 
       db.prepare(
         `
@@ -589,7 +594,8 @@ describe("db package", () => {
         "009",
         "011",
         "012",
-        "013"
+        "013",
+        "014"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -605,6 +611,7 @@ describe("db package", () => {
       expect(hasTableOrView(db, "embedding_usage_events")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_labels")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_merge_candidates")).toBe(true);
+      expect(hasTableOrView(db, "reader_command_events")).toBe(true);
     } finally {
       db.close();
     }
@@ -1327,6 +1334,131 @@ describe("db package", () => {
         nextOffset: null,
         unreadCount: 0
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves unread article scopes and marks ids read without behavior events", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const folders = new SqliteFeedFolderRepository(db);
+      const feeds = new SqliteFeedRepository(db);
+      const articles = new SqliteArticleRepository(db);
+      const actions = new SqliteArticleActionRepository(db);
+      const commandEvents = new SqliteReaderCommandEventRepository(db);
+
+      folders.upsert({ id: "folder_scope", title: "Scope Folder", now: 1000 });
+      feeds.upsert({
+        id: "feed_scope",
+        folderId: "folder_scope",
+        title: "Scope Feed",
+        feedUrl: "https://example.com/scope.xml",
+        now: 1000
+      });
+      feeds.upsert({
+        id: "feed_other_scope",
+        title: "Other Scope Feed",
+        feedUrl: "https://example.com/other-scope.xml",
+        now: 1000
+      });
+
+      for (const fixture of [
+        ["article_scope_recent", "feed_scope", "Scope recent alpha", 9_000],
+        ["article_scope_old", "feed_scope", "Scope old alpha", 1_000],
+        ["article_scope_other_feed", "feed_other_scope", "Scope other alpha", 9_100],
+        ["article_scope_favorite", "feed_scope", "Scope favorite alpha", 9_200],
+        ["article_scope_later", "feed_scope", "Scope later alpha", 9_300],
+        ["article_scope_hidden", "feed_scope", "Scope hidden alpha", 9_400],
+        ["article_scope_not_interested", "feed_scope", "Scope not interested alpha", 9_500]
+      ] as const) {
+        articles.upsert({
+          id: fixture[0],
+          feedId: fixture[1],
+          url: `https://example.com/${fixture[0]}`,
+          title: fixture[2],
+          summary: "Scope fixture",
+          publishedAt: fixture[3],
+          discoveredAt: fixture[3],
+          dedupeKey: fixture[0],
+          now: fixture[3]
+        });
+        articles.upsertContent({
+          articleId: fixture[0],
+          contentText: `${fixture[2]} body`,
+          extractionStatus: "success",
+          extractedAt: fixture[3],
+          now: fixture[3]
+        });
+      }
+
+      actions.record({ articleId: "article_scope_favorite", type: "favorite", now: 10_000 });
+      actions.record({ articleId: "article_scope_later", type: "read_later", now: 10_100 });
+      actions.record({ articleId: "article_scope_hidden", type: "hide", now: 10_200 });
+      actions.record({
+        articleId: "article_scope_not_interested",
+        type: "not_interested",
+        now: 10_300
+      });
+
+      const articleListScope = {
+        type: "article_list",
+        view: "latest",
+        folderId: "folder_scope",
+        timeWindow: "24h",
+        todayStartAt: 8_000,
+        todayEndAt: 11_000
+      } as const;
+      const searchScope = {
+        type: "search",
+        query: "alpha",
+        feedId: "feed_scope",
+        from: 8_000,
+        to: 11_000,
+        state: "all"
+      } as const;
+
+      expect(articles.countUnreadForScope(articleListScope)).toBe(1);
+      expect(articles.listUnreadArticleIdsForScope(articleListScope)).toEqual([
+        "article_scope_recent"
+      ]);
+      expect(articles.countUnreadForScope(searchScope)).toBe(1);
+      expect(articles.countUnreadForScope({ ...searchScope, state: "read" })).toBe(0);
+
+      const behaviorCountBefore = countTable(db, "behavior_events");
+      const affectedArticleIds = articles.listUnreadArticleIdsForScope(searchScope);
+      const markedReadCount = commandEvents.transaction(() => {
+        const count = articles.markArticleIdsRead(affectedArticleIds, 12_000);
+        commandEvents.record({
+          id: "cmd_scope_read",
+          commandType: "mark_scope_read",
+          scope: searchScope,
+          result: { markedReadCount: count, affectedArticleIds },
+          createdAt: 12_000
+        });
+        return count;
+      });
+
+      expect(markedReadCount).toBe(1);
+      expect(articles.countUnreadForScope(searchScope)).toBe(0);
+      expect(countTable(db, "behavior_events")).toBe(behaviorCountBefore);
+      expect(db.prepare("select command_type as commandType from reader_command_events").get()).toEqual({
+        commandType: "mark_scope_read"
+      });
+      expect(
+        db
+          .prepare(
+            "select read_later_at as readLaterAt from article_states where article_id = 'article_scope_later'"
+          )
+          .get()
+      ).toEqual({ readLaterAt: 10_100 });
+      expect(
+        db
+          .prepare(
+            "select favorited_at as favoritedAt from article_states where article_id = 'article_scope_favorite'"
+          )
+          .get()
+      ).toEqual({ favoritedAt: 10_000 });
     } finally {
       db.close();
     }
