@@ -98,6 +98,8 @@ export const zhCN = {
     setupSubmit: "完成设置",
     loginSubmit: "登录",
     submitting: "处理中",
+    telemetryLabel: "反馈数据以帮助开发者更好地优化邸报",
+    telemetryBody: "默认开启，仅用于错误诊断、性能分析和体验改进，可在设置中关闭。",
     logout: "退出",
     logoutTitle: "退出登录",
     usernameRequired: "请输入用户名。",
@@ -347,6 +349,12 @@ export const zhCN = {
         removeReadLaterOnReadComplete: "稍后读中的文章读完后，自动移出稍后读",
         cocoonLevel: "信息茧房水平",
         cocoonLevelHint: "1 表示更开放、更分散、更探索；10 表示更贴合、更稳定、更少扰动。所有级别都只在订阅源内排序，并始终尊重去重和明确负反馈。"
+      },
+      telemetry: {
+        title: "反馈遥测",
+        body: "控制是否向开发者发送用于优化邸报的错误、性能和体验反馈数据。",
+        enabledLabel: "反馈数据以帮助开发者更好地优化邸报",
+        enabledBody: "默认开启。关闭后，前端和服务端会停止发送新的 Sentry 遥测事件。"
       },
       reader: {
         title: "阅读",
@@ -1265,6 +1273,8 @@ export const enUS = {
     setupSubmit: "Finish setup",
     loginSubmit: "Log in",
     submitting: "Please wait",
+    telemetryLabel: "Share feedback data to help improve Dibao",
+    telemetryBody: "On by default. Used for error diagnostics, performance analysis, and product quality improvements. You can turn it off in Settings.",
     logout: "Log out",
     logoutTitle: "Log out",
     usernameRequired: "Enter your username.",
@@ -1515,6 +1525,12 @@ export const enUS = {
         removeReadLaterOnReadComplete: "Remove Read Later articles after you finish them",
         cocoonLevel: "Cocoon level",
         cocoonLevelHint: "1 is broader and more exploratory; 10 stays closer to your established interests. Every level only ranks articles from your subscribed feeds and still respects deduping and explicit negative feedback."
+      },
+      telemetry: {
+        title: "Feedback telemetry",
+        body: "Control whether Dibao sends error, performance, and experience feedback data to help developers improve the app.",
+        enabledLabel: "Share feedback data to help improve Dibao",
+        enabledBody: "On by default. Turning this off stops new Sentry telemetry events from the browser and server."
       },
       reader: {
         title: "Reading",
@@ -2416,6 +2432,8 @@ export const jaJP = {
     setupSubmit: "設定を完了",
     loginSubmit: "ログイン",
     submitting: "処理中",
+    telemetryLabel: "邸報の改善に役立つフィードバックデータを共有する",
+    telemetryBody: "既定でオンです。エラー診断、パフォーマンス分析、使い勝手の改善に使われます。設定でいつでもオフにできます。",
     logout: "ログアウト",
     logoutTitle: "ログアウト",
     usernameRequired: "ユーザー名を入力してください。",
@@ -2666,6 +2684,12 @@ export const jaJP = {
         removeReadLaterOnReadComplete: "あとで読むの記事を読み終えたら、あとで読むから外す",
         cocoonLevel: "パーソナライズ度",
         cocoonLevelHint: "1 はより開かれた分散的な探索、10 はより個人に合わせた安定的で控えめな変化です。どのレベルでも購読フィード内だけで並び替え、重複排除と明示的な低評価を尊重します。"
+      },
+      telemetry: {
+        title: "フィードバック送信",
+        body: "邸報の改善に役立てるため、エラー、パフォーマンス、利用体験に関するフィードバックデータを送信するかを管理します。",
+        enabledLabel: "邸報の改善に役立つフィードバックデータを共有する",
+        enabledBody: "既定でオンです。オフにすると、ブラウザーとサーバーから新しい Sentry テレメトリーイベントを送信しません。"
       },
       reader: {
         title: "読書",

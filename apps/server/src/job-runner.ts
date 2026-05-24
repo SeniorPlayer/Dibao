@@ -48,7 +48,6 @@ export class JobRunner {
       void this.drainDue().catch((error) => this.options.onError?.(error));
     }, this.pollIntervalMs);
     this.interval.unref?.();
-    void this.drainDue().catch((error) => this.options.onError?.(error));
   }
 
   stop(): void {

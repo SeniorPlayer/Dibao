@@ -148,7 +148,7 @@ export class SqliteArticleRepository implements ArticleRepository {
     return this.db.transaction(() => {
       const sampleArticleIds =
         sampleLimit > 0 ? this.listUnreadArticleIdsForScope(scope, sampleLimit + 1) : [];
-      this.db
+      const markedReadCount = this.db
         .prepare(
           `
             ${candidates.sql}
@@ -164,25 +164,8 @@ export class SqliteArticleRepository implements ArticleRepository {
               last_opened_at,
               updated_at
             )
-            select article_id, null, null, null, null, null, null, 0, null, ?
+            select article_id, ?, null, null, null, null, null, 1, null, ?
             from candidates
-          `
-        )
-        .run(...candidates.params, now);
-
-      const markedReadCount = this.db
-        .prepare(
-          `
-            ${candidates.sql}
-            update article_states
-            set
-              read_at = ?,
-              reading_progress = 1,
-              updated_at = ?
-            where article_id in (
-              select article_id
-              from candidates
-            )
           `
         )
         .run(...candidates.params, now, now).changes;
@@ -432,23 +415,24 @@ export class SqliteArticleRepository implements ArticleRepository {
       "s.not_interested_at is null"
     ];
     const rankContext = input.rankContext ?? BASE_RANK_CONTEXT;
-    const params: unknown[] = [rankContext, BASE_RANK_CONTEXT];
+    const rankParams: unknown[] = [rankContext, BASE_RANK_CONTEXT];
+    const filterParams: unknown[] = [];
 
     if (input.feedId) {
       baseConditions.push("a.feed_id = ?");
-      params.push(input.feedId);
+      filterParams.push(input.feedId);
     }
 
     if (input.folderId) {
       baseConditions.push("f.folder_id = ?");
-      params.push(input.folderId);
+      filterParams.push(input.folderId);
     }
 
     if (typeof input.todayStartAt === "number" && typeof input.todayEndAt === "number") {
       baseConditions.push("coalesce(a.published_at, a.discovered_at) >= ?");
-      params.push(input.todayStartAt);
+      filterParams.push(input.todayStartAt);
       baseConditions.push("coalesce(a.published_at, a.discovered_at) < ?");
-      params.push(input.todayEndAt);
+      filterParams.push(input.todayEndAt);
     }
 
     if (input.view === "favorites") {
@@ -459,7 +443,7 @@ export class SqliteArticleRepository implements ArticleRepository {
 
     const unreadCount = this.countForConditions(
       [...baseConditions, unreadArticleCondition()],
-      params
+      filterParams
     );
 
     const conditions = [...baseConditions];
@@ -485,7 +469,7 @@ export class SqliteArticleRepository implements ArticleRepository {
           offset ?
         `
       )
-      .all(...params, limit + 1, offset) as ArticleReadDbRow[];
+      .all(...rankParams, ...filterParams, limit + 1, offset) as ArticleReadDbRow[];
 
     const hasMore = rows.length > limit;
     const items = (hasMore ? rows.slice(0, limit) : rows).map(mapArticleListItem);
@@ -543,7 +527,6 @@ export class SqliteArticleRepository implements ArticleRepository {
     const unreadCount = this.countForSearchConditions(
       search,
       [...baseConditions, unreadArticleCondition()],
-      [rankContext, BASE_RANK_CONTEXT],
       filterParams
     );
 
@@ -602,7 +585,7 @@ export class SqliteArticleRepository implements ArticleRepository {
       .prepare(
         `
           select count(*) as count
-          ${baseArticleReadFrom()}
+          ${baseArticleFilterFrom()}
           where ${conditions.join(" and ")}
         `
       )
@@ -614,7 +597,6 @@ export class SqliteArticleRepository implements ArticleRepository {
   private countForSearchConditions(
     search: SearchHitsCte,
     conditions: string[],
-    rankParams: unknown[],
     filterParams: unknown[]
   ): number {
     const row = this.db
@@ -622,12 +604,12 @@ export class SqliteArticleRepository implements ArticleRepository {
         `
           ${search.sql}
           select count(*) as count
-          ${baseArticleReadFrom()}
+          ${baseArticleFilterFrom()}
           join search_hits on search_hits.article_id = a.id
           where ${conditions.join(" and ")}
         `
       )
-      .get(...search.params, ...rankParams, ...filterParams) as { count: number } | undefined;
+      .get(...search.params, ...filterParams) as { count: number } | undefined;
 
     return row?.count ?? 0;
   }
@@ -959,17 +941,7 @@ function baseArticleSelect(): string {
 
 function unreadArticleCondition(): string {
   return `
-    s.read_at is null
-    and coalesce(s.reading_progress, 0) = 0
-    and s.last_opened_at is null
-    and s.favorited_at is null
-    and s.liked_at is null
-    and s.read_later_at is null
-    and not exists (
-      select 1
-      from behavior_events unread_be
-      where unread_be.article_id = a.id
-    )
+    s.article_id is null
   `;
 }
 
@@ -1029,6 +1001,14 @@ function baseArticleReadFrom(): string {
     left join article_rank_scores base_rs
       on base_rs.article_id = a.id
       and base_rs.rank_context = ?
+  `;
+}
+
+function baseArticleFilterFrom(): string {
+  return `
+    from articles a
+    join feeds f on f.id = a.feed_id and f.deleted_at is null
+    left join article_states s on s.article_id = a.id
   `;
 }
 

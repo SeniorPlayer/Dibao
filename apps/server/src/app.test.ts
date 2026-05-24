@@ -2288,6 +2288,9 @@ describe("server API vertical slice", () => {
             markScrolledArticlesIgnored: true,
             removeReadLaterOnReadComplete: false
           },
+          telemetry: {
+            enabled: true
+          },
           retention: {
             retentionDays: 60,
             keepFavorites: true,
@@ -2338,6 +2341,9 @@ describe("server API vertical slice", () => {
           markScrolledArticlesIgnored: false,
           removeReadLaterOnReadComplete: true
         },
+        telemetry: {
+          enabled: false
+        },
         ranking: {
           cocoonLevel: 7
         }
@@ -2365,6 +2371,9 @@ describe("server API vertical slice", () => {
             behavior: {
               markScrolledArticlesIgnored: false,
               removeReadLaterOnReadComplete: true
+            },
+            telemetry: {
+              enabled: false
             },
             ranking: {
               cocoonLevel: 7
@@ -2401,6 +2410,9 @@ describe("server API vertical slice", () => {
             behavior: {
               markScrolledArticlesIgnored: false,
               removeReadLaterOnReadComplete: true
+            },
+            telemetry: {
+              enabled: false
             }
           }
         }
@@ -2435,6 +2447,11 @@ describe("server API vertical slice", () => {
         {
           behavior: {
             removeReadLaterOnReadComplete: "yes"
+          }
+        },
+        {
+          telemetry: {
+            enabled: "yes"
           }
         },
         {
@@ -5120,6 +5137,59 @@ describe("server API vertical slice", () => {
       expect(afterImpression.statusCode, afterImpression.body).toBe(200);
       expect(afterImpression.json().data).toEqual([]);
       expect(afterImpression.json().meta).toEqual({ unreadCount: 0 });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("keeps article list payloads compact while preserving reader body content", async () => {
+    const db = createFixtureDatabase();
+    const articles = new SqliteArticleRepository(db);
+    const longHtmlSummary = `<section>${"很长的列表摘要 ".repeat(80)}<strong>重点</strong></section>`;
+    articles.upsert({
+      id: "article_long_summary",
+      feedId: "feed_design",
+      url: "https://example.com/long-summary",
+      title: "Long summary fixture",
+      summary: longHtmlSummary,
+      publishedAt: 4500,
+      discoveredAt: 4500,
+      dedupeKey: "long_summary",
+      now: 4500
+    });
+    articles.upsertContent({
+      articleId: "article_long_summary",
+      contentHtml: "<article><p>完整正文 HTML</p></article>",
+      contentText: "完整正文纯文本不需要和 HTML 同时返回。",
+      extractionStatus: "success",
+      extractedAt: 4500,
+      now: 4500
+    });
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const list = await app.inject({
+        method: "GET",
+        url: "/api/articles?view=latest&limit=1"
+      });
+      expect(list.statusCode, list.body).toBe(200);
+      expect(list.json().data[0]).toMatchObject({
+        id: "article_long_summary",
+        summary: expect.not.stringContaining("<section>")
+      });
+      expect(list.json().data[0].summary.length).toBeLessThanOrEqual(363);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: "/api/articles/article_long_summary"
+      });
+      expect(detail.statusCode, detail.body).toBe(200);
+      expect(detail.json().data).toMatchObject({
+        contentHtml: "<article><p>完整正文 HTML</p></article>",
+        contentText: "完整正文纯文本不需要和 HTML 同时返回。"
+      });
+      expect(detail.json().data.summary.length).toBeLessThanOrEqual(363);
     } finally {
       await app.close();
       db.close();

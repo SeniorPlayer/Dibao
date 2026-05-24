@@ -162,6 +162,10 @@ import {
 } from "./retention-cleanup-job-service.js";
 import { SettingsService, SettingsServiceError } from "./settings-service.js";
 import {
+  attachServerTelemetryErrorHandler,
+  configureServerTelemetry
+} from "./telemetry.js";
+import {
   VectorIndexRebuildJobService,
   VECTOR_INDEX_REBUILD_JOB_TYPE
 } from "./vector-index-rebuild-job-service.js";
@@ -204,6 +208,7 @@ type FeedFolderParams = {
 type AuthCredentialBody = {
   username?: unknown;
   password?: unknown;
+  telemetryEnabled?: unknown;
 };
 
 type ChangePasswordBody = {
@@ -382,6 +387,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     settings,
     now: options.now
   });
+  configureServerTelemetry({
+    enabled: settingsService.getSettings().telemetry.enabled
+  });
+  attachServerTelemetryErrorHandler(app);
   const rankingService = new RecommendationRankingService({
     db,
     embeddings,
@@ -857,6 +866,16 @@ export function buildServer(options: BuildServerOptions = {}) {
 
     try {
       const session = await authService.setup(parsed.username, parsed.password, requestMeta(request));
+      if (parsed.telemetryEnabled !== undefined) {
+        const result = settingsService.updateSettings({
+          telemetry: {
+            enabled: parsed.telemetryEnabled
+          }
+        });
+        configureServerTelemetry({
+          enabled: result.settings.telemetry.enabled
+        });
+      }
       reply.header(
         "set-cookie",
         serializeSessionCookie(session.token, session.expiresAt, cookieOptions)
@@ -1158,6 +1177,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     try {
       const beforeRanking = settingsService.getSettings().ranking;
       const result = settingsService.updateSettings(request.body);
+      configureServerTelemetry({
+        enabled: result.settings.telemetry.enabled
+      });
       const afterRanking = result.settings.ranking;
       const rankingJob = rankingSettingsChanged(beforeRanking, afterRanking)
         ? rankingJobService.enqueueAll()
@@ -3896,7 +3918,7 @@ function parseDiscoverFeedBody(body: DiscoverFeedBody | undefined):
 }
 
 function parseAuthCredentialBody(body: AuthCredentialBody | undefined):
-  | { ok: true; username: string; password: string }
+  | { ok: true; username: string; password: string; telemetryEnabled?: boolean }
   | { ok: false; message: string; details?: unknown } {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, message: "request body must be an object" };
@@ -3918,10 +3940,25 @@ function parseAuthCredentialBody(body: AuthCredentialBody | undefined):
     };
   }
 
+  if (
+    Object.hasOwn(body, "telemetryEnabled") &&
+    typeof body.telemetryEnabled !== "boolean"
+  ) {
+    return {
+      ok: false,
+      message: "telemetryEnabled must be a boolean",
+      details: { field: "telemetryEnabled" }
+    };
+  }
+
+  const telemetryEnabled =
+    typeof body.telemetryEnabled === "boolean" ? body.telemetryEnabled : undefined;
+
   return {
     ok: true,
     username: body.username,
-    password: body.password
+    password: body.password,
+    telemetryEnabled
   };
 }
 
@@ -4448,7 +4485,7 @@ function mapArticleListItem(article: ArticleListItemRow) {
     title: article.title,
     url: article.url,
     author: article.author,
-    summary: article.summary,
+    summary: articleListSummaryPreview(article.summary),
     publishedAt: timestampToIso(article.publishedAt),
     discoveredAt: timestampToIsoValue(article.discoveredAt),
     state: article.state,
@@ -4464,13 +4501,41 @@ function mapArticleListItem(article: ArticleListItemRow) {
 }
 
 function mapArticleDetail(article: ArticleDetailRow) {
+  const hasBody = Boolean(article.contentHtml || article.contentText);
+
   return {
     ...mapArticleListItem(article),
     contentHtml: article.contentHtml,
     contentText: article.contentText,
+    summary: hasBody ? articleListSummaryPreview(article.summary) : article.summary,
     extractionStatus: article.extractionStatus,
     extractionError: article.extractionError
   };
+}
+
+function articleListSummaryPreview(summary: string | null): string | null {
+  if (!summary) {
+    return null;
+  }
+
+  const text = summary
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text) {
+    return null;
+  }
+
+  return text.length > 360 ? `${text.slice(0, 360)}...` : text;
 }
 
 function timestampToIso(value: number | null): string | null {

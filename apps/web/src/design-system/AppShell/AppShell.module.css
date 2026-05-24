@@ -129,6 +129,40 @@
   font-size: var(--text-sm);
 }
 
+.telemetrySwitch {
+  min-height: var(--target-min);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--color-ink);
+}
+
+.telemetrySwitch input {
+  min-width: 16px;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: initial;
+  padding: 0;
+  background: initial;
+  accent-color: var(--color-pine);
+}
+
+.telemetrySwitch strong,
+.telemetrySwitch small {
+  display: block;
+}
+
+.telemetrySwitch small {
+  margin-top: 2px;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  line-height: 1.45;
+}
+
 .authForm input:focus-visible,
 .managementForm input:focus-visible,
 .managementForm select:focus-visible,
@@ -1576,6 +1610,14 @@
 .settingsInlineStatus strong {
   color: var(--color-ink);
   font-size: var(--text-sm);
+}
+
+.settingsInlineStatus small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
 }
 
 .settingsInlineStatus input[type="checkbox"] {

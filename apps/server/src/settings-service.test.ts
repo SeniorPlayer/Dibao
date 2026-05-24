@@ -83,6 +83,9 @@ describe("settings service", () => {
         keepFavorites: true,
         keepReadLater: true
       },
+      telemetry: {
+        enabled: true
+      },
       ranking: {
         localLearningEnabled: true,
         localLearningShadowMode: false
@@ -97,6 +100,9 @@ describe("settings service", () => {
         retention: {
           keepFavorites: false,
           keepReadLater: false
+        },
+        telemetry: {
+          enabled: false
         }
       }).settings
     ).toMatchObject({
@@ -106,6 +112,9 @@ describe("settings service", () => {
       retention: {
         keepFavorites: false,
         keepReadLater: false
+      },
+      telemetry: {
+        enabled: false
       }
     });
   });

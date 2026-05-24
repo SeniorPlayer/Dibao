@@ -36,6 +36,7 @@ docker compose up --build -d
 | `DIBAO_FETCH_FULL_CONTENT_MAX_BYTES` | `3145728` | 全文抓取响应最大读取字节数。 |
 | `DIBAO_AUTH_MAX_FAILED_ATTEMPTS` | `5` | 同一用户名/IP 组合允许的连续登录失败次数；设为 `0` 可关闭限速。 |
 | `DIBAO_AUTH_LOCKOUT_MS` | `900000` | 登录失败达到阈值后的冷却时间；设为 `0` 可关闭限速。 |
+| `SENTRY_AUTH_TOKEN` | 未设置 | 可选，仅用于前端生产构建上传 source maps；本机构建也可放在被忽略的 `.env.sentry-build-plugin`。Sentry DSN 和项目标识写在代码常量中。 |
 
 健康检查使用匿名接口：
 

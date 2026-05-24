@@ -12,6 +12,7 @@ export const UI_LOCALE_SETTING_KEY = "ui.locale";
 export const UI_DEFAULT_HOME_VIEW_SETTING_KEY = "ui.defaultHomeView";
 export const READER_SETTINGS_KEY = "reader.settings";
 export const BEHAVIOR_SETTINGS_KEY = "behavior.settings";
+export const TELEMETRY_SETTINGS_KEY = "telemetry.settings";
 export const RECOMMENDATION_SETTINGS_KEY = "recommendation.settings";
 export const RECOMMENDATION_MAINTENANCE_SETTINGS_KEY = "recommendation.maintenanceSettings";
 
@@ -37,6 +38,9 @@ export type AppSettings = {
   behavior: {
     markScrolledArticlesIgnored: boolean;
     removeReadLaterOnReadComplete: boolean;
+  };
+  telemetry: {
+    enabled: boolean;
   };
   retention: {
     retentionDays: number;
@@ -89,6 +93,9 @@ const DEFAULT_HOME_VIEW: DefaultHomeView = "recommended";
 const DEFAULT_BEHAVIOR_SETTINGS = {
   markScrolledArticlesIgnored: true,
   removeReadLaterOnReadComplete: false
+} as const;
+const DEFAULT_TELEMETRY_SETTINGS = {
+  enabled: true
 } as const;
 const DEFAULT_RETENTION_SETTINGS = {
   keepFavorites: true,
@@ -145,6 +152,9 @@ type SettingsPatch = {
     markScrolledArticlesIgnored?: boolean;
     removeReadLaterOnReadComplete?: boolean;
   };
+  telemetry?: {
+    enabled?: boolean;
+  };
   ranking?: {
     cocoonLevel?: number;
     localLearningEnabled?: boolean;
@@ -190,6 +200,7 @@ export class SettingsService {
       },
       reader: this.readReaderSettings(),
       behavior: this.readBehaviorSettings(),
+      telemetry: this.readTelemetrySettings(),
       retention: {
         retentionDays: this.readRetentionDays(),
         ...this.readRetentionSettings()
@@ -264,6 +275,17 @@ export class SettingsService {
         {
           ...this.readBehaviorSettings(),
           ...patch.behavior
+        },
+        now
+      );
+    }
+
+    if (patch.telemetry?.enabled !== undefined) {
+      this.options.settings.setJson(
+        TELEMETRY_SETTINGS_KEY,
+        {
+          ...this.readTelemetrySettings(),
+          enabled: patch.telemetry.enabled
         },
         now
       );
@@ -362,6 +384,18 @@ export class SettingsService {
         typeof input.removeReadLaterOnReadComplete === "boolean"
           ? input.removeReadLaterOnReadComplete
           : DEFAULT_BEHAVIOR_SETTINGS.removeReadLaterOnReadComplete
+    };
+  }
+
+  private readTelemetrySettings(): AppSettings["telemetry"] {
+    const stored = this.options.settings.getJson<unknown>(TELEMETRY_SETTINGS_KEY);
+    const input = isPlainObject(stored) ? stored : {};
+
+    return {
+      enabled:
+        typeof input.enabled === "boolean"
+          ? input.enabled
+          : DEFAULT_TELEMETRY_SETTINGS.enabled
     };
   }
 
@@ -492,7 +526,15 @@ function parseSettingsPatch(body: unknown): SettingsPatch {
   const input = readBodyObject(body);
   const patch: SettingsPatch = {};
 
-  rejectUnknownKeys(input, ["ui", "reader", "retention", "behavior", "ranking", "recommendationMaintenance"]);
+  rejectUnknownKeys(input, [
+    "ui",
+    "reader",
+    "retention",
+    "behavior",
+    "telemetry",
+    "ranking",
+    "recommendationMaintenance"
+  ]);
 
   if (Object.hasOwn(input, "ui")) {
     patch.ui = parseUiPatch(input.ui);
@@ -508,6 +550,10 @@ function parseSettingsPatch(body: unknown): SettingsPatch {
 
   if (Object.hasOwn(input, "behavior")) {
     patch.behavior = parseBehaviorPatch(input.behavior);
+  }
+
+  if (Object.hasOwn(input, "telemetry")) {
+    patch.telemetry = parseTelemetryPatch(input.telemetry);
   }
 
   if (Object.hasOwn(input, "ranking")) {
@@ -635,6 +681,24 @@ function parseBehaviorPatch(value: unknown): SettingsPatch["behavior"] {
       });
     }
     patch.removeReadLaterOnReadComplete = input.removeReadLaterOnReadComplete;
+  }
+
+  return patch;
+}
+
+function parseTelemetryPatch(value: unknown): SettingsPatch["telemetry"] {
+  const input = readSectionObject(value, "telemetry");
+  rejectUnknownKeys(input, ["enabled"], "telemetry");
+
+  const patch: NonNullable<SettingsPatch["telemetry"]> = {};
+
+  if (Object.hasOwn(input, "enabled")) {
+    if (typeof input.enabled !== "boolean") {
+      throw validationError("telemetry.enabled must be a boolean", {
+        field: "telemetry.enabled"
+      });
+    }
+    patch.enabled = input.enabled;
   }
 
   return patch;

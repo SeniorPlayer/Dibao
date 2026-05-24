@@ -59,6 +59,11 @@ import {
 import styles from "./design-system/AppShell/AppShell.module.css";
 import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import { defaultLocale, useI18n, type Dictionary, type NavigationItemKey } from "./i18n.js";
+import {
+  configureClientTelemetry,
+  readStoredTelemetryPreference,
+  storeTelemetryPreference
+} from "./telemetry.js";
 
 const primaryNavigationItems: NavigationItemKey[] = [
   "recommended",
@@ -232,6 +237,9 @@ export function App() {
   const [setupSourceError, setSetupSourceError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(() =>
+    readStoredTelemetryPreference()
+  );
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -339,6 +347,8 @@ export function App() {
   const [pwaUpdateApply, setPwaUpdateApply] = useState<(() => void) | null>(null);
   const openedArticleIds = useRef(new Set<string>());
   const ignoredArticleIds = useRef(new Set<string>());
+  const ignoredArticleQueue = useRef<string[]>([]);
+  const isSendingIgnoredArticle = useRef(false);
   const articleStateById = useRef(new Map<string, ArticleState>());
   const locallyUpdatedArticleIds = useRef(new Set<string>());
   const articleRequestVersion = useRef(0);
@@ -696,6 +706,8 @@ export function App() {
     (settings: AppSettings) => {
       setAppSettings(settings);
       setLocale(settings.ui.locale);
+      setTelemetryEnabled(settings.telemetry.enabled);
+      configureClientTelemetry(settings.telemetry.enabled);
     },
     [setLocale]
   );
@@ -1233,6 +1245,12 @@ export function App() {
     t.errors.api
   ]);
 
+  function handleTelemetryEnabledChange(enabled: boolean) {
+    setTelemetryEnabled(enabled);
+    storeTelemetryPreference(enabled);
+    configureClientTelemetry(enabled);
+  }
+
   async function handleAuthSubmit(mode: AuthMode, username: string, password: string) {
     if (!username.trim()) {
       setAuthError(t.auth.usernameRequired);
@@ -1249,7 +1267,7 @@ export function App() {
 
     try {
       if (mode === "setup") {
-        await dibaoApi.setupAuth(username, password);
+        await dibaoApi.setupAuth(username, password, telemetryEnabled);
         resetReaderState();
         setAppStage({ type: "setup-sources" });
       } else {
@@ -1998,7 +2016,37 @@ export function App() {
     }
   }
 
-  async function handleIgnoreArticle(articleId: string) {
+  function handleIgnoreArticle(articleId: string) {
+    if (
+      ignoredArticleIds.current.has(articleId) ||
+      ignoredArticleQueue.current.includes(articleId)
+    ) {
+      return;
+    }
+
+    ignoredArticleQueue.current.push(articleId);
+    void drainIgnoredArticleQueue();
+  }
+
+  async function drainIgnoredArticleQueue() {
+    if (isSendingIgnoredArticle.current) {
+      return;
+    }
+
+    isSendingIgnoredArticle.current = true;
+    try {
+      while (ignoredArticleQueue.current.length > 0) {
+        const articleId = ignoredArticleQueue.current.shift();
+        if (articleId) {
+          await postIgnoredArticle(articleId);
+        }
+      }
+    } finally {
+      isSendingIgnoredArticle.current = false;
+    }
+  }
+
+  async function postIgnoredArticle(articleId: string) {
     const article = articles.find((candidate) => candidate.id === articleId);
     const interactionStatus = article ? articleInteractionStatusForState(article.state) : "unseen";
 
@@ -2247,7 +2295,9 @@ export function App() {
           error={authError}
           isSubmitting={isAuthSubmitting}
           mode={appStage.type === "login" ? "login" : "setup"}
+          onTelemetryEnabledChange={handleTelemetryEnabledChange}
           onSubmit={handleAuthSubmit}
+          telemetryEnabled={telemetryEnabled}
         />
       </main>
     );
@@ -2756,7 +2806,9 @@ export function AuthGatePanel(props: {
   error?: string | null;
   isSubmitting: boolean;
   mode: AuthMode | "loading";
+  onTelemetryEnabledChange?: (enabled: boolean) => void;
   onSubmit?: (mode: AuthMode, username: string, password: string) => void;
+  telemetryEnabled?: boolean;
 }) {
   const { t } = useI18n();
   const [username, setUsername] = useState("");
@@ -2820,6 +2872,20 @@ export function AuthGatePanel(props: {
           type="password"
           value={password}
         />
+        {props.mode === "setup" ? (
+          <label className={styles.telemetrySwitch} htmlFor="auth-telemetry-enabled">
+            <input
+              checked={props.telemetryEnabled ?? true}
+              id="auth-telemetry-enabled"
+              onChange={(event) => props.onTelemetryEnabledChange?.(event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>{t.auth.telemetryLabel}</strong>
+              <small>{t.auth.telemetryBody}</small>
+            </span>
+          </label>
+        ) : null}
         <button className={styles.primaryButton} disabled={props.isSubmitting} type="submit">
           {props.isSubmitting ? t.auth.submitting : submitLabel}
         </button>
@@ -3173,6 +3239,7 @@ type SettingsDraft = {
   defaultHomeView: AppSettings["ui"]["defaultHomeView"];
   markScrolledArticlesIgnored: boolean;
   removeReadLaterOnReadComplete: boolean;
+  telemetryEnabled: boolean;
   fontSize: string;
   lineHeight: string;
   paragraphGap: string;
@@ -3577,6 +3644,30 @@ export function SettingsWorkspace(props: {
             value={draft.cocoonLevel}
           />
           <p className={styles.managementHint}>{t.settings.sections.behavior.cocoonLevelHint}</p>
+        </section>
+
+        <section className={classNames(styles.settingsSection, "settings-card")} aria-labelledby="settings-telemetry-title">
+          <div>
+            <h3 id="settings-telemetry-title">{t.settings.sections.telemetry.title}</h3>
+            <p>{t.settings.sections.telemetry.body}</p>
+          </div>
+          <label className={styles.settingsInlineStatus} htmlFor="settings-telemetry-enabled">
+            <span>
+              <strong>{t.settings.sections.telemetry.enabledLabel}</strong>
+              <small>{t.settings.sections.telemetry.enabledBody}</small>
+            </span>
+            <input
+              checked={draft.telemetryEnabled}
+              id="settings-telemetry-enabled"
+              onChange={(event) =>
+                applyDraft({
+                  ...draft,
+                  telemetryEnabled: event.target.checked
+                })
+              }
+              type="checkbox"
+            />
+          </label>
         </section>
 
         <section className={classNames(styles.settingsSection, "settings-card", "reader-settings-card")} aria-labelledby="settings-reader-title">
@@ -6914,6 +7005,7 @@ function draftForSettings(settings: AppSettings): SettingsDraft {
     defaultHomeView: settings.ui.defaultHomeView,
     markScrolledArticlesIgnored: settings.behavior.markScrolledArticlesIgnored,
     removeReadLaterOnReadComplete: settings.behavior.removeReadLaterOnReadComplete,
+    telemetryEnabled: settings.telemetry.enabled,
     fontSize: String(settings.reader.fontSize),
     lineHeight: String(settings.reader.lineHeight),
     paragraphGap: String(settings.reader.paragraphGap),
@@ -7073,6 +7165,10 @@ function parseSettingsDraft(
       markScrolledArticlesIgnored: draft.markScrolledArticlesIgnored,
       removeReadLaterOnReadComplete: draft.removeReadLaterOnReadComplete
     },
+    telemetry: {
+      ...current.telemetry,
+      enabled: draft.telemetryEnabled
+    },
     retention: {
       ...current.retention,
       retentionDays,
@@ -7102,6 +7198,9 @@ function parseSettingsDraft(
       behavior: {
         markScrolledArticlesIgnored: draft.markScrolledArticlesIgnored,
         removeReadLaterOnReadComplete: draft.removeReadLaterOnReadComplete
+      },
+      telemetry: {
+        enabled: draft.telemetryEnabled
       },
       retention: {
         retentionDays,

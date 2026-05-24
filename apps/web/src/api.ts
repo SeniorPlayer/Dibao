@@ -318,6 +318,9 @@ export type AppSettings = {
     markScrolledArticlesIgnored: boolean;
     removeReadLaterOnReadComplete: boolean;
   };
+  telemetry: {
+    enabled: boolean;
+  };
   retention: {
     retentionDays: number;
     keepFavorites: boolean;
@@ -362,6 +365,9 @@ export type UpdateSettingsInput = {
   behavior?: {
     markScrolledArticlesIgnored?: boolean;
     removeReadLaterOnReadComplete?: boolean;
+  };
+  telemetry?: {
+    enabled?: boolean;
   };
   retention?: {
     retentionDays?: number;
@@ -811,6 +817,9 @@ export const defaultAppSettings: AppSettings = {
     markScrolledArticlesIgnored: true,
     removeReadLaterOnReadComplete: false
   },
+  telemetry: {
+    enabled: true
+  },
   retention: {
     retentionDays: 60,
     keepFavorites: true,
@@ -943,11 +952,20 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (await request<AuthSession>("/api/auth/session")).data;
     },
 
-    async setupAuth(username: string, password: string): Promise<AuthOkResponse> {
+    async setupAuth(
+      username: string,
+      password: string,
+      telemetryEnabled?: boolean
+    ): Promise<AuthOkResponse> {
+      const body =
+        telemetryEnabled === undefined
+          ? { username, password }
+          : { username, password, telemetryEnabled };
+
       return (
         await request<AuthOkResponse>("/api/auth/setup", {
           method: "POST",
-          body: JSON.stringify({ username, password })
+          body: JSON.stringify(body)
         })
       ).data;
     },
