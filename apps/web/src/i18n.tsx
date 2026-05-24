@@ -383,9 +383,7 @@ export const zhCN = {
         xAccount: "X 账号",
         blog: "作者博客",
         homepage: "项目主页",
-        github: "项目 GitHub",
-        versionSyncHint:
-          "当前版本号来自 @dibao/shared 的 dibaoVersion；发布前会由测试校验它与 package.json version 一致。"
+        github: "项目 GitHub"
       },
       provider: {
         title: "智能能力",
@@ -1574,9 +1572,7 @@ export const enUS = {
         xAccount: "X account",
         blog: "Author blog",
         homepage: "Project homepage",
-        github: "Project GitHub",
-        versionSyncHint:
-          "The displayed version comes from @dibao/shared dibaoVersion; release tests verify it matches package.json version."
+        github: "Project GitHub"
       },
       provider: {
         title: "Intelligence",
@@ -2748,9 +2744,7 @@ export const jaJP = {
         xAccount: "X アカウント",
         blog: "作者ブログ",
         homepage: "プロジェクトサイト",
-        github: "プロジェクト GitHub",
-        versionSyncHint:
-          "表示バージョンは @dibao/shared の dibaoVersion から取得します。リリース時のテストで package.json version との一致を検証します。"
+        github: "プロジェクト GitHub"
       },
       provider: {
         title: "インテリジェンス",

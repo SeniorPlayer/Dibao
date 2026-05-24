@@ -3804,7 +3804,6 @@ export function SettingsWorkspace(props: {
               </dd>
             </div>
           </dl>
-          <p className={styles.managementHint}>{t.settings.sections.about.versionSyncHint}</p>
         </section>
 
         <section className={classNames(styles.settingsSection, "settings-card", "provider-settings-card")} aria-labelledby="settings-provider-title">
