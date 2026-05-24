@@ -1,0 +1,10 @@
+{
+  "dsn": "",
+  "org": "",
+  "project": "",
+  "authToken": "",
+  "tracesSampleRate": 0.1,
+  "devTracesSampleRate": 1,
+  "replaysSessionSampleRate": 0.1,
+  "replaysOnErrorSampleRate": 1
+}

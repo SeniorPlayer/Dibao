@@ -36,7 +36,9 @@ docker compose up --build -d
 | `DIBAO_FETCH_FULL_CONTENT_MAX_BYTES` | `3145728` | 全文抓取响应最大读取字节数。 |
 | `DIBAO_AUTH_MAX_FAILED_ATTEMPTS` | `5` | 同一用户名/IP 组合允许的连续登录失败次数；设为 `0` 可关闭限速。 |
 | `DIBAO_AUTH_LOCKOUT_MS` | `900000` | 登录失败达到阈值后的冷却时间；设为 `0` 可关闭限速。 |
-| `SENTRY_AUTH_TOKEN` | 未设置 | 可选，仅用于前端生产构建上传 source maps；本机构建也可放在被忽略的 `.env.sentry-build-plugin`。Sentry DSN 和项目标识写在代码常量中。 |
+| `DIBAO_SENTRY_CONFIG` | 未设置 | 可选，指向私有 Sentry 构建配置 JSON。默认读取被忽略的 `config/sentry.json`；示例见 `config/sentry.example.json`。 |
+| `DIBAO_SENTRY_DSN` | 未设置 | 可选，覆盖私有 Sentry 配置中的 DSN。未设置 DSN 时，遥测开关仍显示，但 Sentry SDK 不会初始化。 |
+| `SENTRY_AUTH_TOKEN` | 未设置 | 可选，仅用于前端生产构建上传 source maps；也可放在私有 `config/sentry.json` 的 `authToken` 字段。 |
 
 健康检查使用匿名接口：
 

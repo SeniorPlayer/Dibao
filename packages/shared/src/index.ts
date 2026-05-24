@@ -1,21 +1,75 @@
 export const dibaoVersion = "0.1.0";
 
-export const dibaoSentryConfig = {
-  dsn: "https://c1995e42a000cc801d61d097be748759@o4511442089541632.ingest.us.sentry.io/4511442099044352",
-  org: "akashio",
-  project: "dibao",
+export type DibaoSentryConfig = {
+  dsn: string;
+  org: string;
+  project: string;
+  tracesSampleRate: number;
+  devTracesSampleRate: number;
+  replaysSessionSampleRate: number;
+  replaysOnErrorSampleRate: number;
+};
+
+declare const __DIBAO_SENTRY_CONFIG__: Partial<DibaoSentryConfig> | undefined;
+
+export const defaultDibaoSentryConfig: DibaoSentryConfig = {
+  dsn: "",
+  org: "",
+  project: "",
   tracesSampleRate: 0.1,
   devTracesSampleRate: 1.0,
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1.0
 } as const;
 
-export function hasDibaoSentryDsn(): boolean {
-  return dibaoSentryConfig.dsn.length > 0;
+export const dibaoSentryConfig = normalizeDibaoSentryConfig(readInjectedDibaoSentryConfig());
+
+export function normalizeDibaoSentryConfig(
+  input: Partial<DibaoSentryConfig> | undefined
+): DibaoSentryConfig {
+  return {
+    dsn: stringValue(input?.dsn, defaultDibaoSentryConfig.dsn),
+    org: stringValue(input?.org, defaultDibaoSentryConfig.org),
+    project: stringValue(input?.project, defaultDibaoSentryConfig.project),
+    tracesSampleRate: sampleRateValue(
+      input?.tracesSampleRate,
+      defaultDibaoSentryConfig.tracesSampleRate
+    ),
+    devTracesSampleRate: sampleRateValue(
+      input?.devTracesSampleRate,
+      defaultDibaoSentryConfig.devTracesSampleRate
+    ),
+    replaysSessionSampleRate: sampleRateValue(
+      input?.replaysSessionSampleRate,
+      defaultDibaoSentryConfig.replaysSessionSampleRate
+    ),
+    replaysOnErrorSampleRate: sampleRateValue(
+      input?.replaysOnErrorSampleRate,
+      defaultDibaoSentryConfig.replaysOnErrorSampleRate
+    )
+  };
 }
 
-export function hasDibaoSentrySourceMapProject(): boolean {
-  return dibaoSentryConfig.org.length > 0 && dibaoSentryConfig.project.length > 0;
+export function hasDibaoSentryDsn(config = dibaoSentryConfig): boolean {
+  return config.dsn.length > 0;
+}
+
+export function hasDibaoSentrySourceMapProject(config = dibaoSentryConfig): boolean {
+  return config.org.length > 0 && config.project.length > 0;
+}
+
+function readInjectedDibaoSentryConfig(): Partial<DibaoSentryConfig> | undefined {
+  return typeof __DIBAO_SENTRY_CONFIG__ === "undefined" ? undefined : __DIBAO_SENTRY_CONFIG__;
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function sampleRateValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : fallback;
 }
 
 export type ApiSuccess<T> = {

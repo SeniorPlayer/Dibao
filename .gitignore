@@ -6,6 +6,8 @@ build/
 .env
 .env.*
 !.env.example
+.dibao/
+config/sentry.json
 *.log
 playwright-report/
 test-results/

@@ -2,9 +2,11 @@
 .git
 .github
 .tmp
+.dibao
 .env
 .env.*
 !.env.example
+config/sentry.json
 coverage
 dist
 node_modules

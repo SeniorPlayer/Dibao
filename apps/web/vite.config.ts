@@ -6,13 +6,30 @@ import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { dibaoVersion } from "@dibao/shared";
 import { defineConfig } from "vite";
 
-const dibaoSentrySourceMapProject = {
-  org: "akashio",
-  project: "dibao"
-} as const;
-
 const webConfigDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(webConfigDir, "../..");
+
+type SentryBuildConfig = {
+  dsn: string;
+  org: string;
+  project: string;
+  authToken: string;
+  tracesSampleRate: number;
+  devTracesSampleRate: number;
+  replaysSessionSampleRate: number;
+  replaysOnErrorSampleRate: number;
+};
+
+const defaultSentryConfig: SentryBuildConfig = {
+  dsn: "",
+  org: "",
+  project: "",
+  authToken: "",
+  tracesSampleRate: 0.1,
+  devTracesSampleRate: 1,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1
+};
 
 function readSentryAuthToken(): string | undefined {
   const envToken = process.env.SENTRY_AUTH_TOKEN?.trim();
@@ -52,15 +69,72 @@ function readSentryAuthToken(): string | undefined {
   return undefined;
 }
 
-const sentryAuthToken = readSentryAuthToken();
+function readSentryConfig(): SentryBuildConfig {
+  const configPath = process.env.DIBAO_SENTRY_CONFIG
+    ? resolve(repoRoot, process.env.DIBAO_SENTRY_CONFIG)
+    : resolve(repoRoot, "config/sentry.json");
+
+  let fileConfig: Partial<SentryBuildConfig> = {};
+  if (existsSync(configPath)) {
+    fileConfig = JSON.parse(readFileSync(configPath, "utf8")) as Partial<SentryBuildConfig>;
+  }
+
+  return {
+    dsn: stringValue(process.env.DIBAO_SENTRY_DSN ?? fileConfig.dsn, defaultSentryConfig.dsn),
+    org: stringValue(
+      process.env.SENTRY_ORG ?? process.env.DIBAO_SENTRY_ORG ?? fileConfig.org,
+      defaultSentryConfig.org
+    ),
+    project: stringValue(
+      process.env.SENTRY_PROJECT ?? process.env.DIBAO_SENTRY_PROJECT ?? fileConfig.project,
+      defaultSentryConfig.project
+    ),
+    authToken: stringValue(fileConfig.authToken, defaultSentryConfig.authToken),
+    tracesSampleRate: sampleRateValue(fileConfig.tracesSampleRate, defaultSentryConfig.tracesSampleRate),
+    devTracesSampleRate: sampleRateValue(
+      fileConfig.devTracesSampleRate,
+      defaultSentryConfig.devTracesSampleRate
+    ),
+    replaysSessionSampleRate: sampleRateValue(
+      fileConfig.replaysSessionSampleRate,
+      defaultSentryConfig.replaysSessionSampleRate
+    ),
+    replaysOnErrorSampleRate: sampleRateValue(
+      fileConfig.replaysOnErrorSampleRate,
+      defaultSentryConfig.replaysOnErrorSampleRate
+    )
+  };
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function sampleRateValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : fallback;
+}
+
+const sentryConfig = readSentryConfig();
+const sentryAuthToken = (readSentryAuthToken() ?? sentryConfig.authToken) || undefined;
 const dibaoSentryRelease = `dibao@${dibaoVersion}`;
 const sentrySourceMapsEnabled = Boolean(
-  sentryAuthToken &&
-    dibaoSentrySourceMapProject.org &&
-    dibaoSentrySourceMapProject.project
+  sentryAuthToken && sentryConfig.org && sentryConfig.project
 );
 
 export default defineConfig({
+  define: {
+    __DIBAO_SENTRY_CONFIG__: JSON.stringify({
+      dsn: sentryConfig.dsn,
+      org: sentryConfig.org,
+      project: sentryConfig.project,
+      tracesSampleRate: sentryConfig.tracesSampleRate,
+      devTracesSampleRate: sentryConfig.devTracesSampleRate,
+      replaysSessionSampleRate: sentryConfig.replaysSessionSampleRate,
+      replaysOnErrorSampleRate: sentryConfig.replaysOnErrorSampleRate
+    })
+  },
   build: {
     sourcemap: sentrySourceMapsEnabled
   },
@@ -69,8 +143,8 @@ export default defineConfig({
     ...(sentrySourceMapsEnabled
       ? [
           sentryVitePlugin({
-            org: dibaoSentrySourceMapProject.org,
-            project: dibaoSentrySourceMapProject.project,
+            org: sentryConfig.org,
+            project: sentryConfig.project,
             authToken: sentryAuthToken,
             release: {
               name: dibaoSentryRelease,
