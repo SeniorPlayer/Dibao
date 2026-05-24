@@ -324,7 +324,14 @@ describe("web API client", () => {
         ranking: {
           preferFreshness: 0.5,
           preferSource: 0.5,
-          preferDiversity: 0.5
+          preferDiversity: 0.5,
+          cocoonLevel: 5,
+          maxPositiveInterestClusters: 48,
+          maxNegativeInterestClusters: 32,
+          localLearningEnabled: true,
+          localLearningShadowMode: false,
+          explorationEnabled: true,
+          evaluationEnabled: false
         }
       };
 
@@ -369,6 +376,10 @@ describe("web API client", () => {
         retention: {
           retentionDays: 45,
           keepFavorites: false
+        },
+        ranking: {
+          maxPositiveInterestClusters: 48,
+          maxNegativeInterestClusters: 32
         }
       })
     ).resolves.toMatchObject({
@@ -400,6 +411,10 @@ describe("web API client", () => {
           retention: {
             retentionDays: 45,
             keepFavorites: false
+          },
+          ranking: {
+            maxPositiveInterestClusters: 48,
+            maxNegativeInterestClusters: 32
           }
         }
       }

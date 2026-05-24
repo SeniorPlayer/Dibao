@@ -967,6 +967,12 @@ describe("web i18n", () => {
     expect(html).toContain("查看算法透明说明");
     expect(html).toContain("稍后读中的文章读完后，自动移出稍后读");
     expect(html).toContain("type=\"range\"");
+    expect(html).toContain("兴趣簇上限");
+    expect(html).toContain("低配 VPS：24 / 16");
+    expect(html).toContain("中配 NAS：48 / 32");
+    expect(html).toContain("正向兴趣簇");
+    expect(html).toContain("负向兴趣簇");
+    expect(html).toContain("不会按比例增加外部 Embedding 调用");
     expect(html).toContain("字号");
     expect(html).toContain("行高");
     expect(html).toContain("段距");
@@ -980,6 +986,8 @@ describe("web i18n", () => {
     expect(html).toContain("https://1q43.blog");
     expect(html).toContain("https://dibao.app");
     expect(html).toContain("https://github.com/Pls-1q43/dibao");
+    expect(html).toContain("控制是否向开发者发送用于优化邸报的错误、性能和体验反馈数据。");
+    expect(html).not.toContain("反馈遥测");
     expect(html).toContain("智能能力");
     expect(html).toContain("当前未启用 Provider");
     expect(html).toContain("保存配置档");
@@ -994,6 +1002,7 @@ describe("web i18n", () => {
     expect(html).toContain("QPD");
     expect(html).toContain("新的向量空间");
     expect(html).toContain("测试连接");
+    expect(html.indexOf("智能能力")).toBeLessThan(html.indexOf("关于"));
   });
 
   it("renders provider connection and embedding job status separately", () => {

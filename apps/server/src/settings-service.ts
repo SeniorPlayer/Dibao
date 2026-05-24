@@ -52,6 +52,8 @@ export type AppSettings = {
     preferSource: number;
     preferDiversity: number;
     cocoonLevel: number;
+    maxPositiveInterestClusters: number;
+    maxNegativeInterestClusters: number;
     localLearningEnabled: boolean;
     localLearningShadowMode: boolean;
     explorationEnabled: boolean;
@@ -106,6 +108,8 @@ const DEFAULT_RANKING_SETTINGS = {
   preferSource: 0.5,
   preferDiversity: 0.5,
   cocoonLevel: 5,
+  maxPositiveInterestClusters: 24,
+  maxNegativeInterestClusters: 16,
   localLearningEnabled: true,
   localLearningShadowMode: false,
   explorationEnabled: true,
@@ -157,6 +161,8 @@ type SettingsPatch = {
   };
   ranking?: {
     cocoonLevel?: number;
+    maxPositiveInterestClusters?: number;
+    maxNegativeInterestClusters?: number;
     localLearningEnabled?: boolean;
     localLearningShadowMode?: boolean;
     explorationEnabled?: boolean;
@@ -444,6 +450,18 @@ export class SettingsService {
         1,
         10
       ),
+      maxPositiveInterestClusters: readIntegerInRange(
+        input.maxPositiveInterestClusters,
+        DEFAULT_RANKING_SETTINGS.maxPositiveInterestClusters,
+        8,
+        192
+      ),
+      maxNegativeInterestClusters: readIntegerInRange(
+        input.maxNegativeInterestClusters,
+        DEFAULT_RANKING_SETTINGS.maxNegativeInterestClusters,
+        4,
+        128
+      ),
       localLearningEnabled:
         typeof input.localLearningEnabled === "boolean"
           ? input.localLearningEnabled
@@ -628,6 +646,8 @@ function parseRankingPatch(value: unknown): NonNullable<SettingsPatch["ranking"]
   const input = readSectionObject(value, "ranking");
   rejectUnknownKeys(input, [
     "cocoonLevel",
+    "maxPositiveInterestClusters",
+    "maxNegativeInterestClusters",
     "localLearningEnabled",
     "localLearningShadowMode",
     "explorationEnabled",
@@ -637,6 +657,22 @@ function parseRankingPatch(value: unknown): NonNullable<SettingsPatch["ranking"]
   const patch: NonNullable<SettingsPatch["ranking"]> = {};
   if (Object.hasOwn(input, "cocoonLevel")) {
     patch.cocoonLevel = parseIntegerField(input.cocoonLevel, "cocoonLevel", 1, 10);
+  }
+  if (Object.hasOwn(input, "maxPositiveInterestClusters")) {
+    patch.maxPositiveInterestClusters = parseIntegerField(
+      input.maxPositiveInterestClusters,
+      "maxPositiveInterestClusters",
+      8,
+      192
+    );
+  }
+  if (Object.hasOwn(input, "maxNegativeInterestClusters")) {
+    patch.maxNegativeInterestClusters = parseIntegerField(
+      input.maxNegativeInterestClusters,
+      "maxNegativeInterestClusters",
+      4,
+      128
+    );
   }
   for (const key of [
     "localLearningEnabled",

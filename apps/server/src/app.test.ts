@@ -2455,6 +2455,8 @@ describe("server API vertical slice", () => {
             preferSource: 0.5,
             preferDiversity: 0.5,
             cocoonLevel: 5,
+            maxPositiveInterestClusters: 24,
+            maxNegativeInterestClusters: 16,
             localLearningEnabled: true,
             localLearningShadowMode: false,
             explorationEnabled: true,
@@ -2499,7 +2501,9 @@ describe("server API vertical slice", () => {
           enabled: false
         },
         ranking: {
-          cocoonLevel: 7
+          cocoonLevel: 7,
+          maxPositiveInterestClusters: 48,
+          maxNegativeInterestClusters: 32
         }
       });
       expect(updated.statusCode, updated.body).toBe(200);
@@ -2530,7 +2534,9 @@ describe("server API vertical slice", () => {
               enabled: false
             },
             ranking: {
-              cocoonLevel: 7
+              cocoonLevel: 7,
+              maxPositiveInterestClusters: 48,
+              maxNegativeInterestClusters: 32
             }
           }
         }
@@ -2611,6 +2617,16 @@ describe("server API vertical slice", () => {
         {
           ranking: {
             preferFreshness: 0.9
+          }
+        },
+        {
+          ranking: {
+            maxPositiveInterestClusters: 7
+          }
+        },
+        {
+          ranking: {
+            maxNegativeInterestClusters: 129
           }
         }
       ]) {

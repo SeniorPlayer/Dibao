@@ -3248,7 +3248,15 @@ type SettingsDraft = {
   keepFavorites: boolean;
   keepReadLater: boolean;
   cocoonLevel: string;
+  maxPositiveInterestClusters: string;
+  maxNegativeInterestClusters: string;
 };
+
+const interestClusterLimitPresets = [
+  { maxPositiveInterestClusters: 24, maxNegativeInterestClusters: 16 },
+  { maxPositiveInterestClusters: 48, maxNegativeInterestClusters: 32 },
+  { maxPositiveInterestClusters: 96, maxNegativeInterestClusters: 64 }
+] as const;
 
 type SupportedEmbeddingProviderType = Extract<
   EmbeddingProviderType,
@@ -3307,6 +3315,10 @@ export function SettingsWorkspace(props: {
     props.embeddingProviders[0] ??
     null;
   const [draft, setDraft] = useState<SettingsDraft>(() => draftForSettings(props.settings));
+  const [lastInterestClusterPresetIndex, setLastInterestClusterPresetIndex] = useState(() =>
+    presetIndexForInterestClusterLimits(props.settings.ranking) ??
+    closestInterestClusterPresetIndex(props.settings.ranking)
+  );
   const [providerDraft, setProviderDraft] = useState<EmbeddingProviderDraft>(() =>
     draftForEmbeddingProvider(initialProvider)
   );
@@ -3325,7 +3337,12 @@ export function SettingsWorkspace(props: {
   const savedSettingsRef = useRef(props.settings);
 
   useEffect(() => {
-    setDraft(draftForSettings(props.settings));
+    const nextDraft = draftForSettings(props.settings);
+    setDraft(nextDraft);
+    setLastInterestClusterPresetIndex(
+      presetIndexForInterestClusterLimits(props.settings.ranking) ??
+        closestInterestClusterPresetIndex(props.settings.ranking)
+    );
   }, [props.settings]);
 
   useEffect(() => {
@@ -3462,6 +3479,9 @@ export function SettingsWorkspace(props: {
   const canActivateSelectedProvider = selectedProvider !== null && !selectedProvider.enabled;
   const isActivatingSelectedProvider =
     selectedProvider !== null && props.activatingProviderId === selectedProvider.id;
+  const exactInterestClusterPresetIndex = presetIndexForInterestClusterLimitDraft(draft);
+  const interestClusterPresetIndex =
+    exactInterestClusterPresetIndex ?? lastInterestClusterPresetIndex;
 
   return (
     <form
@@ -3656,30 +3676,75 @@ export function SettingsWorkspace(props: {
             value={draft.cocoonLevel}
           />
           <p className={styles.managementHint}>{t.settings.sections.behavior.cocoonLevelHint}</p>
-        </section>
-
-        <section className={classNames(styles.settingsSection, "settings-card")} aria-labelledby="settings-telemetry-title">
-          <div>
-            <h3 id="settings-telemetry-title">{t.settings.sections.telemetry.title}</h3>
-            <p>{t.settings.sections.telemetry.body}</p>
+          <div className={styles.settingsSubsection}>
+            <div>
+              <h4>{t.settings.sections.behavior.interestClusterLimits.title}</h4>
+              <p>{t.settings.sections.behavior.interestClusterLimits.body}</p>
+              <p>{t.settings.sections.behavior.interestClusterLimits.embeddingCostHint}</p>
+            </div>
+            <label className={styles.settingsField} htmlFor="settings-interest-cluster-preset">
+              <span>{t.settings.sections.behavior.interestClusterLimits.performancePreset}</span>
+              <div className={styles.settingsRangeRow}>
+                <input
+                  id="settings-interest-cluster-preset"
+                  max={2}
+                  min={0}
+                  onChange={(event) => {
+                    const presetIndex = interestClusterPresetIndexFromSliderValue(
+                      event.target.value
+                    );
+                    const preset = interestClusterLimitPresets[presetIndex];
+                    setLastInterestClusterPresetIndex(presetIndex);
+                    applyDraft({
+                      ...draft,
+                      maxPositiveInterestClusters: String(preset.maxPositiveInterestClusters),
+                      maxNegativeInterestClusters: String(preset.maxNegativeInterestClusters)
+                    });
+                  }}
+                  step={1}
+                  type="range"
+                  value={interestClusterPresetIndex}
+                />
+                <strong>
+                  {t.settings.sections.behavior.interestClusterLimits.presets[
+                    interestClusterPresetIndex
+                  ] ?? t.settings.sections.behavior.interestClusterLimits.customPreset}
+                </strong>
+              </div>
+              <div className={styles.settingsPresetScale} aria-hidden="true">
+                {t.settings.sections.behavior.interestClusterLimits.presets.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
+            </label>
+            <div className={styles.settingsGrid}>
+              <NumberSettingField
+                id="settings-max-positive-interest-clusters"
+                label={t.settings.sections.behavior.interestClusterLimits.positiveLabel}
+                max={192}
+                min={8}
+                onChange={(value) =>
+                  applyDraft({ ...draft, maxPositiveInterestClusters: value })
+                }
+                step={1}
+                value={draft.maxPositiveInterestClusters}
+              />
+              <NumberSettingField
+                id="settings-max-negative-interest-clusters"
+                label={t.settings.sections.behavior.interestClusterLimits.negativeLabel}
+                max={128}
+                min={4}
+                onChange={(value) =>
+                  applyDraft({ ...draft, maxNegativeInterestClusters: value })
+                }
+                step={1}
+                value={draft.maxNegativeInterestClusters}
+              />
+            </div>
+            <p className={styles.managementHint}>
+              {t.settings.sections.behavior.interestClusterLimits.fieldHint}
+            </p>
           </div>
-          <label className={styles.settingsInlineStatus} htmlFor="settings-telemetry-enabled">
-            <span>
-              <strong>{t.settings.sections.telemetry.enabledLabel}</strong>
-              <small>{t.settings.sections.telemetry.enabledBody}</small>
-            </span>
-            <input
-              checked={draft.telemetryEnabled}
-              id="settings-telemetry-enabled"
-              onChange={(event) =>
-                applyDraft({
-                  ...draft,
-                  telemetryEnabled: event.target.checked
-                })
-              }
-              type="checkbox"
-            />
-          </label>
         </section>
 
         <section className={classNames(styles.settingsSection, "settings-card", "reader-settings-card")} aria-labelledby="settings-reader-title">
@@ -3767,55 +3832,6 @@ export function SettingsWorkspace(props: {
             />
           </label>
           <p className={styles.managementHint}>{t.settings.sections.retention.mappingHint}</p>
-        </section>
-
-        <section className={classNames(styles.settingsSection, "settings-card", "about-settings-card")} aria-labelledby="settings-about-title">
-          <div>
-            <h3 id="settings-about-title">{t.settings.sections.about.title}</h3>
-            <p>{t.settings.sections.about.body}</p>
-          </div>
-          <dl className={styles.aboutList}>
-            <div>
-              <dt>{t.settings.sections.about.version}</dt>
-              <dd>{t.common.version(dibaoVersion)}</dd>
-            </div>
-            <div>
-              <dt>{t.settings.sections.about.author}</dt>
-              <dd>{t.settings.sections.about.authorName}</dd>
-            </div>
-            <div>
-              <dt>{t.settings.sections.about.xAccount}</dt>
-              <dd>
-                <a href="https://x.com/JeffreyCalm" rel="noreferrer" target="_blank">
-                  @JeffreyCalm
-                </a>
-              </dd>
-            </div>
-            <div>
-              <dt>{t.settings.sections.about.blog}</dt>
-              <dd>
-                <a href="https://1q43.blog" rel="noreferrer" target="_blank">
-                  1q43.blog
-                </a>
-              </dd>
-            </div>
-            <div>
-              <dt>{t.settings.sections.about.homepage}</dt>
-              <dd>
-                <a href="https://dibao.app" rel="noreferrer" target="_blank">
-                  dibao.app
-                </a>
-              </dd>
-            </div>
-            <div>
-              <dt>{t.settings.sections.about.github}</dt>
-              <dd>
-                <a href="https://github.com/Pls-1q43/dibao" rel="noreferrer" target="_blank">
-                  Pls-1q43/dibao
-                </a>
-              </dd>
-            </div>
-          </dl>
         </section>
 
         <section className={classNames(styles.settingsSection, "settings-card", "provider-settings-card")} aria-labelledby="settings-provider-title">
@@ -4258,6 +4274,72 @@ export function SettingsWorkspace(props: {
               ))
             )}
           </div>
+        </section>
+
+        <section className={classNames(styles.settingsSection, "settings-card", "about-settings-card")} aria-labelledby="settings-about-title">
+          <div>
+            <h3 id="settings-about-title">{t.settings.sections.about.title}</h3>
+            <p>{t.settings.sections.about.body}</p>
+          </div>
+          <label className={styles.settingsInlineStatus} htmlFor="settings-telemetry-enabled">
+            <span>
+              <strong>{t.settings.sections.about.telemetryLabel}</strong>
+              <small>{t.settings.sections.about.telemetryBody}</small>
+            </span>
+            <input
+              checked={draft.telemetryEnabled}
+              id="settings-telemetry-enabled"
+              onChange={(event) =>
+                applyDraft({
+                  ...draft,
+                  telemetryEnabled: event.target.checked
+                })
+              }
+              type="checkbox"
+            />
+          </label>
+          <dl className={styles.aboutList}>
+            <div>
+              <dt>{t.settings.sections.about.version}</dt>
+              <dd>{t.common.version(dibaoVersion)}</dd>
+            </div>
+            <div>
+              <dt>{t.settings.sections.about.author}</dt>
+              <dd>{t.settings.sections.about.authorName}</dd>
+            </div>
+            <div>
+              <dt>{t.settings.sections.about.xAccount}</dt>
+              <dd>
+                <a href="https://x.com/JeffreyCalm" rel="noreferrer" target="_blank">
+                  @JeffreyCalm
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.settings.sections.about.blog}</dt>
+              <dd>
+                <a href="https://1q43.blog" rel="noreferrer" target="_blank">
+                  1q43.blog
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.settings.sections.about.homepage}</dt>
+              <dd>
+                <a href="https://dibao.app" rel="noreferrer" target="_blank">
+                  dibao.app
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.settings.sections.about.github}</dt>
+              <dd>
+                <a href="https://github.com/Pls-1q43/dibao" rel="noreferrer" target="_blank">
+                  Pls-1q43/dibao
+                </a>
+              </dd>
+            </div>
+          </dl>
         </section>
       </div>
     </form>
@@ -7084,8 +7166,69 @@ function draftForSettings(settings: AppSettings): SettingsDraft {
     retentionDays: String(settings.retention.retentionDays),
     keepFavorites: settings.retention.keepFavorites,
     keepReadLater: settings.retention.keepReadLater,
-    cocoonLevel: String(settings.ranking.cocoonLevel)
+    cocoonLevel: String(settings.ranking.cocoonLevel),
+    maxPositiveInterestClusters: String(settings.ranking.maxPositiveInterestClusters),
+    maxNegativeInterestClusters: String(settings.ranking.maxNegativeInterestClusters)
   };
+}
+
+function presetIndexForInterestClusterLimits(
+  ranking: Pick<
+    AppSettings["ranking"],
+    "maxPositiveInterestClusters" | "maxNegativeInterestClusters"
+  >
+): number | null {
+  const index = interestClusterLimitPresets.findIndex(
+    (preset) =>
+      preset.maxPositiveInterestClusters === ranking.maxPositiveInterestClusters &&
+      preset.maxNegativeInterestClusters === ranking.maxNegativeInterestClusters
+  );
+  return index >= 0 ? index : null;
+}
+
+function presetIndexForInterestClusterLimitDraft(draft: SettingsDraft): number | null {
+  const maxPositiveInterestClusters = Number(draft.maxPositiveInterestClusters);
+  const maxNegativeInterestClusters = Number(draft.maxNegativeInterestClusters);
+  if (
+    !Number.isInteger(maxPositiveInterestClusters) ||
+    !Number.isInteger(maxNegativeInterestClusters)
+  ) {
+    return null;
+  }
+  return presetIndexForInterestClusterLimits({
+    maxPositiveInterestClusters,
+    maxNegativeInterestClusters
+  });
+}
+
+function interestClusterPresetIndexFromSliderValue(value: string): 0 | 1 | 2 {
+  if (value === "2") {
+    return 2;
+  }
+  if (value === "1") {
+    return 1;
+  }
+  return 0;
+}
+
+function closestInterestClusterPresetIndex(
+  ranking: Pick<
+    AppSettings["ranking"],
+    "maxPositiveInterestClusters" | "maxNegativeInterestClusters"
+  >
+): number {
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  interestClusterLimitPresets.forEach((preset, index) => {
+    const distance =
+      Math.abs(preset.maxPositiveInterestClusters - ranking.maxPositiveInterestClusters) +
+      Math.abs(preset.maxNegativeInterestClusters - ranking.maxNegativeInterestClusters);
+    if (distance < closestDistance) {
+      closestIndex = index;
+      closestDistance = distance;
+    }
+  });
+  return closestIndex;
 }
 
 function draftForEmbeddingProvider(provider: EmbeddingProvider | null): EmbeddingProviderDraft {
@@ -7217,6 +7360,24 @@ function parseSettingsDraft(
   if (cocoonLevel === null) {
     return { ok: false, error: t.settings.errors.cocoonLevel };
   }
+  const maxPositiveInterestClusters = parseNumberDraft(
+    draft.maxPositiveInterestClusters,
+    8,
+    192,
+    true
+  );
+  if (maxPositiveInterestClusters === null) {
+    return { ok: false, error: t.settings.errors.maxPositiveInterestClusters };
+  }
+  const maxNegativeInterestClusters = parseNumberDraft(
+    draft.maxNegativeInterestClusters,
+    4,
+    128,
+    true
+  );
+  if (maxNegativeInterestClusters === null) {
+    return { ok: false, error: t.settings.errors.maxNegativeInterestClusters };
+  }
 
   const settings: AppSettings = {
     ...current,
@@ -7248,7 +7409,9 @@ function parseSettingsDraft(
     },
     ranking: {
       ...current.ranking,
-      cocoonLevel
+      cocoonLevel,
+      maxPositiveInterestClusters,
+      maxNegativeInterestClusters
     }
   };
 
@@ -7279,7 +7442,9 @@ function parseSettingsDraft(
         keepReadLater: draft.keepReadLater
       },
       ranking: {
-        cocoonLevel
+        cocoonLevel,
+        maxPositiveInterestClusters,
+        maxNegativeInterestClusters
       }
     }
   };

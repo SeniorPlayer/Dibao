@@ -1223,6 +1223,139 @@ describe("profile algorithm and recommendation ranking", () => {
       db.close();
     }
   });
+
+  it("uses configured positive cluster limits when trimming profile clusters", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    const embeddings = new SqliteEmbeddingRepository(db);
+    const profiles = new SqliteProfileRepository(db);
+
+    try {
+      embeddings.upsertProvider({
+        id: "provider_trim_config",
+        type: "openai_compatible",
+        name: "Provider",
+        baseUrl: "https://api.example.com/v1",
+        model: "fixture",
+        dimension: 3,
+        enabled: true,
+        now: 0
+      });
+      embeddings.createIndex({
+        id: "index_trim_config",
+        providerId: "provider_trim_config",
+        model: "fixture",
+        dimension: 3,
+        now: 0
+      });
+      for (let index = 0; index < 30; index += 1) {
+        profiles.upsertCluster({
+          id: `cluster_trim_large_${index}`,
+          embeddingIndexId: "index_trim_config",
+          polarity: "positive",
+          centroidVectorBlob: toVectorBlob([0, 0, 0]),
+          weight: 30 - index,
+          sampleCount: 2,
+          lastMatchedAt: 1000,
+          now: 1000 + index
+        });
+      }
+
+      new ProfileService({
+        embeddings,
+        profiles,
+        getClusterLimits: () => ({
+          maxPositiveInterestClusters: 32,
+          maxNegativeInterestClusters: 16
+        }),
+        now: () => 2000
+      }).decayClusters();
+      expect(profiles.listClusters({ embeddingIndexId: "index_trim_config", polarity: "positive" }))
+        .toHaveLength(30);
+
+      new ProfileService({
+        embeddings,
+        profiles,
+        getClusterLimits: () => ({
+          maxPositiveInterestClusters: 12,
+          maxNegativeInterestClusters: 16
+        }),
+        now: () => 3000
+      }).decayClusters();
+      const remaining = profiles.listClusters({
+        embeddingIndexId: "index_trim_config",
+        polarity: "positive"
+      });
+      expect(remaining).toHaveLength(12);
+      expect(remaining.map((cluster) => cluster.id)).toEqual(
+        Array.from({ length: 12 }, (_, index) => `cluster_trim_large_${index}`)
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("trims older low-ranked clusters before newly created single-sample clusters", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    const embeddings = new SqliteEmbeddingRepository(db);
+    const profiles = new SqliteProfileRepository(db);
+    const now = 2 * 86_400_000;
+
+    try {
+      embeddings.upsertProvider({
+        id: "provider_trim_new",
+        type: "openai_compatible",
+        name: "Provider",
+        baseUrl: "https://api.example.com/v1",
+        model: "fixture",
+        dimension: 3,
+        enabled: true,
+        now: 0
+      });
+      embeddings.createIndex({
+        id: "index_trim_new",
+        providerId: "provider_trim_new",
+        model: "fixture",
+        dimension: 3,
+        now: 0
+      });
+      for (const cluster of [
+        { id: "cluster_keep_top_0", weight: 10, sampleCount: 3, createdAt: 0 },
+        { id: "cluster_keep_top_1", weight: 9, sampleCount: 3, createdAt: 0 },
+        { id: "cluster_delete_mature_tail", weight: 8, sampleCount: 3, createdAt: 0 },
+        { id: "cluster_keep_new_tail", weight: 1, sampleCount: 1, createdAt: now },
+        { id: "cluster_delete_old_tail", weight: 0.9, sampleCount: 3, createdAt: 0 }
+      ]) {
+        profiles.upsertCluster({
+          id: cluster.id,
+          embeddingIndexId: "index_trim_new",
+          polarity: "positive",
+          centroidVectorBlob: toVectorBlob([0, 0, 0]),
+          weight: cluster.weight,
+          sampleCount: cluster.sampleCount,
+          lastMatchedAt: now,
+          now: cluster.createdAt
+        });
+      }
+
+      new ProfileService({
+        embeddings,
+        profiles,
+        getClusterLimits: () => ({
+          maxPositiveInterestClusters: 3,
+          maxNegativeInterestClusters: 16
+        }),
+        now: () => now
+      }).decayClusters();
+
+      expect(
+        profiles
+          .listClusters({ embeddingIndexId: "index_trim_new", polarity: "positive" })
+          .map((cluster) => cluster.id)
+      ).toEqual(["cluster_keep_top_0", "cluster_keep_top_1", "cluster_keep_new_tail"]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createProfileFixture() {

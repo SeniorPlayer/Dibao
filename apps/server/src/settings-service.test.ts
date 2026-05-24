@@ -118,4 +118,41 @@ describe("settings service", () => {
       }
     });
   });
+
+  it("persists configurable interest cluster limits and validates bounds", () => {
+    const settings = new MemorySettingsRepository();
+    const service = new SettingsService({ settings });
+
+    expect(service.getSettings().ranking).toMatchObject({
+      maxPositiveInterestClusters: 24,
+      maxNegativeInterestClusters: 16
+    });
+
+    expect(
+      service.updateSettings({
+        ranking: {
+          maxPositiveInterestClusters: 48,
+          maxNegativeInterestClusters: 32
+        }
+      }).settings.ranking
+    ).toMatchObject({
+      maxPositiveInterestClusters: 48,
+      maxNegativeInterestClusters: 32
+    });
+
+    expect(() =>
+      service.updateSettings({
+        ranking: {
+          maxPositiveInterestClusters: 7
+        }
+      })
+    ).toThrow(SettingsServiceError);
+    expect(() =>
+      service.updateSettings({
+        ranking: {
+          maxNegativeInterestClusters: 129
+        }
+      })
+    ).toThrow(SettingsServiceError);
+  });
 });

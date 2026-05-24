@@ -44,6 +44,10 @@ export type ProfileServiceOptions = {
   profiles: ProfileRepository;
   now?: () => number;
   clusterIdFactory?: () => string;
+  getClusterLimits?: () => {
+    maxPositiveInterestClusters: number;
+    maxNegativeInterestClusters: number;
+  };
 };
 
 type ProfileSnapshot = {
@@ -117,6 +121,7 @@ const SOURCE_EVENT_WEIGHTS: Record<SourceEventKey, SourceEventWeight> = {
 
 const FEED_STATS_CLEAR_SIGNAL_TARGET = 10;
 const FEED_STATS_OPEN_ONLY_CONFIDENCE = 0.1;
+const NEW_CLUSTER_PROTECTION_MS = 24 * 60 * 60 * 1000;
 
 export class ProfileService {
   private readonly now: () => number;
@@ -467,10 +472,8 @@ export class ProfileService {
   }
 
   private trimClusters(embeddingIndexId: string, polarity: InterestClusterPolarity): number {
-    const max =
-      polarity === "positive"
-        ? profileAlgorithmDefaults.maxPositiveClusters
-        : profileAlgorithmDefaults.maxNegativeClusters;
+    const limits = this.clusterLimits();
+    const max = polarity === "positive" ? limits.positive : limits.negative;
     const clusters = this.options.profiles.listClusters({ embeddingIndexId, polarity });
     let deleted = 0;
 
@@ -499,13 +502,37 @@ export class ProfileService {
     }
 
     const remaining = this.options.profiles.listClusters({ embeddingIndexId, polarity });
-    for (const cluster of remaining.slice(max)) {
+    const deletionCandidates = [
+      ...remaining.filter((cluster) => !this.isProtectedNewCluster(cluster, now)).reverse(),
+      ...remaining.filter((cluster) => this.isProtectedNewCluster(cluster, now)).reverse()
+    ];
+    let deletedFromRemaining = 0;
+
+    for (const cluster of deletionCandidates) {
+      if (remaining.length - deletedFromRemaining <= max) {
+        break;
+      }
       if (this.options.profiles.deleteCluster(cluster.id)) {
         deleted += 1;
+        deletedFromRemaining += 1;
       }
     }
 
     return deleted;
+  }
+
+  private clusterLimits(): { positive: number; negative: number } {
+    const configured = this.options.getClusterLimits?.();
+    return {
+      positive:
+        configured?.maxPositiveInterestClusters ?? profileAlgorithmDefaults.maxPositiveClusters,
+      negative:
+        configured?.maxNegativeInterestClusters ?? profileAlgorithmDefaults.maxNegativeClusters
+    };
+  }
+
+  private isProtectedNewCluster(cluster: InterestClusterRow, now: number): boolean {
+    return now - cluster.createdAt <= NEW_CLUSTER_PROTECTION_MS && cluster.sampleCount <= 1;
   }
 
   private recalculateFeedStats(feedId: string): void {

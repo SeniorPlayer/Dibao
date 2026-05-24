@@ -348,7 +348,24 @@ export const zhCN = {
         markScrolledArticlesIgnored: "滚过未打开文章后，将其标记为已忽略并移出未读",
         removeReadLaterOnReadComplete: "稍后读中的文章读完后，自动移出稍后读",
         cocoonLevel: "信息茧房水平",
-        cocoonLevelHint: "1 表示更开放、更分散、更探索；10 表示更贴合、更稳定、更少扰动。所有级别都只在订阅源内排序，并始终尊重去重和明确负反馈。"
+        cocoonLevelHint: "1 表示更开放、更分散、更探索；10 表示更贴合、更稳定、更少扰动。所有级别都只在订阅源内排序，并始终尊重去重和明确负反馈。",
+        interestClusterLimits: {
+          title: "兴趣簇上限",
+          body: "兴趣簇并非越高越好。对于每日 Inbox 入站文章较少、订阅源比较集中的用户，更少的兴趣簇可能会带来更稳定的推荐效果。",
+          embeddingCostHint:
+            "提高兴趣簇上限主要增加本地排序和向量相似度计算开销，不会按比例增加外部 Embedding 调用。",
+          performancePreset: "性能档",
+          presets: [
+            "低配 VPS：24 / 16",
+            "中配 NAS：48 / 32",
+            "高性能服务器或本地计算机：96 / 64"
+          ],
+          customPreset: "自定义",
+          positiveLabel: "正向兴趣簇",
+          negativeLabel: "负向兴趣簇",
+          fieldHint:
+            "正向簇用于识别你更可能想读的主题；负向簇用于压低你主动隐藏或标记不感兴趣的主题。"
+        }
       },
       telemetry: {
         title: "反馈遥测",
@@ -382,6 +399,8 @@ export const zhCN = {
         version: "当前版本",
         author: "作者",
         authorName: "评论尸",
+        telemetryLabel: "反馈数据",
+        telemetryBody: "控制是否向开发者发送用于优化邸报的错误、性能和体验反馈数据。",
         xAccount: "X 账号",
         blog: "作者博客",
         homepage: "项目主页",
@@ -511,7 +530,9 @@ export const zhCN = {
       paragraphGap: "段距必须是 0.6 到 1.6。",
       readerWidth: "阅读宽度必须是 560 到 860。",
       retentionDays: "保留天数必须是 0 到 3650 的整数，0 表示永久。",
-      cocoonLevel: "信息茧房水平必须是 1 到 10 的整数。"
+      cocoonLevel: "信息茧房水平必须是 1 到 10 的整数。",
+      maxPositiveInterestClusters: "正向兴趣簇上限必须是 8 到 192 之间的整数。",
+      maxNegativeInterestClusters: "负向兴趣簇上限必须是 4 到 128 之间的整数。"
     },
     units: {
       px: "px",
@@ -1539,7 +1560,24 @@ export const enUS = {
         markScrolledArticlesIgnored: "Mark unopened articles you scroll past as ignored and remove them from unread",
         removeReadLaterOnReadComplete: "Remove Read Later articles after you finish them",
         cocoonLevel: "Cocoon level",
-        cocoonLevelHint: "1 is broader and more exploratory; 10 stays closer to your established interests. Every level only ranks articles from your subscribed feeds and still respects deduping and explicit negative feedback."
+        cocoonLevelHint: "1 is broader and more exploratory; 10 stays closer to your established interests. Every level only ranks articles from your subscribed feeds and still respects deduping and explicit negative feedback.",
+        interestClusterLimits: {
+          title: "Interest cluster limits",
+          body: "More interest clusters are not always better. If your Inbox has fewer daily articles or focused feeds, fewer clusters can make recommendations steadier.",
+          embeddingCostHint:
+            "Raising this limit mainly increases local ranking and vector-similarity work. It does not increase external embedding calls proportionally.",
+          performancePreset: "Performance tier",
+          presets: [
+            "Low-end VPS: 24 / 16",
+            "Mid-range NAS: 48 / 32",
+            "Fast server or local machine: 96 / 64"
+          ],
+          customPreset: "Custom",
+          positiveLabel: "Positive interest clusters",
+          negativeLabel: "Negative interest clusters",
+          fieldHint:
+            "Positive clusters identify topics you are more likely to read; negative clusters push down topics you hide or mark not interested."
+        }
       },
       telemetry: {
         title: "Feedback telemetry",
@@ -1573,6 +1611,9 @@ export const enUS = {
         version: "Current version",
         author: "Author",
         authorName: "Pls",
+        telemetryLabel: "Feedback data",
+        telemetryBody:
+          "Control whether Dibao sends error, performance, and experience feedback data to help developers improve the app.",
         xAccount: "X account",
         blog: "Author blog",
         homepage: "Project homepage",
@@ -1702,7 +1743,11 @@ export const enUS = {
       paragraphGap: "Paragraph gap must be between 0.6 and 1.6.",
       readerWidth: "Reader width must be between 560 and 860.",
       retentionDays: "Retention days must be an integer between 0 and 3650; 0 means forever.",
-      cocoonLevel: "Cocoon level must be an integer from 1 to 10."
+      cocoonLevel: "Cocoon level must be an integer from 1 to 10.",
+      maxPositiveInterestClusters:
+        "Positive interest cluster limit must be an integer from 8 to 192.",
+      maxNegativeInterestClusters:
+        "Negative interest cluster limit must be an integer from 4 to 128."
     },
     units: {
       px: "px",
@@ -2713,7 +2758,24 @@ export const jaJP = {
         markScrolledArticlesIgnored: "開かずに通過した記事を無視済みにし、未読から外す",
         removeReadLaterOnReadComplete: "あとで読むの記事を読み終えたら、あとで読むから外す",
         cocoonLevel: "パーソナライズ度",
-        cocoonLevelHint: "1 はより開かれた分散的な探索、10 はより個人に合わせた安定的で控えめな変化です。どのレベルでも購読フィード内だけで並び替え、重複排除と明示的な低評価を尊重します。"
+        cocoonLevelHint: "1 はより開かれた分散的な探索、10 はより個人に合わせた安定的で控えめな変化です。どのレベルでも購読フィード内だけで並び替え、重複排除と明示的な低評価を尊重します。",
+        interestClusterLimits: {
+          title: "興味クラスタの上限",
+          body: "興味クラスタは多ければよいとは限りません。毎日の Inbox 記事が少ない場合や購読フィードが集中している場合は、少なめのクラスタのほうがおすすめが安定することがあります。",
+          embeddingCostHint:
+            "上限を上げると主にローカルの並び替えとベクトル類似度計算の負荷が増えます。外部 Embedding 呼び出しが比例して増えるわけではありません。",
+          performancePreset: "性能プリセット",
+          presets: [
+            "低スペック VPS：24 / 16",
+            "中程度の NAS：48 / 32",
+            "高性能サーバーまたはローカル PC：96 / 64"
+          ],
+          customPreset: "カスタム",
+          positiveLabel: "正方向の興味クラスタ",
+          negativeLabel: "負方向の興味クラスタ",
+          fieldHint:
+            "正方向クラスタは読みたい可能性が高いテーマを見つけ、負方向クラスタは非表示や興味なしにしたテーマを下げます。"
+        }
       },
       telemetry: {
         title: "フィードバック送信",
@@ -2747,6 +2809,9 @@ export const jaJP = {
         version: "現在のバージョン",
         author: "作者",
         authorName: "Pls",
+        telemetryLabel: "フィードバックデータ",
+        telemetryBody:
+          "邸報の改善に使うエラー、パフォーマンス、利用体験のフィードバックデータを開発者へ送信するかを管理します。",
         xAccount: "X アカウント",
         blog: "作者ブログ",
         homepage: "プロジェクトサイト",
@@ -2876,7 +2941,11 @@ export const jaJP = {
       paragraphGap: "段落間隔は 0.6 から 1.6 の範囲で指定してください。",
       readerWidth: "本文幅は 560 から 860 の範囲で指定してください。",
       retentionDays: "保持日数は 0 から 3650 までの整数で入力してください。0 は永続保持です。",
-      cocoonLevel: "パーソナライズ度は 1 から 10 までの整数で入力してください。"
+      cocoonLevel: "パーソナライズ度は 1 から 10 までの整数で入力してください。",
+      maxPositiveInterestClusters:
+        "正方向の興味クラスタ上限は 8 から 192 までの整数で入力してください。",
+      maxNegativeInterestClusters:
+        "負方向の興味クラスタ上限は 4 から 128 までの整数で入力してください。"
     },
     units: {
       px: "px",

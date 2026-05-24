@@ -379,13 +379,14 @@ export function buildServer(options: BuildServerOptions = {}) {
     adapters: embeddingAdapters,
     now: options.now
   });
+  const settingsService = new SettingsService({
+    settings,
+    now: options.now
+  });
   const profileService = new ProfileService({
     embeddings,
     profiles,
-    now: options.now
-  });
-  const settingsService = new SettingsService({
-    settings,
+    getClusterLimits: () => settingsService.getSettings().ranking,
     now: options.now
   });
   configureServerTelemetry({
