@@ -1176,7 +1176,8 @@ export function buildServer(options: BuildServerOptions = {}) {
 
   app.patch<{ Body: unknown }>("/api/settings", async (request, reply) => {
     try {
-      const beforeRanking = settingsService.getSettings().ranking;
+      const beforeSettings = settingsService.getSettings();
+      const beforeRanking = beforeSettings.ranking;
       const result = settingsService.updateSettings(request.body);
       configureServerTelemetry({
         enabled: result.settings.telemetry.enabled
@@ -1185,6 +1186,12 @@ export function buildServer(options: BuildServerOptions = {}) {
       const rankingJob = rankingSettingsChanged(beforeRanking, afterRanking)
         ? rankingJobService.enqueueAll()
         : null;
+      const retentionCleanupJob = retentionSettingsRequireCleanupQueue(
+        beforeSettings.retention,
+        result.settings.retention
+      )
+        ? retentionCleanupJobService.enqueueCleanup()
+        : null;
       if (rankingJob) {
         drainBackgroundJobs();
       }
@@ -1192,7 +1199,9 @@ export function buildServer(options: BuildServerOptions = {}) {
         data: {
           ...result,
           rankingRecalculateQueued: rankingJob !== null,
-          rankingRecalculateJobId: rankingJob?.id ?? null
+          rankingRecalculateJobId: rankingJob?.id ?? null,
+          retentionCleanupQueued: retentionCleanupJob !== null,
+          retentionCleanupJobId: retentionCleanupJob?.id ?? null
         }
       };
     } catch (error) {
@@ -2903,6 +2912,22 @@ function rankingSettingsChanged(
     before.localLearningShadowMode !== after.localLearningShadowMode ||
     before.explorationEnabled !== after.explorationEnabled ||
     before.evaluationEnabled !== after.evaluationEnabled
+  );
+}
+
+function retentionSettingsRequireCleanupQueue(
+  before: ReturnType<SettingsService["getSettings"]>["retention"],
+  after: ReturnType<SettingsService["getSettings"]>["retention"]
+): boolean {
+  if (after.retentionDays === 0) {
+    return false;
+  }
+
+  return (
+    before.retentionDays === 0 ||
+    after.retentionDays < before.retentionDays ||
+    (before.keepFavorites && !after.keepFavorites) ||
+    (before.keepReadLater && !after.keepReadLater)
   );
 }
 

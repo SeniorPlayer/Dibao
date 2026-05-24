@@ -2446,7 +2446,7 @@ describe("server API vertical slice", () => {
             enabled: true
           },
           retention: {
-            retentionDays: 60,
+            retentionDays: 0,
             keepFavorites: true,
             keepReadLater: true
           },
@@ -2891,6 +2891,68 @@ describe("server API vertical slice", () => {
       });
       expect(jobs.countByTypeAndStatus(RANKING_RECALCULATE_JOB_TYPE, "queued")).toBe(1);
       expect(jobs.countByTypeAndStatus("embedding_generate", "queued")).toBe(0);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("queues retention cleanup when retention settings become more restrictive", async () => {
+    const db = createEmptyDatabase();
+    const settings = new SqliteAppSettingsRepository(db);
+    const app = buildServer({ db, logger: false, now: () => 5000 });
+    const jobs = new SqliteJobRepository(db);
+
+    try {
+      settings.setJson("retention.articleDays", 90, 4000);
+
+      const changed = await injectJson(app, "PATCH", "/api/settings", {
+        retention: {
+          retentionDays: 30
+        }
+      });
+      expect(changed.statusCode, changed.body).toBe(200);
+      expect(changed.json()).toMatchObject({
+        data: {
+          retentionCleanupQueued: true,
+          retentionCleanupJobId: expect.any(String),
+          rankingRecalculateQueued: false,
+          settings: {
+            retention: {
+              retentionDays: 30
+            }
+          }
+        }
+      });
+      expect(jobs.countByTypeAndStatus("retention_cleanup", "queued")).toBe(1);
+      expect(jobs.countByTypeAndStatus(RANKING_RECALCULATE_JOB_TYPE, "queued")).toBe(0);
+
+      const same = await injectJson(app, "PATCH", "/api/settings", {
+        retention: {
+          retentionDays: 30
+        }
+      });
+      expect(same.statusCode, same.body).toBe(200);
+      expect(same.json()).toMatchObject({
+        data: {
+          retentionCleanupQueued: false,
+          retentionCleanupJobId: null
+        }
+      });
+      expect(jobs.countByTypeAndStatus("retention_cleanup", "queued")).toBe(1);
+
+      const disabled = await injectJson(app, "PATCH", "/api/settings", {
+        retention: {
+          retentionDays: 0
+        }
+      });
+      expect(disabled.statusCode, disabled.body).toBe(200);
+      expect(disabled.json()).toMatchObject({
+        data: {
+          retentionCleanupQueued: false,
+          retentionCleanupJobId: null
+        }
+      });
     } finally {
       await app.close();
       db.close();

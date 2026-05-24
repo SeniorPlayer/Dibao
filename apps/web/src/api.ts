@@ -387,6 +387,10 @@ export type UpdateSettingsInput = {
 export type UpdateSettingsResponse = {
   ok: true;
   settings: AppSettings;
+  rankingRecalculateQueued?: boolean;
+  rankingRecalculateJobId?: string | null;
+  retentionCleanupQueued?: boolean;
+  retentionCleanupJobId?: string | null;
 };
 
 export type EmbeddingProviderType =
@@ -821,7 +825,7 @@ export const defaultAppSettings: AppSettings = {
     enabled: true
   },
   retention: {
-    retentionDays: 60,
+    retentionDays: 0,
     keepFavorites: true,
     keepReadLater: true
   },

@@ -38,7 +38,7 @@ describe("settings service", () => {
     expect(service.getSettings().retention.retentionDays).toBe(0);
 
     settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, "invalid");
-    expect(service.getSettings().retention.retentionDays).toBe(60);
+    expect(service.getSettings().retention.retentionDays).toBe(0);
 
     settings.delete(RETENTION_ARTICLE_DAYS_SETTING_KEY);
     const invalidEnvService = new SettingsService({
@@ -47,7 +47,7 @@ describe("settings service", () => {
         DIBAO_ARTICLE_RETENTION_DAYS: "invalid"
       }
     });
-    expect(invalidEnvService.getSettings().retention.retentionDays).toBe(60);
+    expect(invalidEnvService.getSettings().retention.retentionDays).toBe(0);
   });
 
   it("strictly rejects unknown and unwritable settings fields", () => {

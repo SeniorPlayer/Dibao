@@ -84,7 +84,7 @@ Last updated: 2026-05-23
 | C-19 | Done | P0 | frontend/backend/test | First-run setup wizard | 空库可完成欢迎、设置密码、导入/添加订阅源、provider 占位跳过并进入 reader。 |
 | C-20 | Done | P0 | frontend/backend/test | Feed management UI | Web 端可创建/重命名/删除 folders，编辑/软删除 feeds，调整分组、启用状态和 `sourceWeight`，并在操作后刷新 source/article 状态。 |
 | C-21 | Done | P0 | backend/infra/frontend/test | Background feed refresh jobs | `POST /api/feeds/refresh` 可为 enabled feeds 入队刷新；内部 job runner 支持重试、stale recovery、失败隔离和 Web “刷新全部”入口。 |
-| C-22 | Done | P0 | backend/infra/algorithm/test/docs | Article retention cleanup | 默认 60 天文章保留策略可通过 setting/env 配置；旧文章 soft delete 并清理正文、FTS、rank 和 vector serving index，同时保留行为与状态数据。 |
+| C-22 | Done | P0 | backend/infra/algorithm/test/docs | Article retention cleanup | 默认永久保留，文章保留策略可通过 setting/env 配置；旧文章 soft delete 并清理正文、FTS、rank 和 vector serving index，同时保留行为与状态数据。 |
 | C-23 | Done | P0 | frontend/backend/design/test/docs | Settings page v0 | Web 设置页可配置语言、阅读参数和文章保留天数；Settings API 严格校验并持久化到 `app_settings`；阅读 CSS variables 即时生效。 |
 | C-24 | Done | P0 | backend/frontend/algorithm/infra/test/docs | Embedding provider pipeline | OpenAI-compatible 与 Ollama provider 可配置和测试；新文章可入队生成 embedding；向量写入 authority table 和 sqlite-vec index；支持 index rebuild。 |
 | C-25 | Done | P0 | algorithm/backend/frontend/test/docs | Profile Algorithm v0 and Ranking v1 | 行为事件可幂等更新兴趣簇和来源统计；`recommended` 可使用 active embedding rank context，并在无 provider/embedding/profile 时 fallback 到 baseline；推荐解释包含兴趣匹配。 |

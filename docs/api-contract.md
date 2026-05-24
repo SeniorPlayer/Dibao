@@ -1315,7 +1315,7 @@ cursor
       "removeReadLaterOnReadComplete": false
     },
     "retention": {
-      "retentionDays": 60,
+      "retentionDays": 0,
       "keepFavorites": true,
       "keepReadLater": true
     },
@@ -1353,6 +1353,7 @@ cursor
 - 任意未知字段、不可写字段、类型错误或越界值返回 `VALIDATION_ERROR`。
 - API 字段 `retention.retentionDays` 持久化到 storage key `retention.articleDays`。
 - `retention.retentionDays = 0` 表示永久保留普通文章，后台 retention cleanup 不会清理旧文章。
+- 当 `retention.retentionDays` 从永久保留改为正数、或被调小、或收藏/稍后读保留开关从 `true` 改为 `false` 时，API 会 enqueue 一个 deduped `retention_cleanup` job；保存设置请求不会同步删除文章。
 - `ui.defaultHomeView` 可为 `recommended` 或 `latest`，控制进入 reader 后默认打开的首页视图。
 - `retention.keepFavorites` 和 `retention.keepReadLater` 控制 retention cleanup 是否永久保留收藏/稍后读文章，默认均为 `true`。
 - `behavior.markScrolledArticlesIgnored` 控制最新 / 推荐列表中“滚过未打开文章 -> 已忽略”的自动行为记录。
@@ -1391,6 +1392,8 @@ cursor
     "ok": true,
     "rankingRecalculateQueued": true,
     "rankingRecalculateJobId": "job_rank_...",
+    "retentionCleanupQueued": true,
+    "retentionCleanupJobId": "job_...",
     "settings": {
       "ui": {
         "locale": "en-US",

@@ -3322,6 +3322,7 @@ export function SettingsWorkspace(props: {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const savedSettingsRef = useRef(props.settings);
 
   useEffect(() => {
     setDraft(draftForSettings(props.settings));
@@ -3376,7 +3377,18 @@ export function SettingsWorkspace(props: {
       return;
     }
 
+    if (
+      retentionSettingsRequireCleanupConfirmation(
+        savedSettingsRef.current.retention,
+        parsed.settings.retention
+      ) &&
+      !window.confirm(t.settings.sections.retention.cleanupConfirm)
+    ) {
+      return;
+    }
+
     await props.onSaveSettings(parsed.input);
+    savedSettingsRef.current = parsed.settings;
   }
 
   async function handleProviderSubmit() {
@@ -7271,6 +7283,22 @@ function parseSettingsDraft(
       }
     }
   };
+}
+
+function retentionSettingsRequireCleanupConfirmation(
+  before: AppSettings["retention"],
+  after: AppSettings["retention"]
+): boolean {
+  if (after.retentionDays === 0) {
+    return false;
+  }
+
+  return (
+    before.retentionDays === 0 ||
+    after.retentionDays < before.retentionDays ||
+    (before.keepFavorites && !after.keepFavorites) ||
+    (before.keepReadLater && !after.keepReadLater)
+  );
 }
 
 function parseEmbeddingProviderDraft(

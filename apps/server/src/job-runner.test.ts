@@ -333,6 +333,64 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("defers retention cleanup after one batch when more candidates remain", async () => {
+    const db = createEmptyDatabase();
+    const jobs = new SqliteJobRepository(db);
+    const calls: Array<{ maxBatches?: number }> = [];
+
+    try {
+      jobs.enqueue({
+        id: "job_retention_batch",
+        type: "retention_cleanup",
+        payloadJson: null,
+        maxAttempts: 1,
+        runAfter: 1000,
+        now: 1000
+      });
+      const cleanupJobs = new RetentionCleanupJobService({
+        jobs,
+        retention: {
+          runCleanup(options) {
+            calls.push(options ?? {});
+            return {
+              retentionDays: 30,
+              cutoff: 1000,
+              candidateArticles: 100,
+              vectorsDeleted: 100,
+              hasMoreCandidates: true,
+              articlesSoftDeleted: 100,
+              contentsDeleted: 100,
+              ftsRowsDeleted: 100,
+              rankScoresDeleted: 100,
+              rankExplanationsDeleted: 100
+            };
+          }
+        },
+        now: () => 2000
+      });
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          retention_cleanup: (job) => cleanupJobs.handleRetentionCleanupJob(job)
+        },
+        now: () => 2000
+      });
+
+      await expect(runner.runDueOnce()).resolves.toMatchObject({
+        id: "job_retention_batch"
+      });
+      expect(calls).toEqual([{ maxBatches: 1 }]);
+      expect(jobs.findById("job_retention_batch")).toMatchObject({
+        status: "queued",
+        attempts: 0,
+        runAfter: 4000,
+        error: "Retention cleanup deferred after one batch"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("retention cleanup prevents deleted articles from being restored by feed refresh", async () => {
     const db = createEmptyDatabase();
     const feeds = new SqliteFeedRepository(db);
@@ -344,6 +402,7 @@ describe("job runner foundation", () => {
     const now = Date.parse("2026-05-15T00:00:00.000Z");
 
     try {
+      settings.setJson(RETENTION_ARTICLE_DAYS_SETTING_KEY, 60, now);
       feeds.upsert({
         id: "feed_retention",
         title: "Retention Feed",

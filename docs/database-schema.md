@@ -1109,15 +1109,15 @@ idx_jobs_created_at(created_at)
 
 ### 默认策略
 
-默认文章保留 60 天。
+默认文章保留 0 天，即永久保留。
 
 保留天数配置来源：
 
 ```text
-app_settings.retention.articleDays > DIBAO_ARTICLE_RETENTION_DAYS > 60
+app_settings.retention.articleDays > DIBAO_ARTICLE_RETENTION_DAYS > 0
 ```
 
-合法范围为 `0..3650`，其中 `0` 表示永久保留。非法 setting/env 会回退到默认值 `60`。
+合法范围为 `0..3650`，其中 `0` 表示永久保留。非法 setting/env 会回退到默认值 `0`。
 
 过期判断使用：
 

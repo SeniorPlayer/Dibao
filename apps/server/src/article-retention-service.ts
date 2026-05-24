@@ -7,7 +7,7 @@ import type { VectorStore } from "@dibao/db";
 
 export const RETENTION_ARTICLE_DAYS_SETTING_KEY = "retention.articleDays";
 export const RETENTION_SETTINGS_KEY = "retention.settings";
-export const DEFAULT_ARTICLE_RETENTION_DAYS = 60;
+export const DEFAULT_ARTICLE_RETENTION_DAYS = 0;
 export const MIN_ARTICLE_RETENTION_DAYS = 0;
 export const MAX_ARTICLE_RETENTION_DAYS = 3650;
 export const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +18,7 @@ export type ArticleRetentionSummary = ArticleRetentionCleanupResult & {
   cutoff: number;
   candidateArticles: number;
   vectorsDeleted: number;
+  hasMoreCandidates: boolean;
 };
 
 export type ArticleRetentionServiceOptions = {
@@ -66,13 +67,16 @@ export class ArticleRetentionService {
     };
   }
 
-  runCleanup(): ArticleRetentionSummary {
+  runCleanup(options: { maxBatches?: number } = {}): ArticleRetentionSummary {
     const now = this.now();
     const retentionDays = this.getRetentionDays();
     const retentionPolicy = this.getRetentionPolicy();
     const cutoff = retentionDays === 0 ? 0 : now - retentionDays * DAY_IN_MS;
+    const maxBatches = options.maxBatches ?? Number.POSITIVE_INFINITY;
+    let batches = 0;
     let vectorsDeleted = 0;
     let candidateArticles = 0;
+    let hasMoreCandidates = false;
     let cleanup: ArticleRetentionCleanupResult = {
       articlesSoftDeleted: 0,
       contentsDeleted: 0,
@@ -87,11 +91,12 @@ export class ArticleRetentionService {
         cutoff,
         candidateArticles,
         vectorsDeleted,
+        hasMoreCandidates,
         ...cleanup
       };
     }
 
-    while (true) {
+    while (batches < maxBatches) {
       const candidates = this.options.articles.listRetentionCandidates({
         cutoff,
         keepFavorites: retentionPolicy.keepFavorites,
@@ -101,6 +106,7 @@ export class ArticleRetentionService {
       if (candidates.length === 0) {
         break;
       }
+      batches += 1;
 
       const articleIds = candidates.map((candidate) => candidate.articleId);
       candidateArticles += articleIds.length;
@@ -115,11 +121,22 @@ export class ArticleRetentionService {
       );
     }
 
+    if (batches >= maxBatches) {
+      hasMoreCandidates =
+        this.options.articles.listRetentionCandidates({
+          cutoff,
+          keepFavorites: retentionPolicy.keepFavorites,
+          keepReadLater: retentionPolicy.keepReadLater,
+          limit: 1
+        }).length > 0;
+    }
+
     return {
       retentionDays,
       cutoff,
       candidateArticles,
       vectorsDeleted,
+      hasMoreCandidates,
       ...cleanup
     };
   }

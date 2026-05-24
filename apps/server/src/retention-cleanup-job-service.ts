@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { JobRepository, JobRow } from "@dibao/db";
 import type { JobRunner } from "./job-runner.js";
-import { PermanentJobFailure } from "./job-runner.js";
+import { DeferredJobRun, PermanentJobFailure } from "./job-runner.js";
 import type { ArticleRetentionService } from "./article-retention-service.js";
 
 export const RETENTION_CLEANUP_JOB_TYPE = "retention_cleanup" as const;
 export const DEFAULT_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const RETENTION_CLEANUP_BATCHES_PER_JOB_RUN = 1;
+const RETENTION_CLEANUP_DEFER_MS = 2_000;
 
 export type RetentionCleanupJobServiceOptions = {
   jobs: JobRepository;
@@ -45,7 +47,15 @@ export class RetentionCleanupJobService {
       throw new PermanentJobFailure("Invalid retention_cleanup job payload");
     }
 
-    this.options.retention.runCleanup();
+    const result = this.options.retention.runCleanup({
+      maxBatches: RETENTION_CLEANUP_BATCHES_PER_JOB_RUN
+    });
+    if (result.hasMoreCandidates) {
+      throw new DeferredJobRun(
+        "Retention cleanup deferred after one batch",
+        this.now() + RETENTION_CLEANUP_DEFER_MS
+      );
+    }
   }
 }
 

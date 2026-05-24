@@ -372,6 +372,8 @@ export const zhCN = {
         keepReadLater: "保留稍后读文章",
         enabled: "已开启",
         disabled: "已关闭",
+        cleanupConfirm:
+          "会删除超过期限的历史文章，且无法恢复。清理会进入后台队列，不会在保存设置时同步执行。确定继续吗？",
         mappingHint: "API 字段 retention.retentionDays 会保存到 storage key retention.articleDays。"
       },
       about: {
@@ -1561,6 +1563,8 @@ export const enUS = {
         keepReadLater: "Keep Read Later articles",
         enabled: "On",
         disabled: "Off",
+        cleanupConfirm:
+          "Historical articles older than the retention window will be deleted and cannot be restored. Cleanup will be queued in the background and will not run synchronously while saving settings. Continue?",
         mappingHint: "API field retention.retentionDays is stored as storage key retention.articleDays."
       },
       about: {
@@ -2733,6 +2737,8 @@ export const jaJP = {
         keepReadLater: "あとで読む記事を保持",
         enabled: "オン",
         disabled: "オフ",
+        cleanupConfirm:
+          "保持期間を過ぎた過去の記事は削除され、復元できません。整理はバックグラウンドキューに入り、設定保存中に同期実行されません。続行しますか？",
         mappingHint: "API フィールド retention.retentionDays は storage key retention.articleDays に保存されます。"
       },
       about: {
