@@ -119,8 +119,9 @@ function sampleRateValue(value: unknown, fallback: number): number {
 const sentryConfig = readSentryConfig();
 const sentryAuthToken = (readSentryAuthToken() ?? sentryConfig.authToken) || undefined;
 const dibaoSentryRelease = `dibao@${dibaoVersion}`;
+const sentrySourceMapUploadRequested = process.env.DIBAO_SENTRY_UPLOAD_SOURCEMAPS === "1";
 const sentrySourceMapsEnabled = Boolean(
-  sentryAuthToken && sentryConfig.org && sentryConfig.project
+  sentrySourceMapUploadRequested && sentryAuthToken && sentryConfig.org && sentryConfig.project
 );
 
 export default defineConfig({

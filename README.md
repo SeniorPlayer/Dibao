@@ -234,7 +234,8 @@ docker compose ps
 | `DIBAO_AUTH_LOCKOUT_MS` | `900000` | 登录失败达到阈值后的冷却时间；设为 `0` 可关闭限速。 |
 | `DIBAO_SENTRY_CONFIG` | 未设置 | 可选，指向私有 Sentry 构建配置 JSON。默认读取被忽略的 `config/sentry.json`；示例见 [config/sentry.example.json](./config/sentry.example.json)。 |
 | `DIBAO_SENTRY_DSN` | 未设置 | 可选，覆盖私有 Sentry 配置中的 DSN。未设置 DSN 时，遥测开关仍显示，但 Sentry SDK 不会初始化。 |
-| `SENTRY_AUTH_TOKEN` | 未设置 | 可选，仅用于前端生产构建上传 source maps。 |
+| `SENTRY_AUTH_TOKEN` | 未设置 | 可选，仅用于前端生产构建上传 source maps。默认不会上传；必须同时设置 `DIBAO_SENTRY_UPLOAD_SOURCEMAPS=1`。 |
+| `DIBAO_SENTRY_UPLOAD_SOURCEMAPS` | `0` | 设为 `1` 时，且存在 Sentry org/project/auth token，生产构建才会生成并上传 source maps。 |
 
 开发命令：
 
