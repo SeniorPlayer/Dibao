@@ -3335,8 +3335,12 @@ export function SettingsWorkspace(props: {
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const savedSettingsRef = useRef(props.settings);
+  const hasUnsavedSettingsDraftRef = useRef(false);
 
   useEffect(() => {
+    if (!hasUnsavedSettingsDraftRef.current) {
+      savedSettingsRef.current = props.settings;
+    }
     const nextDraft = draftForSettings(props.settings);
     setDraft(nextDraft);
     setLastInterestClusterPresetIndex(
@@ -3376,6 +3380,7 @@ export function SettingsWorkspace(props: {
   }, [pendingProviderSelectionId, props.embeddingProviders]);
 
   function applyDraft(nextDraft: SettingsDraft) {
+    hasUnsavedSettingsDraftRef.current = true;
     setDraft(nextDraft);
     setLocalError(null);
 
@@ -3406,6 +3411,7 @@ export function SettingsWorkspace(props: {
 
     await props.onSaveSettings(parsed.input);
     savedSettingsRef.current = parsed.settings;
+    hasUnsavedSettingsDraftRef.current = false;
   }
 
   async function handleProviderSubmit() {
