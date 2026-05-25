@@ -764,14 +764,15 @@ export function App() {
     };
   }, [appStage.type, applySettings, t.errors.api]);
 
-  const loadEmbeddingSettings = useCallback(async () => {
+  const loadEmbeddingSettings = useCallback(async (options: { includeIndexes?: boolean } = {}) => {
     setIsEmbeddingLoading(true);
     setEmbeddingError(null);
 
     try {
+      const includeIndexes = options.includeIndexes ?? true;
       const [providers, indexes] = await Promise.all([
         dibaoApi.listEmbeddingProviders(),
-        dibaoApi.listEmbeddingIndexes()
+        includeIndexes ? dibaoApi.listEmbeddingIndexes() : Promise.resolve([])
       ]);
       setEmbeddingProviders(providers);
       setEmbeddingIndexes(indexes);
@@ -787,7 +788,7 @@ export function App() {
       return;
     }
 
-    void loadEmbeddingSettings();
+    void loadEmbeddingSettings({ includeIndexes: false });
   }, [appPage.type, appStage.type, loadEmbeddingSettings]);
 
   const refreshArticleExplanation = useCallback(async (articleId: string) => {
