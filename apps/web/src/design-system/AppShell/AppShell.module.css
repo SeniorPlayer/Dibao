@@ -2372,8 +2372,14 @@
 
 .articleItemRead,
 .articleItem[data-interaction-status="opened"],
+.articleItem[data-interaction-status="reading"],
+.articleItem[data-interaction-status="saved"],
+.articleItem[data-interaction-status="seen"],
 .articleItem[data-interaction-status="read"],
 .articleItemActive[data-interaction-status="opened"],
+.articleItemActive[data-interaction-status="reading"],
+.articleItemActive[data-interaction-status="saved"],
+.articleItemActive[data-interaction-status="seen"],
 .articleItemActive[data-interaction-status="read"] {
   --article-strip-background: var(--color-line-subtle);
 }
@@ -2404,10 +2410,12 @@
 
 .articleItemRead[data-favorited="true"]:not([data-interaction-status="ignored"]),
 .articleItem[data-interaction-status="opened"][data-favorited="true"],
+.articleItem[data-interaction-status="reading"][data-favorited="true"],
 .articleItem[data-interaction-status="saved"][data-favorited="true"],
 .articleItem[data-interaction-status="seen"][data-favorited="true"],
 .articleItem[data-interaction-status="read"][data-favorited="true"],
 .articleItemActive[data-interaction-status="opened"][data-favorited="true"],
+.articleItemActive[data-interaction-status="reading"][data-favorited="true"],
 .articleItemActive[data-interaction-status="saved"][data-favorited="true"],
 .articleItemActive[data-interaction-status="seen"][data-favorited="true"],
 .articleItemActive[data-interaction-status="read"][data-favorited="true"] {
@@ -2421,10 +2429,12 @@
 
 .articleItemRead[data-read-later="true"]:not([data-interaction-status="ignored"]),
 .articleItem[data-interaction-status="opened"][data-read-later="true"],
+.articleItem[data-interaction-status="reading"][data-read-later="true"],
 .articleItem[data-interaction-status="saved"][data-read-later="true"],
 .articleItem[data-interaction-status="seen"][data-read-later="true"],
 .articleItem[data-interaction-status="read"][data-read-later="true"],
 .articleItemActive[data-interaction-status="opened"][data-read-later="true"],
+.articleItemActive[data-interaction-status="reading"][data-read-later="true"],
 .articleItemActive[data-interaction-status="saved"][data-read-later="true"],
 .articleItemActive[data-interaction-status="seen"][data-read-later="true"],
 .articleItemActive[data-interaction-status="read"][data-read-later="true"] {
@@ -2452,10 +2462,12 @@
 
 .articleItemRead[data-favorited="true"][data-read-later="true"]::before,
 .articleItem[data-interaction-status="opened"][data-favorited="true"][data-read-later="true"]::before,
+.articleItem[data-interaction-status="reading"][data-favorited="true"][data-read-later="true"]::before,
 .articleItem[data-interaction-status="saved"][data-favorited="true"][data-read-later="true"]::before,
 .articleItem[data-interaction-status="seen"][data-favorited="true"][data-read-later="true"]::before,
 .articleItem[data-interaction-status="read"][data-favorited="true"][data-read-later="true"]::before,
 .articleItemActive[data-interaction-status="opened"][data-favorited="true"][data-read-later="true"]::before,
+.articleItemActive[data-interaction-status="reading"][data-favorited="true"][data-read-later="true"]::before,
 .articleItemActive[data-interaction-status="saved"][data-favorited="true"][data-read-later="true"]::before,
 .articleItemActive[data-interaction-status="seen"][data-favorited="true"][data-read-later="true"]::before,
 .articleItemActive[data-interaction-status="read"][data-favorited="true"][data-read-later="true"]::before {

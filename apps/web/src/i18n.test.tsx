@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
@@ -200,6 +201,24 @@ describe("web i18n", () => {
         locallyUpdatedIds
       )
     ).toBe(11);
+  });
+
+  it("keeps non-unseen article states from rendering the unread strip", () => {
+    const css = readFileSync(
+      new URL("./design-system/AppShell/AppShell.module.css", import.meta.url),
+      "utf8"
+    );
+    const subtleStripRule = css.slice(
+      css.indexOf(".articleItemRead,"),
+      css.indexOf("--article-strip-background: var(--color-line-subtle);")
+    );
+
+    for (const status of ["opened", "reading", "saved", "seen", "read"]) {
+      expect(subtleStripRule).toContain(`.articleItem[data-interaction-status="${status}"]`);
+      expect(subtleStripRule).toContain(
+        `.articleItemActive[data-interaction-status="${status}"]`
+      );
+    }
   });
 
   it("renders setup and login auth gate copy from the dictionary", () => {
