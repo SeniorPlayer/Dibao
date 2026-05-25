@@ -42,6 +42,7 @@ import { ProfileService } from "./profile-service.js";
 import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_CHUNK_DELAY_MS,
+  RANKING_RECALCULATE_CHUNK_SIZE,
   RANKING_RECALCULATE_JOB_TYPE
 } from "./ranking-job-service.js";
 import { RecommendationRankingService } from "./ranking-service.js";
@@ -1332,11 +1333,72 @@ describe("job runner foundation", () => {
       now += RANKING_RECALCULATE_CHUNK_DELAY_MS;
       await expect(runner.drainDue()).resolves.toBe(1);
       expect(calls).toEqual([
-        { cursor: null, limit: 500 },
-        { cursor: "cursor_1", limit: 500 },
-        { cursor: "cursor_2", limit: 500 }
+        { cursor: null, limit: RANKING_RECALCULATE_CHUNK_SIZE },
+        { cursor: "cursor_1", limit: RANKING_RECALCULATE_CHUNK_SIZE },
+        { cursor: "cursor_2", limit: RANKING_RECALCULATE_CHUNK_SIZE }
       ]);
       expect(jobs.countByTypeAndStatus(RANKING_RECALCULATE_JOB_TYPE, "succeeded")).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("clamps legacy full ranking chunks to the current chunk size", async () => {
+    const db = createEmptyDatabase();
+    try {
+      const jobs = new SqliteJobRepository(db);
+      const calls: Array<{ cursor: string | null; limit: number }> = [];
+      const rankingJobs = new RankingRecalculateJobService({
+        jobs,
+        ranking: {
+          recalculateArticle() {
+            return 1;
+          },
+          recalculateArticles(articleIds: string[]) {
+            return articleIds.length;
+          },
+          recalculateAll() {
+            return 0;
+          },
+          recalculateChunk(input: { cursor?: string | null; limit: number }) {
+            calls.push({
+              cursor: input.cursor ?? null,
+              limit: input.limit
+            });
+            return {
+              processed: input.limit,
+              nextCursor: "cursor_legacy_next"
+            };
+          }
+        },
+        jobIdFactory: () => "job_rank_legacy_next",
+        now: () => 1000
+      });
+      jobs.enqueue({
+        id: "job_rank_legacy",
+        type: RANKING_RECALCULATE_JOB_TYPE,
+        payloadJson: JSON.stringify({ cursor: "cursor_legacy", limit: 500 }),
+        maxAttempts: 2,
+        runAfter: 1000,
+        now: 1000
+      });
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [RANKING_RECALCULATE_JOB_TYPE]: (job) =>
+            rankingJobs.handleRankingRecalculateJob(job)
+        },
+        now: () => 1000
+      });
+
+      await expect(runner.drainDue()).resolves.toBe(1);
+      expect(calls).toEqual([
+        { cursor: "cursor_legacy", limit: RANKING_RECALCULATE_CHUNK_SIZE }
+      ]);
+      expect(JSON.parse(jobs.findById("job_rank_legacy_next")?.payloadJson ?? "{}")).toEqual({
+        cursor: "cursor_legacy_next",
+        limit: RANKING_RECALCULATE_CHUNK_SIZE
+      });
     } finally {
       db.close();
     }

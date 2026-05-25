@@ -5,8 +5,8 @@ import type { ArticleRankingRecalculator } from "./ranking-service.js";
 
 export const RANKING_RECALCULATE_JOB_TYPE = "ranking_recalculate" as const;
 export const RANKING_RECALCULATE_ARTICLE_LIMIT = 500;
-export const RANKING_RECALCULATE_CHUNK_SIZE = 500;
-export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 10_000;
+export const RANKING_RECALCULATE_CHUNK_SIZE = 100;
+export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 30_000;
 
 export type RankingRecalculateJobPayload = {
   articleIds?: string[];
@@ -92,10 +92,14 @@ export class RankingRecalculateJobService {
     if (payload.articleIds) {
       this.options.ranking.recalculateArticles(payload.articleIds);
     } else {
+      const limit = Math.min(
+        payload.limit ?? RANKING_RECALCULATE_CHUNK_SIZE,
+        RANKING_RECALCULATE_CHUNK_SIZE
+      );
       const result = this.options.ranking.recalculateChunk
         ? this.options.ranking.recalculateChunk({
             cursor: payload.cursor ?? null,
-            limit: payload.limit ?? RANKING_RECALCULATE_CHUNK_SIZE
+            limit
           })
         : {
             processed: this.options.ranking.recalculateAll(),
@@ -108,7 +112,7 @@ export class RankingRecalculateJobService {
           type: RANKING_RECALCULATE_JOB_TYPE,
           payloadJson: JSON.stringify({
             cursor: result.nextCursor,
-            limit: payload.limit ?? RANKING_RECALCULATE_CHUNK_SIZE
+            limit
           } satisfies RankingRecalculateJobPayload),
           maxAttempts: 2,
           runAfter: now + RANKING_RECALCULATE_CHUNK_DELAY_MS,
