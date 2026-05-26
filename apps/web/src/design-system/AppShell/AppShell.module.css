@@ -2734,10 +2734,6 @@
   border-top: var(--border-subtle);
 }
 
-.readerExplanationAnchor {
-  scroll-margin-top: var(--space-6);
-}
-
 .readerActionsHidden {
   pointer-events: none;
   opacity: 0;

@@ -6282,16 +6282,7 @@ function ArticleDetailPanel(props: {
   );
   const sourceNotice = props.article ? contentSourceNotice(props.article, t) : null;
   const showReaderActions = useReaderActionVisibility(readerPanelRef, props.article?.id ?? null);
-  const explanationEntryRef = useRef<HTMLDivElement>(null);
   const canExplainDetail = shouldLoadRankExplanation(props.articleView);
-
-  function handleScrollToExplanation() {
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    explanationEntryRef.current?.scrollIntoView({
-      behavior: prefersReducedMotion ? "auto" : "smooth",
-      block: "start"
-    });
-  }
 
   useReaderReadProgress({
     article: props.article,
@@ -6345,7 +6336,7 @@ function ArticleDetailPanel(props: {
               actionError={props.actionError}
               article={props.article}
               canExplain={canExplainDetail}
-              onExplain={handleScrollToExplanation}
+              onExplain={props.onOpenExplanation}
               onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
               pendingAction={props.pendingAction}
               placement="top"
@@ -6370,17 +6361,15 @@ function ArticleDetailPanel(props: {
             pendingAction={props.pendingAction}
             placement="bottom"
           />
-          <div className={styles.readerExplanationAnchor} ref={explanationEntryRef}>
-            <ArticleExplanationEntry
-              articleView={props.articleView}
-              error={props.explanationError}
-              explanation={props.explanation}
-              isOpen={props.isExplanationOpen}
-              isLoading={props.isExplanationLoading}
-              onClose={props.onCloseExplanation}
-              onOpen={props.onOpenExplanation}
-            />
-          </div>
+          <ArticleExplanationEntry
+            articleView={props.articleView}
+            error={props.explanationError}
+            explanation={props.explanation}
+            isOpen={props.isExplanationOpen}
+            isLoading={props.isExplanationLoading}
+            onClose={props.onCloseExplanation}
+            onOpen={props.onOpenExplanation}
+          />
         </article>
       ) : null}
     </section>

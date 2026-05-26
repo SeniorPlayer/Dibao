@@ -154,10 +154,20 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByRole("link", { name: /E2E Article Alpha/ }).click();
     const recommendedReader = page.getByTestId("reader-scroll-container");
     await expect(recommendedReader.getByRole("button", { name: "为什么推荐" })).toBeVisible();
-    await recommendedReader.getByRole("button", { name: "为什么推荐" }).click();
     await expect(recommendedReader.getByRole("heading", { name: "为什么推荐" })).toBeVisible();
     await expect(recommendedReader).toContainText(/推荐|排序|稍后读|新鲜度/);
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const scrollTopBeforeExplanation = await recommendedReader.evaluate(
+      (element) => element.scrollTop
+    );
+    await recommendedReader.getByRole("button", { name: "为什么推荐" }).click();
+    const explanationDialog = page.getByRole("dialog", { name: "为什么推荐" });
+    await expect(explanationDialog).toBeVisible();
+    await expect(explanationDialog).toContainText(/推荐|排序|稍后读|新鲜度/);
+    await expect
+      .poll(() => recommendedReader.evaluate((element) => element.scrollTop))
+      .toBe(scrollTopBeforeExplanation);
+    await explanationDialog.getByRole("button", { name: "关闭" }).click();
+    await expect(explanationDialog).toHaveCount(0);
 
     await page.getByRole("link", { name: "最新" }).click();
     await page.getByRole("button", { name: "打开来源" }).click();
