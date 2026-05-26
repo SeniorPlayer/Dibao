@@ -304,6 +304,7 @@ async function login(page: Page): Promise<void> {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "登录邸报" })).toBeVisible();
+  await page.getByRole("textbox", { name: "用户名" }).fill("e2e");
   await page.getByRole("textbox", { name: "访问密码" }).fill(accessPassword);
   await page.getByRole("button", { name: "登录" }).click();
 

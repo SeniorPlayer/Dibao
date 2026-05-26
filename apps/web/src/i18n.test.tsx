@@ -1236,7 +1236,7 @@ describe("web i18n", () => {
     expect(favoriteHtml).toContain("收藏视图默认按收藏时间排序");
   });
 
-  it("renders personalized explanation entry as a popover trigger", () => {
+  it("renders personalized explanation entry inline on desktop", () => {
     const html = renderToStaticMarkup(
       <DibaoI18nProvider>
         <ArticleExplanationEntry
@@ -1254,16 +1254,16 @@ describe("web i18n", () => {
             ]
           }}
           isLoading={false}
-          isOpen
+          isOpen={false}
           onClose={() => undefined}
           onOpen={() => undefined}
         />
       </DibaoI18nProvider>
     );
 
-    expect(html).toContain("查看完整理由");
     expect(html).toContain("与你近期的正向兴趣相似");
-    expect(html).toContain("关闭");
+    expect(html).not.toContain(">查看完整理由</button>");
+    expect(html).not.toContain("关闭");
   });
 });
 

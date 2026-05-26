@@ -2734,6 +2734,10 @@
   border-top: var(--border-subtle);
 }
 
+.readerExplanationAnchor {
+  scroll-margin-top: var(--space-6);
+}
+
 .readerActionsHidden {
   pointer-events: none;
   opacity: 0;
@@ -2906,10 +2910,7 @@
 }
 
 .reasonInline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
+  display: block;
 }
 
 .reasonInline h3,

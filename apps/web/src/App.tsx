@@ -6282,6 +6282,16 @@ function ArticleDetailPanel(props: {
   );
   const sourceNotice = props.article ? contentSourceNotice(props.article, t) : null;
   const showReaderActions = useReaderActionVisibility(readerPanelRef, props.article?.id ?? null);
+  const explanationEntryRef = useRef<HTMLDivElement>(null);
+  const canExplainDetail = shouldLoadRankExplanation(props.articleView);
+
+  function handleScrollToExplanation() {
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    explanationEntryRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "start"
+    });
+  }
 
   useReaderReadProgress({
     article: props.article,
@@ -6334,6 +6344,8 @@ function ArticleDetailPanel(props: {
             <ArticleActionControls
               actionError={props.actionError}
               article={props.article}
+              canExplain={canExplainDetail}
+              onExplain={handleScrollToExplanation}
               onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
               pendingAction={props.pendingAction}
               placement="top"
@@ -6358,15 +6370,17 @@ function ArticleDetailPanel(props: {
             pendingAction={props.pendingAction}
             placement="bottom"
           />
-          <ArticleExplanationEntry
-            articleView={props.articleView}
-            error={props.explanationError}
-            explanation={props.explanation}
-            isOpen={props.isExplanationOpen}
-            isLoading={props.isExplanationLoading}
-            onClose={props.onCloseExplanation}
-            onOpen={props.onOpenExplanation}
-          />
+          <div className={styles.readerExplanationAnchor} ref={explanationEntryRef}>
+            <ArticleExplanationEntry
+              articleView={props.articleView}
+              error={props.explanationError}
+              explanation={props.explanation}
+              isOpen={props.isExplanationOpen}
+              isLoading={props.isExplanationLoading}
+              onClose={props.onCloseExplanation}
+              onOpen={props.onOpenExplanation}
+            />
+          </div>
         </article>
       ) : null}
     </section>
@@ -6467,8 +6481,10 @@ function shortError(value: string): string {
 export function ArticleActionControls(props: {
   actionError: string | null;
   article: Pick<ArticleDetail, "id" | "state">;
+  canExplain?: boolean;
   hidden?: boolean;
   onAction: (intent: ArticleActionIntent) => void;
+  onExplain?: () => void;
   pendingAction: ArticleActionIntent | null;
   placement?: "top" | "bottom";
 }) {
@@ -6533,6 +6549,17 @@ export function ArticleActionControls(props: {
           onClick={() => props.onAction("notInterested")}
           selected={state.notInterested}
         />
+        {props.canExplain && props.onExplain ? (
+          <button
+            aria-label={t.explanation.title}
+            className={classNames(styles.actionButton, styles.actionExplain)}
+            onClick={props.onExplain}
+            title={t.explanation.title}
+            type="button"
+          >
+            <ActionIcon name="sparkle" />
+          </button>
+        ) : null}
       </div>
       {props.actionError ? <p className={styles.actionError}>{props.actionError}</p> : null}
     </div>
@@ -6609,15 +6636,11 @@ export function ArticleExplanationEntry(props: {
   return (
     <>
       <section className={styles.reasonInline} aria-label={t.explanation.title}>
-        <div>
-          <h3>
-            <ActionIcon name="sparkle" /> {t.explanation.entryTitle}
-          </h3>
-          <p>{t.explanation.teaser}</p>
-        </div>
-        <button className={styles.primaryButton} onClick={props.onOpen} type="button">
-          {t.explanation.open}
-        </button>
+        <RankExplanationPanel
+          error={props.error}
+          explanation={props.explanation}
+          isLoading={props.isLoading}
+        />
       </section>
 
       <button
