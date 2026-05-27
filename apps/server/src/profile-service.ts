@@ -232,17 +232,22 @@ export class ProfileService {
       return false;
     }
 
+    if (event.embeddingContentHash !== event.contentHash) {
+      return false;
+    }
+
     const snapshot = parseSnapshot(this.options.profiles.getTopicSnapshot(event.articleId));
+    if (snapshotHasProcessedEvent(snapshot, event.embeddingIndexId, event.id)) {
+      return false;
+    }
+
     const bucket = snapshotBucket(snapshot, event.embeddingIndexId, event.embeddingContentHash);
 
     if (bucket.processedEventIds?.includes(event.id)) {
       return false;
     }
 
-    const staleForCurrentContent = event.createdAt < event.articleUpdatedAt;
-    const impact = staleForCurrentContent
-      ? { polarity: "stats_only" as const, profileWeight: 0 }
-      : impactForEvent(event, bucket);
+    const impact = impactForEvent(event, bucket);
 
     bucket.processedEventIds = [...(bucket.processedEventIds ?? []), event.id];
     if (event.eventType === "read_progress") {
@@ -867,6 +872,21 @@ function snapshotBucket(
   snapshot.profileV0[embeddingIndexId] ??= {};
   snapshot.profileV0[embeddingIndexId][contentHash] ??= {};
   return snapshot.profileV0[embeddingIndexId][contentHash];
+}
+
+function snapshotHasProcessedEvent(
+  snapshot: ProfileSnapshot,
+  embeddingIndexId: string,
+  eventId: string
+): boolean {
+  const indexSnapshot = snapshot.profileV0?.[embeddingIndexId];
+  if (!indexSnapshot) {
+    return false;
+  }
+
+  return Object.values(indexSnapshot).some((bucket) =>
+    bucket.processedEventIds?.includes(eventId)
+  );
 }
 
 function bestClusterMatch(vector: number[], clusters: InterestClusterRow[]) {

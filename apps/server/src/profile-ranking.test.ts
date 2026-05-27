@@ -22,6 +22,7 @@ import {
   PROFILE_EVENT_PROCESS_JOB_TYPE,
   ProfileEventProcessJobService
 } from "./profile-event-job-service.js";
+import { ProfileRebuildService } from "./profile-rebuild-service.js";
 import { ProfileService } from "./profile-service.js";
 import {
   RankingRecalculateJobService,
@@ -53,7 +54,7 @@ function buildServer(options: Parameters<typeof buildRealServer>[0] = {}) {
 }
 
 describe("profile algorithm and recommendation ranking", () => {
-  it("processes a single event idempotently and does not replay it for a new content hash", () => {
+  it("processes a single event idempotently and does not replay it after a content hash change", () => {
     const fixture = createProfileFixture();
     const { actions, articles, db, profile, profiles, vectorStore } = fixture;
 
@@ -103,9 +104,147 @@ describe("profile algorithm and recommendation ranking", () => {
       const snapshot = JSON.parse(profiles.getTopicSnapshot("article_liked") ?? "{}") as {
         profileV0?: Record<string, Record<string, { processedEventIds?: string[] }>>;
       };
-      expect(
-        snapshot.profileV0?.index_profile?.hash_liked_v2?.processedEventIds
-      ).toContain(result!.eventId);
+      expect(snapshot.profileV0?.index_profile?.hash_liked?.processedEventIds).toContain(
+        result!.eventId
+      );
+      expect(snapshot.profileV0?.index_profile?.hash_liked_v2?.processedEventIds).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a valid profile signal when article updated_at is newer but content hash still matches", () => {
+    const fixture = createProfileFixture();
+    const { actions, articles, db, profile, profiles } = fixture;
+
+    try {
+      const result = actions.record({
+        articleId: "article_liked",
+        type: "favorite",
+        now: 2000
+      });
+      articles.upsert({
+        id: "article_liked",
+        feedId: "feed_profile",
+        url: "https://example.com/article_liked",
+        canonicalUrl: "https://example.com/article_liked",
+        title: "Liked profile topic",
+        summary: "The same content refreshed by the feed.",
+        publishedAt: 1000,
+        discoveredAt: 1000,
+        contentHash: "hash_liked",
+        dedupeKey: "article_liked",
+        now: 3000
+      });
+
+      profile.processEvent(result!.eventId);
+
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })).toHaveLength(1);
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })[0]?.weight).toBeCloseTo(4.2);
+      expect(clusterEvidenceCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not mark a stale embedding hash as processed before the current vector arrives", () => {
+    const fixture = createProfileFixture();
+    const { actions, articles, db, profile, profiles, vectorStore } = fixture;
+
+    try {
+      const result = actions.record({
+        articleId: "article_liked",
+        type: "favorite",
+        now: 2000
+      });
+      articles.upsert({
+        id: "article_liked",
+        feedId: "feed_profile",
+        url: "https://example.com/article_liked",
+        canonicalUrl: "https://example.com/article_liked",
+        title: "Liked profile topic rewritten",
+        summary: "A changed article body.",
+        publishedAt: 1000,
+        discoveredAt: 1000,
+        contentHash: "hash_liked_v2",
+        dedupeKey: "article_liked",
+        now: 3000
+      });
+
+      profile.processEvent(result!.eventId);
+
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })).toHaveLength(0);
+      expect(profiles.getTopicSnapshot("article_liked")).toBeNull();
+
+      vectorStore.upsertArticleVector({
+        articleId: "article_liked",
+        embeddingIndexId: "index_profile",
+        vector: [1, 0, 0],
+        contentHash: "hash_liked_v2",
+        now: 4000
+      });
+      profile.processArticleEvents(["article_liked"]);
+
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })).toHaveLength(1);
+      expect(clusterEvidenceCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rebuilds active-index profile clusters from behavior history without recomputing embeddings", () => {
+    const fixture = createProfileFixture();
+    const { actions, db, profile, profiles } = fixture;
+
+    try {
+      const result = actions.record({
+        articleId: "article_liked",
+        type: "favorite",
+        now: 2000
+      });
+      profiles.upsertTopicSnapshot({
+        articleId: "article_liked",
+        feedId: "feed_profile",
+        topicSnapshotJson: JSON.stringify({
+          profileV0: {
+            index_profile: {
+              hash_liked: {
+                processedEventIds: [result!.eventId]
+              }
+            }
+          }
+        }),
+        now: 3000
+      });
+
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })).toHaveLength(0);
+
+      const rebuild = new ProfileRebuildService({
+        db,
+        profile
+      });
+      const rebuildResult = rebuild.rebuildActiveIndexProfile({
+        rebuildLabels: false,
+        rebuildFamilies: false,
+        recalculateRanking: false
+      });
+
+      expect(rebuildResult).toMatchObject({
+        embeddingIndexId: "index_profile",
+        reset: {
+          snapshotsTouched: 1
+        },
+        replay: {
+          articleCount: 1,
+          profileChanged: true
+        },
+        after: {
+          clusters: 1,
+          evidence: 1
+        }
+      });
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })[0]?.weight).toBeCloseTo(4.2);
+      expect(clusterEvidenceCount(db)).toBe(1);
     } finally {
       db.close();
     }
@@ -2025,6 +2164,10 @@ function maintenanceJob(type: Parameters<RecommendationMaintenanceService["handl
     createdAt: 0,
     updatedAt: 0
   };
+}
+
+function clusterEvidenceCount(db: DibaoDatabase): number {
+  return countRows(db, "interest_cluster_evidence");
 }
 
 function countRows(db: DibaoDatabase, tableName: string): number {
