@@ -41,7 +41,7 @@
 - 保存、あとで読む、既読、興味なし、未読整理。
 - ローカル Mac / Windows では Ollama + `bge-m3` によるローカル embedding。
 - 小さな VPS では Gemini の無料枠、または SiliconFlow / 硅基流动の `BAAI/bge-m3` を推奨。`BAAI/bge-m3` は無料で、日次上限ではなく RPM / TPM のレート制限で利用できます。
-- Docker volume に SQLite データを保存。
+- ローカルの永続化フォルダに SQLite データを保存。
 - PWA としてホーム画面 / Dock に追加。
 
 日本国内向けの無料 embedding provider も確認しましたが、README に安定して推奨できる「日本発・無料・OpenAI-compatible・embedding 対応」の選択肢は見つかりませんでした。日本語 RSS でも、まずはローカル Ollama、Gemini、または SiliconFlow の国際向け API を使う構成が現実的です。
@@ -63,16 +63,13 @@ services:
       DIBAO_DATABASE_PATH: /data/dibao.sqlite
       DIBAO_COOKIE_SECURE: "false"
     volumes:
-      - dibao-data:/data
-
-volumes:
-  dibao-data:
+      - ./data:/data
 ```
 
 ```bash
 docker compose up -d
 ```
 
-`http://localhost:8080` を開き、初回セットアップでユーザー名とパスワードを作成します。Provider は後から設定できます。データは `/data/dibao.sqlite` に保存されるため、アップグレード前に Docker volume をバックアップしてください。
+`http://localhost:8080` を開き、初回セットアップでユーザー名とパスワードを作成します。Provider は後から設定できます。データはローカルの `./data/dibao.sqlite` に保存されるため、アップグレード前にこのフォルダをバックアップしてください。
 
 詳細な製品説明と開発情報は [中文主页](./README.md) を参照してください。

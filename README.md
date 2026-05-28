@@ -51,7 +51,7 @@
 - **信源归你**：只整理你订阅的 RSS / Atom，不引入陌生信息流。
 - **排序帮你**：从“最新”里筛出更值得先看的文章，让未读列表更像一张可复核的日报。
 - **解释给你**：每篇推荐都能看到原因，例如主题相近、来源稳定、时间新鲜、与你最近的阅读反馈有关。
-- **数据留给你**：数据库在你的 Docker volume、NAS、家用服务器或 VPS 上。
+- **数据留给你**：数据库在你的本地持久化目录、NAS、家用服务器或 VPS 上。
 - **失败可恢复**：订阅源抓取失败、provider 不可用、索引需要重建时，界面会给出状态和恢复入口。
 
 ### 你会得到什么
@@ -87,10 +87,7 @@ services:
       DIBAO_DATABASE_PATH: /data/dibao.sqlite
       DIBAO_COOKIE_SECURE: "false"
     volumes:
-      - dibao-data:/data
-
-volumes:
-  dibao-data:
+      - ./data:/data
 ```
 
 启动：
@@ -172,19 +169,18 @@ ollama pull bge-m3
 
 ### 备份与升级
 
-邸报默认把数据放在 Docker volume：
+邸报默认把数据放在 `compose.yaml` 同目录下的持久化文件夹：
 
 ```text
-dibao-data:/data
-/data/dibao.sqlite
+./data:/data
+./data/dibao.sqlite
 ```
 
 升级前建议备份：
 
 ```bash
 docker compose stop
-docker run --rm -v dibao_dibao-data:/data -v "$PWD:/backup" busybox \
-  sh -c 'tar czf /backup/dibao-data-backup.tgz -C /data .'
+tar czf dibao-data-backup.tgz -C data .
 docker compose up -d
 ```
 

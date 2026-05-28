@@ -48,7 +48,7 @@ Chronological RSS is honest, but it can become impossible to scan. Platform feed
 - Your subscriptions stay under your control.
 - Recommendations only happen inside your own feeds.
 - Each recommendation can show human-readable reasons.
-- The SQLite database stays in your Docker volume, NAS, home server, or VPS.
+- The SQLite database stays in your local persistent folder, NAS, home server, or VPS.
 - Provider failures, feed errors, and indexing work are visible and recoverable.
 
 ### What You Get
@@ -83,10 +83,7 @@ services:
       DIBAO_DATABASE_PATH: /data/dibao.sqlite
       DIBAO_COOKIE_SECURE: "false"
     volumes:
-      - dibao-data:/data
-
-volumes:
-  dibao-data:
+      - ./data:/data
 ```
 
 Start Dibao:
@@ -145,16 +142,15 @@ Free tiers, pricing, and regional availability can change. Check [Ollama bge-m3]
 Default data path:
 
 ```text
-dibao-data:/data
-/data/dibao.sqlite
+./data:/data
+./data/dibao.sqlite
 ```
 
 Back up before upgrading:
 
 ```bash
 docker compose stop
-docker run --rm -v dibao_dibao-data:/data -v "$PWD:/backup" busybox \
-  sh -c 'tar czf /backup/dibao-data-backup.tgz -C /data .'
+tar czf dibao-data-backup.tgz -C data .
 docker compose up -d
 ```
 
@@ -188,7 +184,7 @@ No. Recommendations stay inside your RSS / Atom feeds.
 
 **Where is my data stored?**
 
-In your SQLite database under the Docker volume mounted at `/data`.
+In the SQLite database under the local `./data` folder mounted at `/data`.
 
 **Can I install it on my phone?**
 

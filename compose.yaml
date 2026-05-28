@@ -14,7 +14,4 @@ services:
       DIBAO_DATABASE_PATH: /data/dibao.sqlite
       DIBAO_COOKIE_SECURE: "false"
     volumes:
-      - dibao-data:/data
-
-volumes:
-  dibao-data:
+      - ./data:/data
