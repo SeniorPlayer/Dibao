@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const project = `dibao-d-smoke-${process.pid}`;
 const hostPort = process.env.DIBAO_DOCKER_SMOKE_PORT ?? "18080";
+const username = "docker-smoke";
 const password = "docker smoke password";
 const fixtureRss = `<?xml version="1.0"?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
@@ -32,7 +33,10 @@ const fixtureRss = `<?xml version="1.0"?>
   </channel>
 </rss>`;
 const tmp = mkdtempSync(join(tmpdir(), "dibao-docker-smoke-"));
+const dataPath = join(tmp, "data");
 const overridePath = join(tmp, "compose.override.yaml");
+mkdirSync(dataPath, { recursive: true });
+chmodSync(dataPath, 0o777);
 
 const fixture = await startFixtureServer();
 const apiBase = `http://127.0.0.1:${hostPort}`;
@@ -46,6 +50,8 @@ writeFileSync(
     environment:
       DIBAO_BACKGROUND_JOBS: "true"
       DIBAO_JOB_RUNNER_INTERVAL_MS: "500"
+    volumes:
+      - "${dataPath}:/data"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 `
@@ -55,7 +61,7 @@ try {
   run("docker", ["compose", "-p", project, "-f", "compose.yaml", "-f", overridePath, "up", "-d", "--build"]);
   await waitForHealth(apiBase);
 
-  const setup = await postJson(`${apiBase}/api/auth/setup`, { password });
+  const setup = await postJson(`${apiBase}/api/auth/setup`, { username, password });
   const cookie = setup.headers.get("set-cookie")?.split(";")[0];
   if (!cookie) {
     throw new Error("Setup did not return a session cookie");

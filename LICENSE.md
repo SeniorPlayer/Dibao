@@ -8,8 +8,8 @@ Copyright (c) 2026 Pls and Dibao contributors.
 - Licensor: Pls / Dibao project maintainer
 - License: Business Source License 1.1
 - SPDX-License-Identifier: BUSL-1.1
-- Release Date: TODO
-- Change Date: TODO
+- Release Date: 2026-05-28
+- Change Date: 2030-05-28
 - Change License: Apache License 2.0
 - Change License SPDX identifier: Apache-2.0
 

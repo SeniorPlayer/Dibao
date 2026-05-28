@@ -1,20 +1,21 @@
 # Dibao v0.1.0 Release Checklist
 
-Last updated: 2026-05-16
+Last updated: 2026-05-28
 
 Target tag: `v0.1.0`
 
-Candidate branch: `main`
+Candidate branch: `release/v0.1.0`
 
 ## Release Decision
 
-`main` is a v0.1.0 release candidate after the RC closure commit is merged. Do not tag until all pre-tag gates below are green on the exact commit that will be tagged.
+`release/v0.1.0` is the v0.1.0 release candidate. Do not tag until all pre-tag gates below are green on the exact commit that will be merged to `main` and tagged.
 
 ## Blocking Pre-Tag Items
 
 | Status | Item | Acceptance |
 | --- | --- | --- |
 | Done | Version bump | Root/workspace package versions, internal workspace deps, `package-lock.json`, shared `dibaoVersion`, version tests, and API/docs examples are aligned to `0.1.0`. |
+| Done | License metadata | `LICENSE.md` is frozen with Release Date `2026-05-28`; Change Date is `2030-05-28`; Docker license label carries the same Change Date. |
 | Done | Docker build verification | `docker build -t dibao:local .` succeeds. If the shell lacks `docker`, use Docker Desktop bundled CLI with `/Applications/Docker.app/Contents/Resources/bin` on `PATH`. |
 | Done | Compose verification | `docker compose config` succeeds. |
 | Done | Docker recommendation smoke | `npm run smoke:docker-recommendation` reaches full embedding coverage and returns recommended articles. |
@@ -23,10 +24,10 @@ Candidate branch: `main`
 
 ## Pre-Tag Validation
 
-Run from a clean checkout of `main`:
+Run from a clean checkout of the release candidate:
 
 ```bash
-git checkout main
+git checkout release/v0.1.0
 git pull --ff-only
 git status -sb
 npm run typecheck
@@ -51,6 +52,7 @@ Expected result:
 - Docker image builds.
 - Compose config is valid.
 - `.github/workflows/publish-docker-image.yml` is tracked on the release branch before creating the release tag.
+- `docs/release-notes-v0.1.0.md` includes Simplified Chinese, Japanese, and English user-facing release notes, install/upgrade notes, known limitations, and the first-release migration list.
 - Docker recommendation smoke completes provider setup, backfill, diagnostics, and recommended list checks.
 - Performance report is regenerated or confirmed in `docs/recommendation-performance.md`.
 - Real Ollama probe passes with the user's local provider, currently `bge-m3` with dimension `1024`.
@@ -90,11 +92,13 @@ Expected result:
 
 ## Tagging Commands
 
-Do not run these until all blocking pre-tag items are done and the user explicitly approves tagging.
+Do not run these until all blocking pre-tag items are done and the user explicitly approves tagging or a release operation.
 
 ```bash
 git checkout main
 git pull --ff-only
+git merge --no-ff release/v0.1.0
+git push origin main
 git tag -a v0.1.0 -m "Dibao v0.1.0"
 git push origin v0.1.0
 ```
@@ -103,6 +107,6 @@ git push origin v0.1.0
 
 - Release title: `Dibao v0.1.0`
 - Mark as latest release: yes.
-- Mark as prerelease: recommended `yes`, because this is the first public MVP.
+- Mark as prerelease: no.
 - Attachments: none required for source release.
 - Body: use `docs/release-notes-v0.1.0.md`.
