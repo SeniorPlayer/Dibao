@@ -40,7 +40,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await page.getByRole("button", { name: "添加此源" }).first().click();
 
     await expect(page.getByRole("heading", { name: "推荐能力" })).toBeVisible();
-    await page.getByRole("button", { name: "暂不配置，继续" }).click();
+    await page.getByRole("button", { name: "跳过，使用基础排序" }).click();
 
     await expect(page.getByRole("link", { name: /E2E Article Beta/ })).toBeVisible();
 

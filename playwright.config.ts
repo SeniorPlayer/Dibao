@@ -15,6 +15,7 @@ export default defineConfig({
   },
   use: {
     baseURL,
+    locale: "zh-CN",
     trace: "retain-on-failure"
   },
   webServer: {
