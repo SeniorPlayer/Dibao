@@ -35,12 +35,12 @@ jobs:
       DONE_STATUS: Done
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Sync feature requests
         run: node .github/scripts/sync-roadmap.mjs
