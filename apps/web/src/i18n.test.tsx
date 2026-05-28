@@ -27,7 +27,7 @@ import {
   unreadCountWithKnownLocalStates,
   unreadCountAfterStateChange
 } from "./articleListState.js";
-import { defaultAppSettings, type ArticleListItem } from "./api.js";
+import { defaultAppSettings, type ArticleListItem, type EmbeddingProvider } from "./api.js";
 import { FeedManagementWorkspace } from "./FeedManagementPanel.js";
 import {
   DibaoI18nProvider,
@@ -288,7 +288,6 @@ describe("web i18n", () => {
       <DibaoI18nProvider>
         <SetupProviderPanel
           activatingProviderId={null}
-          deletingProviderId={null}
           embeddingError={null}
           embeddingProviders={[]}
           isEmbeddingLoading={false}
@@ -296,7 +295,6 @@ describe("web i18n", () => {
           testingProviderId={null}
           onActivateEmbeddingProvider={() => Promise.resolve(true)}
           onContinue={() => undefined}
-          onDeleteEmbeddingProvider={() => Promise.resolve()}
           onSaveEmbeddingProvider={() => Promise.resolve(null)}
           onTestEmbeddingProvider={() => Promise.resolve()}
         />
@@ -306,7 +304,6 @@ describe("web i18n", () => {
       <DibaoI18nProvider locale="en-US">
         <SetupProviderPanel
           activatingProviderId={null}
-          deletingProviderId={null}
           embeddingError={null}
           embeddingProviders={[]}
           isEmbeddingLoading={false}
@@ -314,7 +311,6 @@ describe("web i18n", () => {
           testingProviderId={null}
           onActivateEmbeddingProvider={() => Promise.resolve(true)}
           onContinue={() => undefined}
-          onDeleteEmbeddingProvider={() => Promise.resolve()}
           onSaveEmbeddingProvider={() => Promise.resolve(null)}
           onTestEmbeddingProvider={() => Promise.resolve()}
         />
@@ -324,7 +320,6 @@ describe("web i18n", () => {
       <DibaoI18nProvider locale="ja-JP">
         <SetupProviderPanel
           activatingProviderId={null}
-          deletingProviderId={null}
           embeddingError={null}
           embeddingProviders={[]}
           isEmbeddingLoading={false}
@@ -332,7 +327,41 @@ describe("web i18n", () => {
           testingProviderId={null}
           onActivateEmbeddingProvider={() => Promise.resolve(true)}
           onContinue={() => undefined}
-          onDeleteEmbeddingProvider={() => Promise.resolve()}
+          onSaveEmbeddingProvider={() => Promise.resolve(null)}
+          onTestEmbeddingProvider={() => Promise.resolve()}
+        />
+      </DibaoI18nProvider>
+    );
+    const testedProvider: EmbeddingProvider = {
+      id: "provider_tested",
+      type: "openai_compatible",
+      name: "Test Provider",
+      baseUrl: "https://example.com/v1",
+      model: "text-embedding-3-small",
+      dimension: 1536,
+      textMaxChars: 8000,
+      requestsPerMinute: null,
+      requestsPerDay: null,
+      enabled: false,
+      qualityTier: "recommended",
+      hasApiKey: true,
+      lastTestStatus: "success",
+      lastTestError: null,
+      lastTestAt: "2026-05-28T06:44:11.354Z",
+      createdAt: "2026-05-28T06:44:11.354Z",
+      updatedAt: "2026-05-28T06:44:11.354Z"
+    };
+    const testedProviderHtml = renderToStaticMarkup(
+      <DibaoI18nProvider>
+        <SetupProviderPanel
+          activatingProviderId={null}
+          embeddingError={null}
+          embeddingProviders={[testedProvider]}
+          isEmbeddingLoading={false}
+          isSavingEmbeddingProvider={false}
+          testingProviderId={null}
+          onActivateEmbeddingProvider={() => Promise.resolve(true)}
+          onContinue={() => undefined}
           onSaveEmbeddingProvider={() => Promise.resolve(null)}
           onTestEmbeddingProvider={() => Promise.resolve()}
         />
@@ -350,12 +379,13 @@ describe("web i18n", () => {
     expect(providerHtml).toContain("#%E6%8E%A8%E8%8D%90-provider");
     expect(providerHtml).toContain("跳过，使用基础排序");
     expect(providerHtml).toContain("保存配置并测试连接");
-    expect(providerHtml).toContain("保存并启用");
     expect(providerHtml).toContain("API Key");
     expect(providerHtml).toContain("Base URL");
     expect(providerHtml).toContain("模型");
     expect(providerHtml).toContain("切片长度");
-    expect(providerHtml).toContain("测试连接");
+    expect(testedProviderHtml).toContain("启用 Provider 并继续");
+    expect(testedProviderHtml).not.toContain("保存配置并测试连接</button>");
+    expect(testedProviderHtml).not.toContain("删除");
     expect(providerEnglishHtml).toContain("tree/main");
     expect(providerEnglishHtml).toContain("#%E6%8E%A8%E8%8D%90-provider");
     expect(providerJapaneseHtml).toContain("README.ja.md");

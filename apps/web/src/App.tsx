@@ -2405,14 +2405,12 @@ export function App() {
         {pwaStatusBanner}
         <SetupProviderPanel
           activatingProviderId={activatingProviderId}
-          deletingProviderId={deletingProviderId}
           embeddingError={embeddingError}
           embeddingProviders={embeddingProviders}
           isEmbeddingLoading={isEmbeddingLoading}
           isSavingEmbeddingProvider={isSavingEmbeddingProvider}
           testingProviderId={testingProviderId}
           onContinue={handleSetupProviderContinue}
-          onDeleteEmbeddingProvider={handleDeleteEmbeddingProvider}
           onActivateEmbeddingProvider={handleActivateEmbeddingProvider}
           onSaveEmbeddingProvider={handleSaveEmbeddingProvider}
           onTestEmbeddingProvider={handleTestEmbeddingProvider}
@@ -3199,7 +3197,6 @@ export function FeedDiscoveryPanel(props: {
 
 export function SetupProviderPanel(props: {
   activatingProviderId: string | null;
-  deletingProviderId: string | null;
   embeddingError: string | null;
   embeddingProviders: EmbeddingProvider[];
   isEmbeddingLoading: boolean;
@@ -3207,7 +3204,6 @@ export function SetupProviderPanel(props: {
   testingProviderId: string | null;
   onActivateEmbeddingProvider: (providerId: string) => Promise<boolean>;
   onContinue: () => void;
-  onDeleteEmbeddingProvider: (providerId: string) => Promise<void>;
   onSaveEmbeddingProvider: (
     providerId: string | null,
     input: CreateEmbeddingProviderInput | UpdateEmbeddingProviderInput
@@ -3278,12 +3274,17 @@ export function SetupProviderPanel(props: {
   }
 
   async function handleProviderEnableSubmit() {
-    if (!selectedProvider || !canEnableSelectedProvider) {
+    if (!selectedProvider || !canFinalizeSelectedProvider) {
       setProviderLocalError(t.setup.provider.testRequired);
       return;
     }
 
     setProviderLocalError(null);
+    if (selectedProvider.enabled) {
+      props.onContinue();
+      return;
+    }
+
     const activated = await props.onActivateEmbeddingProvider(selectedProvider.id);
     if (activated) {
       props.onContinue();
@@ -3297,15 +3298,16 @@ export function SetupProviderPanel(props: {
         null;
   const selectedProviderDraftMatches =
     selectedProvider !== null && embeddingProviderDraftMatchesProvider(providerDraft, selectedProvider);
-  const canEnableSelectedProvider =
+  const canFinalizeSelectedProvider =
     selectedProvider !== null &&
-    !selectedProvider.enabled &&
     selectedProvider.lastTestStatus === "success" &&
     selectedProviderDraftMatches;
   const isActivatingSelectedProvider =
     selectedProvider !== null && props.activatingProviderId === selectedProvider.id;
   const isTestingSelectedProvider =
     selectedProvider !== null && props.testingProviderId === selectedProvider.id;
+  const isPrimaryProviderActionBusy =
+    props.isSavingEmbeddingProvider || isTestingSelectedProvider || isActivatingSelectedProvider;
 
   return (
     <section
@@ -3595,56 +3597,29 @@ export function SetupProviderPanel(props: {
       <div className={styles.managementActions}>
         <button
           className={styles.primaryButton}
-          disabled={props.isSavingEmbeddingProvider || isTestingSelectedProvider}
-          onClick={() => void handleProviderTestSubmit()}
-          type="button"
-        >
-          {props.isSavingEmbeddingProvider
-            ? t.setup.provider.saving
-            : isTestingSelectedProvider
-              ? t.settings.sections.provider.testing
-              : t.setup.provider.saveAndTest}
-        </button>
-        <button
-          className={styles.primaryButton}
-          disabled={
-            !canEnableSelectedProvider ||
-            isActivatingSelectedProvider ||
-            props.isSavingEmbeddingProvider ||
-            isTestingSelectedProvider
+          disabled={isPrimaryProviderActionBusy}
+          onClick={() =>
+            void (canFinalizeSelectedProvider
+              ? handleProviderEnableSubmit()
+              : handleProviderTestSubmit())
           }
-          onClick={() => void handleProviderEnableSubmit()}
           type="button"
         >
           {isActivatingSelectedProvider
             ? t.settings.sections.provider.activating
-            : t.setup.provider.saveAndContinue}
-        </button>
-        <button
-          className={styles.secondaryButton}
-          disabled={!selectedProvider || isTestingSelectedProvider}
-          onClick={() =>
-            selectedProvider ? void props.onTestEmbeddingProvider(selectedProvider.id) : undefined
-          }
-          type="button"
-        >
-          {isTestingSelectedProvider ? t.settings.sections.provider.testing : t.settings.sections.provider.test}
+            : props.isSavingEmbeddingProvider
+              ? t.setup.provider.saving
+              : isTestingSelectedProvider
+                ? t.settings.sections.provider.testing
+                : canFinalizeSelectedProvider
+                  ? selectedProvider?.enabled
+                    ? t.setup.provider.useProviderAndContinue
+                    : t.setup.provider.enableAndContinue
+                  : t.setup.provider.saveAndTest}
         </button>
         <button className={styles.secondaryButton} onClick={props.onContinue} type="button">
           {t.setup.provider.continue}
         </button>
-        {selectedProvider ? (
-          <button
-            className={styles.dangerButton}
-            disabled={props.deletingProviderId === selectedProvider.id}
-            onClick={() => void props.onDeleteEmbeddingProvider(selectedProvider.id)}
-            type="button"
-          >
-            {props.deletingProviderId === selectedProvider.id
-              ? t.settings.sections.provider.deleting
-              : t.settings.sections.provider.delete}
-          </button>
-        ) : null}
       </div>
     </section>
   );
