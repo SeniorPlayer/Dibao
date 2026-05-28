@@ -1108,7 +1108,7 @@ describe("web i18n", () => {
     expect(html).toContain("https://x.com/JeffreyCalm");
     expect(html).toContain("https://1q43.blog");
     expect(html).toContain("https://dibao.app");
-    expect(html).toContain("https://github.com/Pls-1q43/dibao");
+    expect(html).toContain("https://github.com/Pls-1q43/Dibao");
     expect(html).toContain("控制是否向开发者发送用于优化邸报的错误、性能和体验反馈数据。");
     expect(html).not.toContain("反馈遥测");
     expect(html).toContain("智能能力");

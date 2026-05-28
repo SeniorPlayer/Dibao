@@ -4913,8 +4913,8 @@ export function SettingsWorkspace(props: {
             <div>
               <dt>{t.settings.sections.about.github}</dt>
               <dd>
-                <a href="https://github.com/Pls-1q43/dibao" rel="noreferrer" target="_blank">
-                  Pls-1q43/dibao
+                <a href="https://github.com/Pls-1q43/Dibao" rel="noreferrer" target="_blank">
+                  Pls-1q43/Dibao
                 </a>
               </dd>
             </div>

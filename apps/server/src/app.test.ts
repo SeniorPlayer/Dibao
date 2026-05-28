@@ -2664,7 +2664,7 @@ describe("server API vertical slice", () => {
         JSON.stringify({
           tag_name: "v0.2.0",
           name: "Dibao v0.2.0",
-          html_url: "https://github.com/Pls-1q43/dibao/releases/tag/v0.2.0",
+          html_url: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
           published_at: "2026-05-28T08:00:00.000Z"
         }),
         {
@@ -2697,7 +2697,7 @@ describe("server API vertical slice", () => {
         data: {
           currentVersion: "0.1.0",
           latestVersion: "v0.2.0",
-          releaseUrl: "https://github.com/Pls-1q43/dibao/releases/tag/v0.2.0",
+          releaseUrl: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
           updateAvailable: true,
           status: "update_available",
           checkedAt: "2026-05-28T09:30:00.000Z",

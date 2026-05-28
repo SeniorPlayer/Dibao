@@ -6,7 +6,7 @@ export const LATEST_RELEASE_SETTINGS_KEY = "release.latest";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GITHUB_RELEASE_CHECK_TIMEOUT_MS = 8000;
 const GITHUB_LATEST_RELEASE_URL =
-  "https://api.github.com/repos/Pls-1q43/dibao/releases/latest";
+  "https://api.github.com/repos/Pls-1q43/Dibao/releases/latest";
 
 type LatestReleaseCache = {
   latestVersion: string | null;
