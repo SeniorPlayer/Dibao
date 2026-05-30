@@ -213,6 +213,9 @@ export type InterestClusterLabelServiceOptions = {
 };
 
 const rawDefaultLexicon = defaultLabelLexicon as RawDefaultLexicon;
+const MAX_LABEL_DEDUPE_SCAN_CANDIDATES = 240;
+const MAX_LABEL_TERMS_FOR_DISAMBIGUATION = 8;
+const MAX_REPRESENTATIVE_DEDUPE_SCAN_CANDIDATES = 120;
 
 export class InterestClusterLabelService {
   private readonly now: () => number;
@@ -710,20 +713,22 @@ export class InterestClusterLabelService {
     const hasAlternatives = candidateRows.some(
       (candidate) => candidate.clusterRatio <= settings.commonTermClusterRatioDrop || candidate.protectedTerm
     );
+    const rankedLabelCandidates = candidateRows
+      .filter((candidate) => {
+        if (
+          !candidate.protectedTerm &&
+          hasAlternatives &&
+          candidate.clusterRatio > settings.commonTermClusterRatioDrop
+        ) {
+          return false;
+        }
+        return candidate.weight >= 0.35;
+      })
+      .sort((left, right) => right.weight - left.weight || left.term.localeCompare(right.term));
     const labelTerms = dedupeSubsumedTerms(
-      candidateRows
-        .filter((candidate) => {
-          if (
-            !candidate.protectedTerm &&
-            hasAlternatives &&
-            candidate.clusterRatio > settings.commonTermClusterRatioDrop
-          ) {
-            return false;
-          }
-          return candidate.weight >= 0.35;
-        })
-        .sort((left, right) => right.weight - left.weight || left.term.localeCompare(right.term)),
-      input.lexicon
+      rankedLabelCandidates.slice(0, MAX_LABEL_DEDUPE_SCAN_CANDIDATES),
+      input.lexicon,
+      Math.max(settings.maxTerms, MAX_LABEL_TERMS_FOR_DISAMBIGUATION)
     )
       .slice(0, settings.maxTerms)
       .map((candidate) => ({
@@ -1267,8 +1272,11 @@ function labelFromRepresentativeTitles(
     addTextCandidates(titleTerms, article.title, 1, "title", lexicon);
   }
   const terms = dedupeSubsumedTerms(
-    Array.from(titleTerms.values()).sort((left, right) => right.weight - left.weight),
-    lexicon
+    Array.from(titleTerms.values())
+      .sort((left, right) => right.weight - left.weight)
+      .slice(0, MAX_REPRESENTATIVE_DEDUPE_SCAN_CANDIDATES),
+    lexicon,
+    6
   )
     .slice(0, 3)
     .map((candidate) => candidate.term);
@@ -1277,10 +1285,14 @@ function labelFromRepresentativeTitles(
 
 function dedupeSubsumedTerms<T extends { term: string; weight: number }>(
   candidates: T[],
-  lexicon: EffectiveLabelLexicon
+  lexicon: EffectiveLabelLexicon,
+  limit = Number.POSITIVE_INFINITY
 ): T[] {
   const result: T[] = [];
   for (const candidate of candidates) {
+    if (result.length >= limit) {
+      break;
+    }
     const term = candidate.term;
     const key = normalizeTermKey(term);
     if (!key) {
@@ -1439,8 +1451,11 @@ function representativeSpecificTerm(
   }
   return (
     dedupeSubsumedTerms(
-      Array.from(candidates.values()).sort((left, right) => right.weight - left.weight),
-      lexicon
+      Array.from(candidates.values())
+        .sort((left, right) => right.weight - left.weight)
+        .slice(0, MAX_REPRESENTATIVE_DEDUPE_SCAN_CANDIDATES),
+      lexicon,
+      6
     ).find((candidate) => !existingTerms.has(candidate.key))?.term ?? null
   );
 }
