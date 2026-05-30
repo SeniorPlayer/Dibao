@@ -58,6 +58,10 @@ export interface ProfileRepository {
     polarity?: InterestClusterPolarity;
   }): InterestClusterRow[];
   listClusterEvidence(input: { embeddingIndexId: string; limit?: number }): InterestClusterEvidenceRow[];
+  listClusterEvidenceForCluster(input: {
+    clusterId: string;
+    limit?: number;
+  }): InterestClusterEvidenceRow[];
   insertClusterEvidence(input: {
     id: string;
     clusterId: string;
@@ -391,6 +395,49 @@ export class SqliteProfileRepository implements ProfileRepository {
         `
       )
       .all(input.embeddingIndexId, limit) as InterestClusterEvidenceRow[];
+  }
+
+  listClusterEvidenceForCluster(input: {
+    clusterId: string;
+    limit?: number;
+  }): InterestClusterEvidenceRow[] {
+    const limit = Math.max(1, Math.min(100, input.limit ?? 16));
+    return this.db
+      .prepare(
+        `
+          select
+            ice.id,
+            ice.cluster_id as clusterId,
+            ice.article_id as articleId,
+            coalesce(a.feed_id, ice.feed_id_snapshot, '') as feedId,
+            coalesce(f.title, ice.feed_title_snapshot, '') as feedTitle,
+            ice.behavior_event_id as behaviorEventId,
+            ice.evidence_source as evidenceSource,
+            ice.confidence,
+            ice.similarity,
+            ice.weight_delta as weightDelta,
+            coalesce(be.event_type, ice.event_type_snapshot, 'read_complete') as eventType,
+            be.metadata_json as metadataJson,
+            coalesce(s.reading_progress, ice.reading_progress_snapshot, 0) as readingProgress,
+            coalesce(a.title, ice.article_title_snapshot, ice.article_id) as title,
+            coalesce(ae.vector_blob, ice.vector_blob_snapshot) as vectorBlob,
+            ice.created_at as createdAt
+          from interest_cluster_evidence ice
+          join interest_clusters ic on ic.id = ice.cluster_id
+          left join articles a on a.id = ice.article_id
+          left join feeds f on f.id = a.feed_id
+          left join article_embeddings ae
+            on ae.article_id = a.id
+           and ae.embedding_index_id = ic.embedding_index_id
+          left join article_states s on s.article_id = a.id
+          left join behavior_events be on be.id = ice.behavior_event_id
+          where ice.cluster_id = ?
+            and coalesce(ae.vector_blob, ice.vector_blob_snapshot) is not null
+          order by ice.confidence desc, abs(ice.weight_delta) desc, ice.created_at desc
+          limit ?
+        `
+      )
+      .all(input.clusterId, limit) as InterestClusterEvidenceRow[];
   }
 
   insertClusterEvidence(input: {

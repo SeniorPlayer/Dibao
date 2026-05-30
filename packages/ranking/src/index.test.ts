@@ -13,7 +13,8 @@ import {
 
 describe("ranking package", () => {
   it("exports conservative Profile Algorithm defaults", () => {
-    expect(profileAlgorithmDefaults.maxPositiveClusters).toBe(24);
+    expect(profileAlgorithmDefaults.maxPositiveClusters).toBe(48);
+    expect(profileAlgorithmDefaults.maxNegativeClusters).toBe(32);
     expect(profileAlgorithmDefaults.negativeMergeThreshold).toBeGreaterThan(
       profileAlgorithmDefaults.positiveMergeThreshold
     );

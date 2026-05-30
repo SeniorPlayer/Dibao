@@ -51,6 +51,9 @@ const authUsernamePath = fileURLToPath(
 const interestFamiliesPath = fileURLToPath(
   new URL("../migrations/017_interest_families.sql", import.meta.url)
 );
+const interestClusterCalibrationsPath = fileURLToPath(
+  new URL("../migrations/018_interest_cluster_calibrations.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -133,6 +136,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "017",
       name: "interest_families",
       sql: readFileSync(interestFamiliesPath, "utf8")
+    },
+    {
+      version: "018",
+      name: "interest_cluster_calibrations",
+      sql: readFileSync(interestClusterCalibrationsPath, "utf8")
     }
   ];
 }

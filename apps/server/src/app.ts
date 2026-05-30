@@ -116,6 +116,7 @@ import {
   InterestClusterLabelServiceError,
   INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE
 } from "./interest-cluster-label-service.js";
+import { InterestClusterCalibrationService } from "./interest-cluster-calibration-service.js";
 import {
   InterestClusterMergeService,
   InterestClusterMergeServiceError,
@@ -411,6 +412,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     embeddings,
     profiles,
     getClusterLimits: () => settingsService.getSettings().ranking,
+    getClusterCalibration: (embeddingIndexId) =>
+      clusterCalibrationService.getOrCreateCalibration(embeddingIndexId),
     now: options.now
   });
   configureServerTelemetry({
@@ -441,6 +444,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     settings,
     now: options.now
   });
+  const clusterCalibrationService = new InterestClusterCalibrationService({
+    db,
+    now: options.now
+  });
   const clusterMergeService = new InterestClusterMergeService({
     db,
     clusterLabels: clusterLabelService,
@@ -448,12 +455,16 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   const interestFamilyService = new InterestFamilyService({
     db,
+    getFamilyLimits: () => settingsService.getSettings().ranking,
+    getClusterCalibration: (embeddingIndexId) =>
+      clusterCalibrationService.getOrCreateCalibration(embeddingIndexId),
     now: options.now
   });
   const profileRebuildService = new ProfileRebuildService({
     db,
     profile: profileService,
     clusterLabels: clusterLabelService,
+    calibration: clusterCalibrationService,
     interestFamilies: interestFamilyService,
     ranking: rankingService
   });
@@ -1292,13 +1303,16 @@ export function buildServer(options: BuildServerOptions = {}) {
       const rankingJob = rankingSettingsChanged(beforeRanking, afterRanking)
         ? rankingJobService.enqueueAll()
         : null;
+      const familyJob = profileStructureSettingsChanged(beforeRanking, afterRanking)
+        ? recommendationMaintenanceService.enqueueInterestFamilyRebuild()
+        : null;
       const retentionCleanupJob = retentionSettingsRequireCleanupQueue(
         beforeSettings.retention,
         result.settings.retention
       )
         ? retentionCleanupJobService.enqueueCleanup()
         : null;
-      if (rankingJob) {
+      if (rankingJob || familyJob) {
         drainBackgroundJobs();
       }
       return {
@@ -3074,6 +3088,18 @@ function rankingSettingsChanged(
     before.localLearningShadowMode !== after.localLearningShadowMode ||
     before.explorationEnabled !== after.explorationEnabled ||
     before.evaluationEnabled !== after.evaluationEnabled
+  );
+}
+
+function profileStructureSettingsChanged(
+  before: ReturnType<SettingsService["getSettings"]>["ranking"],
+  after: ReturnType<SettingsService["getSettings"]>["ranking"]
+): boolean {
+  return (
+    before.maxPositiveInterestClusters !== after.maxPositiveInterestClusters ||
+    before.maxNegativeInterestClusters !== after.maxNegativeInterestClusters ||
+    before.maxPositiveInterestFamilies !== after.maxPositiveInterestFamilies ||
+    before.maxNegativeInterestFamilies !== after.maxNegativeInterestFamilies
   );
 }
 

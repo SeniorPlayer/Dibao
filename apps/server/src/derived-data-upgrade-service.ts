@@ -6,7 +6,7 @@ import {
   type ProfileRebuildService
 } from "./profile-rebuild-service.js";
 
-export const DERIVED_DATA_UPGRADE_ID = "v0.1.1-interest-profile-rebuild" as const;
+export const DERIVED_DATA_UPGRADE_ID = "v0.1.1-interest-profile-calibration-rebuild" as const;
 export const DERIVED_DATA_UPGRADE_TARGET_VERSION = "0.1.1" as const;
 
 const DERIVED_DATA_UPGRADE_SETTING_KEY = `upgrade.derivedData.${DERIVED_DATA_UPGRADE_ID}`;
@@ -248,7 +248,7 @@ export class DerivedDataUpgradeService {
       return { required: false, activeIndexId, reason: "no_replayable_profile_signals" };
     }
 
-    return { required: true, activeIndexId, reason: "v0.1.1_interest_cluster_rebuild" };
+    return { required: true, activeIndexId, reason: "v0.1.1_interest_cluster_calibration_rebuild" };
   }
 
   private activeEmbeddingIndexId(): string | null {

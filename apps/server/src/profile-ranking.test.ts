@@ -511,11 +511,14 @@ describe("profile algorithm and recommendation ranking", () => {
       profile.processEvent(progress!.eventId);
 
       const clustersAfterProgress = profiles.listClusters({ embeddingIndexId: "index_profile" });
-      expect(clustersAfterProgress).toHaveLength(2);
+      expect(clustersAfterProgress).toHaveLength(3);
       expect(
         clustersAfterProgress.find((cluster) => cluster.id === firstCluster.id)?.sampleCount
       ).toBe(1);
-      expect(clusterEvidenceCount(db)).toBe(2);
+      expect(clustersAfterProgress.find((cluster) => cluster.id === "cluster_medium_3")?.sampleCount).toBe(
+        1
+      );
+      expect(clusterEvidenceCount(db)).toBe(3);
     } finally {
       db.close();
     }

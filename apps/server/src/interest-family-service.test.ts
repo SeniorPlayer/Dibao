@@ -55,8 +55,8 @@ describe("InterestFamilyService", () => {
 
       expect(service.rebuildActiveIndexFamilies()).toMatchObject({
         embeddingIndexId: "index_family",
-        familyCount: 3,
-        memberCount: 4
+        familyCount: 2,
+        memberCount: 3
       });
 
       const memberRows = db
@@ -71,18 +71,18 @@ describe("InterestFamilyService", () => {
       const aiFamily = memberRows.find((row) => row.clusterId === "cluster_ai_agents")?.familyId;
       expect(memberRows.find((row) => row.clusterId === "cluster_ai_models")?.familyId).toBe(aiFamily);
       expect(memberRows.find((row) => row.clusterId === "cluster_finance")?.familyId).not.toBe(aiFamily);
-      expect(memberRows.find((row) => row.clusterId === "cluster_negative_ai")?.familyId).not.toBe(aiFamily);
+      expect(memberRows.find((row) => row.clusterId === "cluster_negative_ai")).toBeUndefined();
 
       const summary = service.listFamilySummary("index_family", 8);
       expect(summary.positive).toBe(2);
-      expect(summary.negative).toBe(1);
+      expect(summary.negative).toBe(0);
       expect(summary.topFamilies.some((family) => family.clusterCount === 2)).toBe(true);
     } finally {
       db.close();
     }
   });
 
-  it("keeps single-article families low maturity for ranking dampening", () => {
+  it("does not publish single-article topic families", () => {
     const db = createFamilyFixtureDatabase();
     try {
       insertFamilyCluster(db, {
@@ -93,11 +93,49 @@ describe("InterestFamilyService", () => {
       });
       const service = new InterestFamilyService({ db, now: () => 6000 });
 
-      service.rebuildActiveIndexFamilies();
+      expect(service.rebuildActiveIndexFamilies()).toMatchObject({
+        familyCount: 0,
+        memberCount: 0
+      });
+      expect(service.listFamilySummary("index_family", 1).topFamilies).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
 
-      const family = service.listFamilySummary("index_family", 1).topFamilies[0];
-      expect(family?.supportArticleCount).toBe(1);
-      expect(family?.maturity).toBeLessThanOrEqual(0.35);
+  it("caps published topic families without forcing leftovers together", () => {
+    const db = createFamilyFixtureDatabase();
+    try {
+      for (let index = 0; index < 4; index += 1) {
+        const vectors = [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+          [-1, 0, 0]
+        ];
+        insertFamilyCluster(db, {
+          clusterId: `cluster_cap_${index}`,
+          vector: vectors[index]!,
+          labelTerms: [`topic ${index}`],
+          articleIds: [`article_cap_${index}_1`, `article_cap_${index}_2`]
+        });
+      }
+      const service = new InterestFamilyService({
+        db,
+        getFamilyLimits: () => ({
+          maxPositiveInterestFamilies: 2,
+          maxNegativeInterestFamilies: 1
+        }),
+        now: () => 6000
+      });
+
+      expect(service.rebuildActiveIndexFamilies()).toMatchObject({
+        familyCount: 2
+      });
+      expect(service.listFamilySummary("index_family", 8).positive).toBe(2);
+      expect(
+        db.prepare("select count(*) as count from interest_cluster_family_members").get()
+      ).toEqual({ count: 2 });
     } finally {
       db.close();
     }

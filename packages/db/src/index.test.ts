@@ -152,6 +152,7 @@ describe("db package", () => {
         "interest_cluster_merge_candidates",
         "interest_families",
         "interest_cluster_family_members",
+        "interest_cluster_calibrations",
         "reader_command_events",
         "jobs"
       ]) {
@@ -173,6 +174,7 @@ describe("db package", () => {
       expect(hasIndex(db, "idx_interest_cluster_merge_candidates_status")).toBe(true);
       expect(hasIndex(db, "idx_interest_families_index_polarity_weight")).toBe(true);
       expect(hasIndex(db, "idx_interest_cluster_family_members_family")).toBe(true);
+      expect(hasIndex(db, "idx_interest_cluster_calibrations_algorithm")).toBe(true);
       expect(hasIndex(db, "idx_reader_command_events_created_at")).toBe(true);
       expect(hasIndex(db, "idx_profile_terms_polarity_scope_weight")).toBe(true);
     } finally {
@@ -210,7 +212,8 @@ describe("db package", () => {
         "014",
         "015",
         "016",
-        "017"
+        "017",
+        "018"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
@@ -636,7 +639,8 @@ describe("db package", () => {
         "014",
         "015",
         "016",
-        "017"
+        "017",
+        "018"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -652,6 +656,7 @@ describe("db package", () => {
       expect(hasTableOrView(db, "embedding_usage_events")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_labels")).toBe(true);
       expect(hasTableOrView(db, "interest_cluster_merge_candidates")).toBe(true);
+      expect(hasTableOrView(db, "interest_cluster_calibrations")).toBe(true);
       expect(hasTableOrView(db, "reader_command_events")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
     } finally {

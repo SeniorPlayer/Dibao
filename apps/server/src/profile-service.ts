@@ -3,6 +3,7 @@ import {
   fromVectorBlob,
   toVectorBlob,
   type EmbeddingRepository,
+  type InterestClusterEvidenceRow,
   type InterestClusterPolarity,
   type InterestClusterRow,
   type ProfileBehaviorEventRow,
@@ -15,6 +16,10 @@ import {
   normalizeVector,
   profileAlgorithmDefaults
 } from "@dibao/ranking";
+import type {
+  InterestClusterCalibration,
+  InterestClusterPolarityThresholds
+} from "./interest-cluster-calibration-service.js";
 
 type ProfileEventPolarity = InterestClusterPolarity | "stats_only";
 
@@ -48,6 +53,7 @@ export type ProfileServiceOptions = {
     maxPositiveInterestClusters: number;
     maxNegativeInterestClusters: number;
   };
+  getClusterCalibration?: (embeddingIndexId: string) => InterestClusterCalibration;
 };
 
 type ProfileSnapshot = {
@@ -126,6 +132,7 @@ const NEW_CLUSTER_PROTECTION_MS = 24 * 60 * 60 * 1000;
 export class ProfileService {
   private readonly now: () => number;
   private readonly clusterIdFactory: () => string;
+  private deferredClusterTrimDepth = 0;
 
   constructor(private readonly options: ProfileServiceOptions) {
     this.now = options.now ?? Date.now;
@@ -176,6 +183,20 @@ export class ProfileService {
       feedStatsChanged: feedIds.size > 0,
       profileChanged
     };
+  }
+
+  beginDeferredClusterTrim(): () => void {
+    this.deferredClusterTrimDepth += 1;
+    return () => {
+      this.deferredClusterTrimDepth = Math.max(0, this.deferredClusterTrimDepth - 1);
+    };
+  }
+
+  finalizeClusterMaintenance(embeddingIndexId: string): number {
+    return (
+      this.compactAndTrimClusters(embeddingIndexId, "positive", { protectNewClusters: false }) +
+      this.compactAndTrimClusters(embeddingIndexId, "negative", { protectNewClusters: false })
+    );
   }
 
   decayClusters(input: ProfileDecayInput = {}): ProfileDecayResult {
@@ -293,7 +314,7 @@ export class ProfileService {
       polarity
     });
     const best = bestClusterMatch(vector, clusters);
-    const thresholds = thresholdsFor(polarity);
+    const thresholds = this.thresholdsFor(event.embeddingIndexId, polarity);
     const now = this.now();
 
     if (!best) {
@@ -312,7 +333,14 @@ export class ProfileService {
       return;
     }
 
-    if (best.similarity >= thresholds.merge) {
+    if (
+      best.similarity >= thresholds.attachThreshold &&
+      this.canMergeIntoCluster({
+        vector,
+        best,
+        thresholds
+      })
+    ) {
       const learningRate = clamp(eventWeight / 20, 0.03, 0.18);
       const merged = mergeCentroid(best.centroid, vector, learningRate);
       this.options.profiles.updateCluster({
@@ -409,10 +437,14 @@ export class ProfileService {
 
   private compactAndTrimClusters(
     embeddingIndexId: string,
-    polarity: InterestClusterPolarity
+    polarity: InterestClusterPolarity,
+    options: { protectNewClusters?: boolean } = {}
   ): number {
     const deletedByMerge = this.mergeSimilarClusters(embeddingIndexId, polarity);
-    return deletedByMerge + this.trimClusters(embeddingIndexId, polarity);
+    if (this.deferredClusterTrimDepth > 0) {
+      return deletedByMerge;
+    }
+    return deletedByMerge + this.trimClusters(embeddingIndexId, polarity, options);
   }
 
   private mergeSimilarClusters(
@@ -421,6 +453,7 @@ export class ProfileService {
   ): number {
     let deleted = 0;
     let merged = true;
+    const thresholds = this.thresholdsFor(embeddingIndexId, polarity);
 
     while (merged) {
       merged = false;
@@ -438,7 +471,19 @@ export class ProfileService {
           }
           const rightVector = fromVectorBlob(right.centroidVectorBlob);
           const similarity = cosineSimilarity(leftVector, rightVector);
-          if (similarity < profileAlgorithmDefaults.clusterCompactionSimilarityThreshold) {
+          if (similarity < thresholds.compactThreshold) {
+            continue;
+          }
+          if (
+            !this.canMergeClusterPair({
+              left,
+              right,
+              leftVector,
+              rightVector,
+              similarity,
+              thresholds
+            })
+          ) {
             continue;
           }
 
@@ -488,7 +533,11 @@ export class ProfileService {
     return deleted;
   }
 
-  private trimClusters(embeddingIndexId: string, polarity: InterestClusterPolarity): number {
+  private trimClusters(
+    embeddingIndexId: string,
+    polarity: InterestClusterPolarity,
+    options: { protectNewClusters?: boolean } = {}
+  ): number {
     const limits = this.clusterLimits();
     const max = polarity === "positive" ? limits.positive : limits.negative;
     const clusters = this.options.profiles.listClusters({ embeddingIndexId, polarity });
@@ -519,10 +568,13 @@ export class ProfileService {
     }
 
     const remaining = this.options.profiles.listClusters({ embeddingIndexId, polarity });
-    const deletionCandidates = [
-      ...remaining.filter((cluster) => !this.isProtectedNewCluster(cluster, now)).reverse(),
-      ...remaining.filter((cluster) => this.isProtectedNewCluster(cluster, now)).reverse()
-    ];
+    const protectNewClusters = options.protectNewClusters ?? true;
+    const deletionCandidates = protectNewClusters
+      ? [
+          ...remaining.filter((cluster) => !this.isProtectedNewCluster(cluster, now)).reverse(),
+          ...remaining.filter((cluster) => this.isProtectedNewCluster(cluster, now)).reverse()
+        ]
+      : remaining.slice().reverse();
     let deletedFromRemaining = 0;
 
     for (const cluster of deletionCandidates) {
@@ -550,6 +602,117 @@ export class ProfileService {
 
   private isProtectedNewCluster(cluster: InterestClusterRow, now: number): boolean {
     return now - cluster.createdAt <= NEW_CLUSTER_PROTECTION_MS && cluster.sampleCount <= 1;
+  }
+
+  private thresholdsFor(
+    embeddingIndexId: string,
+    polarity: InterestClusterPolarity
+  ): InterestClusterPolarityThresholds {
+    const calibration = this.options.getClusterCalibration?.(embeddingIndexId);
+    if (calibration) {
+      return calibration.thresholds[polarity];
+    }
+    const mergeThreshold =
+      polarity === "positive"
+        ? profileAlgorithmDefaults.positiveMergeThreshold
+        : profileAlgorithmDefaults.negativeMergeThreshold;
+    return {
+      mergeThreshold,
+      attachThreshold: mergeThreshold,
+      pairwiseGuardThreshold: mergeThreshold,
+      compactThreshold: profileAlgorithmDefaults.clusterCompactionSimilarityThreshold,
+      maxClusterSamples: polarity === "positive" ? 8 : 6,
+      familyCentroidThreshold: polarity === "positive" ? 0.8 : 0.84,
+      familyLabelAssistedThreshold: polarity === "positive" ? 0.76 : 0.8,
+      familySharedLabelThreshold: polarity === "positive" ? 0.74 : 0.78
+    };
+  }
+
+  private canMergeIntoCluster(input: {
+    vector: number[];
+    best: NonNullable<ReturnType<typeof bestClusterMatch>>;
+    thresholds: InterestClusterPolarityThresholds;
+  }): boolean {
+    const cluster = input.best.cluster;
+    if (cluster.sampleCount >= input.thresholds.maxClusterSamples) {
+      return false;
+    }
+
+    if (input.best.similarity >= input.thresholds.mergeThreshold && cluster.sampleCount <= 1) {
+      return true;
+    }
+
+    const evidence = this.options.profiles.listClusterEvidenceForCluster({
+      clusterId: cluster.id,
+      limit: 12
+    });
+    const similarities = evidenceVectorSimilarities(input.vector, evidence);
+    if (similarities.length === 0) {
+      return input.best.similarity >= input.thresholds.mergeThreshold;
+    }
+
+    const nearest = similarities[0] ?? Number.NEGATIVE_INFINITY;
+    const top3 = similarities.slice(0, 3);
+    const averageTop3 =
+      top3.length > 0 ? top3.reduce((sum, value) => sum + value, 0) / top3.length : 0;
+    const pairwiseFloor =
+      cluster.sampleCount >= 6
+        ? input.thresholds.pairwiseGuardThreshold - 0.015
+        : input.thresholds.pairwiseGuardThreshold - 0.035;
+
+    return (
+      nearest >= input.thresholds.pairwiseGuardThreshold &&
+      averageTop3 >= pairwiseFloor &&
+      input.best.similarity >= input.thresholds.mergeThreshold - 0.02
+    );
+  }
+
+  private canMergeClusterPair(input: {
+    left: InterestClusterRow;
+    right: InterestClusterRow;
+    leftVector: number[];
+    rightVector: number[];
+    similarity: number;
+    thresholds: InterestClusterPolarityThresholds;
+  }): boolean {
+    if (input.left.sampleCount + input.right.sampleCount > input.thresholds.maxClusterSamples) {
+      return false;
+    }
+    if (
+      input.left.sampleCount <= 1 &&
+      input.right.sampleCount <= 1 &&
+      input.similarity >= input.thresholds.compactThreshold
+    ) {
+      return true;
+    }
+
+    const leftEvidence = this.options.profiles.listClusterEvidenceForCluster({
+      clusterId: input.left.id,
+      limit: 10
+    });
+    const rightEvidence = this.options.profiles.listClusterEvidenceForCluster({
+      clusterId: input.right.id,
+      limit: 10
+    });
+    const similarities = crossEvidenceSimilarities({
+      leftVector: input.leftVector,
+      rightVector: input.rightVector,
+      leftEvidence,
+      rightEvidence
+    });
+    if (similarities.length === 0) {
+      return input.similarity >= input.thresholds.mergeThreshold;
+    }
+
+    const nearest = similarities[0] ?? Number.NEGATIVE_INFINITY;
+    const top3 = similarities.slice(0, 3);
+    const averageTop3 =
+      top3.length > 0 ? top3.reduce((sum, value) => sum + value, 0) / top3.length : 0;
+    return (
+      nearest >= input.thresholds.pairwiseGuardThreshold &&
+      averageTop3 >= input.thresholds.pairwiseGuardThreshold - 0.03 &&
+      input.similarity >= input.thresholds.compactThreshold
+    );
   }
 
   private recalculateFeedStats(feedId: string): void {
@@ -645,7 +808,7 @@ function impactForEvent(
       return {
         polarity: "positive",
         profileWeight: Math.max(0, nextWeight - previousWeight),
-        forceCreate: tier === "read_complete"
+        forceCreate: tier === "read_progress_75"
       };
     }
     default:
@@ -881,18 +1044,6 @@ function bestClusterMatch(vector: number[], clusters: InterestClusterRow[]) {
   return best;
 }
 
-function thresholdsFor(polarity: InterestClusterPolarity) {
-  return polarity === "positive"
-    ? {
-        merge: profileAlgorithmDefaults.positiveMergeThreshold,
-        create: profileAlgorithmDefaults.positiveCreateThreshold
-      }
-    : {
-        merge: profileAlgorithmDefaults.negativeMergeThreshold,
-        create: profileAlgorithmDefaults.negativeCreateThreshold
-      };
-}
-
 function emptyResult(): ProfileUpdateResult {
   return {
     articleIds: [],
@@ -907,4 +1058,47 @@ function uniqueStrings(values: string[]): string[] {
 
 function randomClusterId(): string {
   return `cluster_${randomBytes(10).toString("hex")}`;
+}
+
+function evidenceVectorSimilarities(
+  vector: number[],
+  evidence: InterestClusterEvidenceRow[]
+): number[] {
+  return evidence
+    .map((row) => fromVectorBlob(row.vectorBlob))
+    .filter((evidenceVector) => evidenceVector.length === vector.length)
+    .map((evidenceVector) => cosineSimilarity(vector, evidenceVector))
+    .filter((similarity) => Number.isFinite(similarity))
+    .sort((left, right) => right - left);
+}
+
+function crossEvidenceSimilarities(input: {
+  leftVector: number[];
+  rightVector: number[];
+  leftEvidence: InterestClusterEvidenceRow[];
+  rightEvidence: InterestClusterEvidenceRow[];
+}): number[] {
+  const leftVectors = evidenceVectors(input.leftEvidence, input.leftVector);
+  const rightVectors = evidenceVectors(input.rightEvidence, input.rightVector);
+  const similarities: number[] = [];
+  for (const left of leftVectors) {
+    for (const right of rightVectors) {
+      if (left.length === right.length) {
+        similarities.push(cosineSimilarity(left, right));
+      }
+    }
+  }
+  return similarities
+    .filter((similarity) => Number.isFinite(similarity))
+    .sort((left, right) => right - left);
+}
+
+function evidenceVectors(
+  evidence: InterestClusterEvidenceRow[],
+  fallback: number[]
+): number[][] {
+  const vectors = evidence
+    .map((row) => fromVectorBlob(row.vectorBlob))
+    .filter((vector) => vector.length === fallback.length);
+  return vectors.length > 0 ? vectors : [fallback];
 }

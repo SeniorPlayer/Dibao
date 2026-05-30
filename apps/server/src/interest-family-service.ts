@@ -8,6 +8,10 @@ import {
   type InterestFamilyRow
 } from "@dibao/db";
 import { clamp, cosineSimilarity, normalizeVector } from "@dibao/ranking";
+import type {
+  InterestClusterCalibration,
+  InterestClusterPolarityThresholds
+} from "./interest-cluster-calibration-service.js";
 
 export const INTEREST_FAMILY_REBUILD_JOB_TYPE = "interest_family_rebuild" as const;
 
@@ -16,6 +20,8 @@ const NEGATIVE_CENTROID_THRESHOLD = 0.82;
 const LABEL_ASSISTED_CENTROID_THRESHOLD = 0.68;
 const SHARED_LABEL_CENTROID_THRESHOLD = 0.64;
 const MAX_CLUSTERS_PER_POLARITY = 256;
+const DEFAULT_POSITIVE_FAMILY_LIMIT = 16;
+const DEFAULT_NEGATIVE_FAMILY_LIMIT = 12;
 
 type ClusterFamilyDbRow = InterestClusterRow;
 
@@ -107,6 +113,11 @@ export type RecommendationClusterFamily = {
 export type InterestFamilyServiceOptions = {
   db: DibaoDatabase;
   now?: () => number;
+  getFamilyLimits?: () => {
+    maxPositiveInterestFamilies: number;
+    maxNegativeInterestFamilies: number;
+  };
+  getClusterCalibration?: (embeddingIndexId: string) => InterestClusterCalibration;
 };
 
 export class InterestFamilyService {
@@ -136,6 +147,7 @@ export class InterestFamilyService {
         embeddingIndexId,
         polarity
       }).slice(0, MAX_CLUSTERS_PER_POLARITY);
+      const thresholds = this.thresholdsFor(embeddingIndexId, polarity);
       for (const cluster of clusters) {
         const vector = fromVectorBlob(cluster.centroidVectorBlob);
         const terms = clusterLabelTerms(labels.get(cluster.id), cluster.label);
@@ -143,6 +155,7 @@ export class InterestFamilyService {
           vector,
           terms,
           polarity,
+          thresholds,
           families: familyDrafts.filter((family) => family.polarity === polarity)
         });
 
@@ -170,15 +183,20 @@ export class InterestFamilyService {
       );
     }
 
-    const rows = familyDrafts.map((family) =>
-      familyRowForDraft({
-        family,
-        labels,
-        evidence,
-        embeddingIndexId,
-        now,
-        totalPolarityWeight: totalWeightByPolarity.get(family.polarity) ?? 0
-      })
+    const rows = rowsWithinFamilyLimits(
+      familyDrafts
+        .map((family) =>
+          familyRowForDraft({
+            family,
+            labels,
+            evidence,
+            embeddingIndexId,
+            now,
+            totalPolarityWeight: totalWeightByPolarity.get(family.polarity) ?? 0
+          })
+        )
+        .filter((row) => isMatureFamilyRow(row.family)),
+      this.familyLimits()
     );
 
     this.options.db.transaction(() => {
@@ -474,12 +492,42 @@ export class InterestFamilyService {
     }
     return summaries;
   }
+
+  private thresholdsFor(
+    embeddingIndexId: string,
+    polarity: InterestClusterPolarity
+  ): InterestClusterPolarityThresholds {
+    const calibration = this.options.getClusterCalibration?.(embeddingIndexId);
+    if (calibration) {
+      return calibration.thresholds[polarity];
+    }
+    return {
+      mergeThreshold: polarity === "positive" ? 0.82 : 0.84,
+      attachThreshold: polarity === "positive" ? 0.82 : 0.84,
+      pairwiseGuardThreshold: polarity === "positive" ? 0.82 : 0.84,
+      compactThreshold: 0.92,
+      maxClusterSamples: polarity === "positive" ? 8 : 6,
+      familyCentroidThreshold:
+        polarity === "positive" ? POSITIVE_CENTROID_THRESHOLD : NEGATIVE_CENTROID_THRESHOLD,
+      familyLabelAssistedThreshold: LABEL_ASSISTED_CENTROID_THRESHOLD,
+      familySharedLabelThreshold: SHARED_LABEL_CENTROID_THRESHOLD
+    };
+  }
+
+  private familyLimits(): { positive: number; negative: number } {
+    const configured = this.options.getFamilyLimits?.();
+    return {
+      positive: configured?.maxPositiveInterestFamilies ?? DEFAULT_POSITIVE_FAMILY_LIMIT,
+      negative: configured?.maxNegativeInterestFamilies ?? DEFAULT_NEGATIVE_FAMILY_LIMIT
+    };
+  }
 }
 
 function bestFamilyAssignment(input: {
   vector: number[];
   terms: string[];
   polarity: InterestClusterPolarity;
+  thresholds: InterestClusterPolarityThresholds;
   families: FamilyDraft[];
 }): { family: FamilyDraft; centroidSimilarity: number; confidence: number } | null {
   let best:
@@ -503,12 +551,11 @@ function bestFamilyAssignment(input: {
     return null;
   }
 
-  const centroidThreshold =
-    input.polarity === "positive" ? POSITIVE_CENTROID_THRESHOLD : NEGATIVE_CENTROID_THRESHOLD;
   const assign =
-    best.centroidSimilarity >= centroidThreshold ||
-    (best.labelJaccard >= 0.34 && best.centroidSimilarity >= LABEL_ASSISTED_CENTROID_THRESHOLD) ||
-    (best.sharedLabel && best.centroidSimilarity >= SHARED_LABEL_CENTROID_THRESHOLD);
+    best.centroidSimilarity >= input.thresholds.familyCentroidThreshold ||
+    (best.labelJaccard >= 0.34 &&
+      best.centroidSimilarity >= input.thresholds.familyLabelAssistedThreshold) ||
+    (best.sharedLabel && best.centroidSimilarity >= input.thresholds.familySharedLabelThreshold);
 
   if (!assign) {
     return null;
@@ -646,6 +693,34 @@ function familyRowForDraft(input: {
     },
     members: input.family.memberships
   };
+}
+
+function rowsWithinFamilyLimits(
+  rows: Array<ReturnType<typeof familyRowForDraft>>,
+  limits: { positive: number; negative: number }
+): Array<ReturnType<typeof familyRowForDraft>> {
+  return (["positive", "negative"] as const).flatMap((polarity) =>
+    rows
+      .filter((row) => row.family.polarity === polarity)
+      .sort(
+        (left, right) =>
+          right.family.weight - left.family.weight ||
+          right.family.maturity - left.family.maturity ||
+          right.family.supportArticleCount - left.family.supportArticleCount ||
+          left.family.id.localeCompare(right.family.id)
+      )
+      .slice(0, polarity === "positive" ? limits.positive : limits.negative)
+  );
+}
+
+function isMatureFamilyRow(family: InterestFamilyRow): boolean {
+  if (family.supportArticleCount < 2 || family.maturity < 0.48) {
+    return false;
+  }
+  if (family.clusterCount < 2 && family.supportEventCount < 2 && family.sourceCount < 2) {
+    return false;
+  }
+  return true;
 }
 
 function familySummaryFromRows(rows: InterestFamilyRow[], limit: number): RecommendationFamilySummary {

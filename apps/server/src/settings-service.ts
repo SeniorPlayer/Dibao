@@ -55,6 +55,8 @@ export type AppSettings = {
     cocoonLevel: number;
     maxPositiveInterestClusters: number;
     maxNegativeInterestClusters: number;
+    maxPositiveInterestFamilies: number;
+    maxNegativeInterestFamilies: number;
     localLearningEnabled: boolean;
     localLearningShadowMode: boolean;
     explorationEnabled: boolean;
@@ -109,8 +111,10 @@ const DEFAULT_RANKING_SETTINGS = {
   preferSource: 0.5,
   preferDiversity: 0.5,
   cocoonLevel: 5,
-  maxPositiveInterestClusters: 24,
-  maxNegativeInterestClusters: 16,
+  maxPositiveInterestClusters: 48,
+  maxNegativeInterestClusters: 32,
+  maxPositiveInterestFamilies: 16,
+  maxNegativeInterestFamilies: 12,
   localLearningEnabled: true,
   localLearningShadowMode: false,
   explorationEnabled: true,
@@ -164,6 +168,8 @@ type SettingsPatch = {
     cocoonLevel?: number;
     maxPositiveInterestClusters?: number;
     maxNegativeInterestClusters?: number;
+    maxPositiveInterestFamilies?: number;
+    maxNegativeInterestFamilies?: number;
     localLearningEnabled?: boolean;
     localLearningShadowMode?: boolean;
     explorationEnabled?: boolean;
@@ -486,6 +492,18 @@ export class SettingsService {
         4,
         128
       ),
+      maxPositiveInterestFamilies: readIntegerInRange(
+        input.maxPositiveInterestFamilies,
+        DEFAULT_RANKING_SETTINGS.maxPositiveInterestFamilies,
+        2,
+        64
+      ),
+      maxNegativeInterestFamilies: readIntegerInRange(
+        input.maxNegativeInterestFamilies,
+        DEFAULT_RANKING_SETTINGS.maxNegativeInterestFamilies,
+        1,
+        48
+      ),
       localLearningEnabled:
         typeof input.localLearningEnabled === "boolean"
           ? input.localLearningEnabled
@@ -672,6 +690,8 @@ function parseRankingPatch(value: unknown): NonNullable<SettingsPatch["ranking"]
     "cocoonLevel",
     "maxPositiveInterestClusters",
     "maxNegativeInterestClusters",
+    "maxPositiveInterestFamilies",
+    "maxNegativeInterestFamilies",
     "localLearningEnabled",
     "localLearningShadowMode",
     "explorationEnabled",
@@ -696,6 +716,22 @@ function parseRankingPatch(value: unknown): NonNullable<SettingsPatch["ranking"]
       "maxNegativeInterestClusters",
       4,
       128
+    );
+  }
+  if (Object.hasOwn(input, "maxPositiveInterestFamilies")) {
+    patch.maxPositiveInterestFamilies = parseIntegerField(
+      input.maxPositiveInterestFamilies,
+      "maxPositiveInterestFamilies",
+      2,
+      64
+    );
+  }
+  if (Object.hasOwn(input, "maxNegativeInterestFamilies")) {
+    patch.maxNegativeInterestFamilies = parseIntegerField(
+      input.maxNegativeInterestFamilies,
+      "maxNegativeInterestFamilies",
+      1,
+      48
     );
   }
   for (const key of [

@@ -124,20 +124,26 @@ describe("settings service", () => {
     const service = new SettingsService({ settings });
 
     expect(service.getSettings().ranking).toMatchObject({
-      maxPositiveInterestClusters: 24,
-      maxNegativeInterestClusters: 16
+      maxPositiveInterestClusters: 48,
+      maxNegativeInterestClusters: 32,
+      maxPositiveInterestFamilies: 16,
+      maxNegativeInterestFamilies: 12
     });
 
     expect(
       service.updateSettings({
         ranking: {
           maxPositiveInterestClusters: 48,
-          maxNegativeInterestClusters: 32
+          maxNegativeInterestClusters: 32,
+          maxPositiveInterestFamilies: 20,
+          maxNegativeInterestFamilies: 10
         }
       }).settings.ranking
     ).toMatchObject({
       maxPositiveInterestClusters: 48,
-      maxNegativeInterestClusters: 32
+      maxNegativeInterestClusters: 32,
+      maxPositiveInterestFamilies: 20,
+      maxNegativeInterestFamilies: 10
     });
 
     expect(() =>
@@ -151,6 +157,20 @@ describe("settings service", () => {
       service.updateSettings({
         ranking: {
           maxNegativeInterestClusters: 129
+        }
+      })
+    ).toThrow(SettingsServiceError);
+    expect(() =>
+      service.updateSettings({
+        ranking: {
+          maxPositiveInterestFamilies: 1
+        }
+      })
+    ).toThrow(SettingsServiceError);
+    expect(() =>
+      service.updateSettings({
+        ranking: {
+          maxNegativeInterestFamilies: 49
         }
       })
     ).toThrow(SettingsServiceError);

@@ -2578,8 +2578,10 @@ describe("server API vertical slice", () => {
             preferSource: 0.5,
             preferDiversity: 0.5,
             cocoonLevel: 5,
-            maxPositiveInterestClusters: 24,
-            maxNegativeInterestClusters: 16,
+            maxPositiveInterestClusters: 48,
+            maxNegativeInterestClusters: 32,
+            maxPositiveInterestFamilies: 16,
+            maxNegativeInterestFamilies: 12,
             localLearningEnabled: true,
             localLearningShadowMode: false,
             explorationEnabled: true,
@@ -2626,7 +2628,9 @@ describe("server API vertical slice", () => {
         ranking: {
           cocoonLevel: 7,
           maxPositiveInterestClusters: 48,
-          maxNegativeInterestClusters: 32
+          maxNegativeInterestClusters: 32,
+          maxPositiveInterestFamilies: 20,
+          maxNegativeInterestFamilies: 10
         }
       });
       expect(updated.statusCode, updated.body).toBe(200);
@@ -2659,7 +2663,9 @@ describe("server API vertical slice", () => {
             ranking: {
               cocoonLevel: 7,
               maxPositiveInterestClusters: 48,
-              maxNegativeInterestClusters: 32
+              maxNegativeInterestClusters: 32,
+              maxPositiveInterestFamilies: 20,
+              maxNegativeInterestFamilies: 10
             }
           }
         }

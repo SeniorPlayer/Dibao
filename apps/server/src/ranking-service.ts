@@ -980,7 +980,11 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         sampleCount: cluster.sampleCount
       });
       const familyId = family?.familyId ?? cluster.id;
-      const familyMaturity = clamp(family?.maturity ?? fallbackMaturity, 0.2, 1);
+      const familyMaturity = semanticFamilyMaturity({
+        maturity: family?.maturity ?? fallbackMaturity,
+        dominanceRatio: family?.dominanceRatio ?? 0,
+        clusterCount: family?.clusterCount ?? 1
+      });
       return {
         cluster,
         polarity: cluster.polarity,
@@ -1223,6 +1227,20 @@ function clusterMaturityFor(input: {
     1
   );
   return supportArticleCount <= 1 ? Math.min(value, 0.38) : value;
+}
+
+function semanticFamilyMaturity(input: {
+  maturity: number;
+  dominanceRatio: number;
+  clusterCount: number;
+}): number {
+  let multiplier = 1;
+  if (input.clusterCount >= 5 && input.dominanceRatio >= 0.62) {
+    multiplier = 0.55;
+  } else if (input.clusterCount >= 5 && input.dominanceRatio >= 0.45) {
+    multiplier = 0.75;
+  }
+  return clamp(input.maturity * multiplier, 0.2, 1);
 }
 
 function recentIntentMatchesFor(

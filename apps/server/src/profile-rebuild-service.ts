@@ -4,6 +4,7 @@ import type {
   ClusterLabelRebuildProgress,
   InterestClusterLabelService
 } from "./interest-cluster-label-service.js";
+import type { InterestClusterCalibrationService } from "./interest-cluster-calibration-service.js";
 import type { InterestFamilyService } from "./interest-family-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RecommendationRankingService } from "./ranking-service.js";
@@ -62,9 +63,11 @@ export type ProfileRebuildResult = {
 
 export type ProfileRebuildServiceOptions = {
   db: DibaoDatabase;
-  profile: Pick<ProfileService, "processArticleEvents">;
+  profile: Pick<ProfileService, "processArticleEvents"> &
+    Partial<Pick<ProfileService, "beginDeferredClusterTrim" | "finalizeClusterMaintenance">>;
   clusterLabels?: Pick<InterestClusterLabelService, "rebuildIndexLabels"> &
     Partial<Pick<InterestClusterLabelService, "rebuildIndexLabelsAsync">>;
+  calibration?: Pick<InterestClusterCalibrationService, "getOrCreateCalibration" | "refreshCalibration">;
   interestFamilies?: Pick<InterestFamilyService, "rebuildFamiliesForIndex">;
   ranking?: Pick<RecommendationRankingService, "recalculateAll">;
 };
@@ -87,6 +90,7 @@ export class ProfileRebuildService {
       return emptyRebuildResult();
     }
 
+    this.options.calibration?.refreshCalibration(embeddingIndexId);
     const reset = this.resetActiveIndexProfile(embeddingIndexId);
     const articleIds = this.listReplayArticleIds(embeddingIndexId);
     const chunkSize = clampChunkSize(input.chunkSize);
@@ -94,13 +98,19 @@ export class ProfileRebuildService {
     let chunksProcessed = 0;
     let profileChanged = false;
 
-    for (let offset = 0; offset < articleIds.length; offset += chunkSize) {
-      const chunk = articleIds.slice(offset, offset + chunkSize);
-      const result = this.options.profile.processArticleEvents(chunk);
-      articleIdsProcessed += result.articleIds.length;
-      chunksProcessed += 1;
-      profileChanged = result.profileChanged || profileChanged;
+    const endDeferredTrim = this.options.profile.beginDeferredClusterTrim?.();
+    try {
+      for (let offset = 0; offset < articleIds.length; offset += chunkSize) {
+        const chunk = articleIds.slice(offset, offset + chunkSize);
+        const result = this.options.profile.processArticleEvents(chunk);
+        articleIdsProcessed += result.articleIds.length;
+        chunksProcessed += 1;
+        profileChanged = result.profileChanged || profileChanged;
+      }
+    } finally {
+      endDeferredTrim?.();
     }
+    this.options.profile.finalizeClusterMaintenance?.(embeddingIndexId);
 
     const labels =
       input.rebuildLabels === false
@@ -152,6 +162,7 @@ export class ProfileRebuildService {
       chunksProcessed: 0
     });
     await delayImmediate();
+    this.options.calibration?.refreshCalibration(embeddingIndexId);
     const reset = this.resetActiveIndexProfile(embeddingIndexId);
     const articleIds = this.listReplayArticleIds(embeddingIndexId);
     const chunkSize = clampChunkSize(input.chunkSize);
@@ -165,20 +176,26 @@ export class ProfileRebuildService {
       articleIdsProcessed,
       chunksProcessed
     });
-    for (let offset = 0; offset < articleIds.length; offset += chunkSize) {
-      const chunk = articleIds.slice(offset, offset + chunkSize);
-      const result = this.options.profile.processArticleEvents(chunk);
-      articleIdsProcessed += result.articleIds.length;
-      chunksProcessed += 1;
-      profileChanged = result.profileChanged || profileChanged;
-      input.onProgress?.({
-        step: "replay",
-        articleCount: articleIds.length,
-        articleIdsProcessed,
-        chunksProcessed
-      });
-      await delayImmediate();
+    const endDeferredTrim = this.options.profile.beginDeferredClusterTrim?.();
+    try {
+      for (let offset = 0; offset < articleIds.length; offset += chunkSize) {
+        const chunk = articleIds.slice(offset, offset + chunkSize);
+        const result = this.options.profile.processArticleEvents(chunk);
+        articleIdsProcessed += result.articleIds.length;
+        chunksProcessed += 1;
+        profileChanged = result.profileChanged || profileChanged;
+        input.onProgress?.({
+          step: "replay",
+          articleCount: articleIds.length,
+          articleIdsProcessed,
+          chunksProcessed
+        });
+        await delayImmediate();
+      }
+    } finally {
+      endDeferredTrim?.();
     }
+    this.options.profile.finalizeClusterMaintenance?.(embeddingIndexId);
 
     input.onProgress?.({
       step: "labels",

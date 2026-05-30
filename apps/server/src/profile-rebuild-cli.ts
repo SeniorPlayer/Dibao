@@ -6,6 +6,7 @@ import {
   SqliteRankingRepository
 } from "@dibao/db";
 import { InterestClusterLabelService } from "./interest-cluster-label-service.js";
+import { InterestClusterCalibrationService } from "./interest-cluster-calibration-service.js";
 import { InterestFamilyService } from "./interest-family-service.js";
 import { ProfileRebuildService } from "./profile-rebuild-service.js";
 import { ProfileService } from "./profile-service.js";
@@ -34,10 +35,12 @@ try {
   const rankings = new SqliteRankingRepository(db);
   const settings = new SqliteAppSettingsRepository(db);
   const settingsService = new SettingsService({ settings });
+  const calibration = new InterestClusterCalibrationService({ db });
   const profile = new ProfileService({
     embeddings,
     profiles,
-    getClusterLimits: () => settingsService.getSettings().ranking
+    getClusterLimits: () => settingsService.getSettings().ranking,
+    getClusterCalibration: (embeddingIndexId) => calibration.getOrCreateCalibration(embeddingIndexId)
   });
   const ranking = new RecommendationRankingService({
     db,
@@ -47,11 +50,16 @@ try {
     getRankingSettings: () => settingsService.getSettings().ranking
   });
   const clusterLabels = new InterestClusterLabelService({ db, settings });
-  const interestFamilies = new InterestFamilyService({ db });
+  const interestFamilies = new InterestFamilyService({
+    db,
+    getFamilyLimits: () => settingsService.getSettings().ranking,
+    getClusterCalibration: (embeddingIndexId) => calibration.getOrCreateCalibration(embeddingIndexId)
+  });
   const rebuild = new ProfileRebuildService({
     db,
     profile,
     clusterLabels,
+    calibration,
     interestFamilies,
     ranking
   });

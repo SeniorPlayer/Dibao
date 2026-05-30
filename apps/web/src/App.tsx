@@ -3093,6 +3093,7 @@ function DerivedDataUpgradePanel(props: {
       <div className={styles.setupStatusBox} aria-live="polite">
         <strong>{t.upgrade.steps[step]}</strong>
         <p>{t.upgrade.progress(articleCurrent, articleTotal, percent)}</p>
+        <p>{t.upgrade.costNote}</p>
         <progress
           aria-label={t.upgrade.progressLabel}
           className={styles.upgradeProgress}
@@ -3872,12 +3873,29 @@ type SettingsDraft = {
   cocoonLevel: string;
   maxPositiveInterestClusters: string;
   maxNegativeInterestClusters: string;
+  maxPositiveInterestFamilies: string;
+  maxNegativeInterestFamilies: string;
 };
 
 const interestClusterLimitPresets = [
-  { maxPositiveInterestClusters: 24, maxNegativeInterestClusters: 16 },
-  { maxPositiveInterestClusters: 48, maxNegativeInterestClusters: 32 },
-  { maxPositiveInterestClusters: 96, maxNegativeInterestClusters: 64 }
+  {
+    maxPositiveInterestClusters: 24,
+    maxNegativeInterestClusters: 16,
+    maxPositiveInterestFamilies: 8,
+    maxNegativeInterestFamilies: 6
+  },
+  {
+    maxPositiveInterestClusters: 48,
+    maxNegativeInterestClusters: 32,
+    maxPositiveInterestFamilies: 16,
+    maxNegativeInterestFamilies: 12
+  },
+  {
+    maxPositiveInterestClusters: 96,
+    maxNegativeInterestClusters: 64,
+    maxPositiveInterestFamilies: 28,
+    maxNegativeInterestFamilies: 20
+  }
 ] as const;
 
 type SupportedEmbeddingProviderType = Extract<
@@ -4373,7 +4391,9 @@ export function SettingsWorkspace(props: {
                     applyDraft({
                       ...draft,
                       maxPositiveInterestClusters: String(preset.maxPositiveInterestClusters),
-                      maxNegativeInterestClusters: String(preset.maxNegativeInterestClusters)
+                      maxNegativeInterestClusters: String(preset.maxNegativeInterestClusters),
+                      maxPositiveInterestFamilies: String(preset.maxPositiveInterestFamilies),
+                      maxNegativeInterestFamilies: String(preset.maxNegativeInterestFamilies)
                     });
                   }}
                   step={1}
@@ -4414,6 +4434,28 @@ export function SettingsWorkspace(props: {
                 }
                 step={1}
                 value={draft.maxNegativeInterestClusters}
+              />
+              <NumberSettingField
+                id="settings-max-positive-interest-families"
+                label={t.settings.sections.behavior.interestClusterLimits.positiveFamilyLabel}
+                max={64}
+                min={2}
+                onChange={(value) =>
+                  applyDraft({ ...draft, maxPositiveInterestFamilies: value })
+                }
+                step={1}
+                value={draft.maxPositiveInterestFamilies}
+              />
+              <NumberSettingField
+                id="settings-max-negative-interest-families"
+                label={t.settings.sections.behavior.interestClusterLimits.negativeFamilyLabel}
+                max={48}
+                min={1}
+                onChange={(value) =>
+                  applyDraft({ ...draft, maxNegativeInterestFamilies: value })
+                }
+                step={1}
+                value={draft.maxNegativeInterestFamilies}
               />
             </div>
             <p className={styles.managementHint}>
@@ -8032,20 +8074,27 @@ function draftForSettings(settings: AppSettings): SettingsDraft {
     keepReadLater: settings.retention.keepReadLater,
     cocoonLevel: String(settings.ranking.cocoonLevel),
     maxPositiveInterestClusters: String(settings.ranking.maxPositiveInterestClusters),
-    maxNegativeInterestClusters: String(settings.ranking.maxNegativeInterestClusters)
+    maxNegativeInterestClusters: String(settings.ranking.maxNegativeInterestClusters),
+    maxPositiveInterestFamilies: String(settings.ranking.maxPositiveInterestFamilies),
+    maxNegativeInterestFamilies: String(settings.ranking.maxNegativeInterestFamilies)
   };
 }
 
 function presetIndexForInterestClusterLimits(
   ranking: Pick<
     AppSettings["ranking"],
-    "maxPositiveInterestClusters" | "maxNegativeInterestClusters"
+    | "maxPositiveInterestClusters"
+    | "maxNegativeInterestClusters"
+    | "maxPositiveInterestFamilies"
+    | "maxNegativeInterestFamilies"
   >
 ): number | null {
   const index = interestClusterLimitPresets.findIndex(
     (preset) =>
       preset.maxPositiveInterestClusters === ranking.maxPositiveInterestClusters &&
-      preset.maxNegativeInterestClusters === ranking.maxNegativeInterestClusters
+      preset.maxNegativeInterestClusters === ranking.maxNegativeInterestClusters &&
+      preset.maxPositiveInterestFamilies === ranking.maxPositiveInterestFamilies &&
+      preset.maxNegativeInterestFamilies === ranking.maxNegativeInterestFamilies
   );
   return index >= 0 ? index : null;
 }
@@ -8053,15 +8102,21 @@ function presetIndexForInterestClusterLimits(
 function presetIndexForInterestClusterLimitDraft(draft: SettingsDraft): number | null {
   const maxPositiveInterestClusters = Number(draft.maxPositiveInterestClusters);
   const maxNegativeInterestClusters = Number(draft.maxNegativeInterestClusters);
+  const maxPositiveInterestFamilies = Number(draft.maxPositiveInterestFamilies);
+  const maxNegativeInterestFamilies = Number(draft.maxNegativeInterestFamilies);
   if (
     !Number.isInteger(maxPositiveInterestClusters) ||
-    !Number.isInteger(maxNegativeInterestClusters)
+    !Number.isInteger(maxNegativeInterestClusters) ||
+    !Number.isInteger(maxPositiveInterestFamilies) ||
+    !Number.isInteger(maxNegativeInterestFamilies)
   ) {
     return null;
   }
   return presetIndexForInterestClusterLimits({
     maxPositiveInterestClusters,
-    maxNegativeInterestClusters
+    maxNegativeInterestClusters,
+    maxPositiveInterestFamilies,
+    maxNegativeInterestFamilies
   });
 }
 
@@ -8078,7 +8133,10 @@ function interestClusterPresetIndexFromSliderValue(value: string): 0 | 1 | 2 {
 function closestInterestClusterPresetIndex(
   ranking: Pick<
     AppSettings["ranking"],
-    "maxPositiveInterestClusters" | "maxNegativeInterestClusters"
+    | "maxPositiveInterestClusters"
+    | "maxNegativeInterestClusters"
+    | "maxPositiveInterestFamilies"
+    | "maxNegativeInterestFamilies"
   >
 ): number {
   let closestIndex = 0;
@@ -8086,7 +8144,9 @@ function closestInterestClusterPresetIndex(
   interestClusterLimitPresets.forEach((preset, index) => {
     const distance =
       Math.abs(preset.maxPositiveInterestClusters - ranking.maxPositiveInterestClusters) +
-      Math.abs(preset.maxNegativeInterestClusters - ranking.maxNegativeInterestClusters);
+      Math.abs(preset.maxNegativeInterestClusters - ranking.maxNegativeInterestClusters) +
+      Math.abs(preset.maxPositiveInterestFamilies - ranking.maxPositiveInterestFamilies) +
+      Math.abs(preset.maxNegativeInterestFamilies - ranking.maxNegativeInterestFamilies);
     if (distance < closestDistance) {
       closestIndex = index;
       closestDistance = distance;
@@ -8284,6 +8344,24 @@ function parseSettingsDraft(
   if (maxNegativeInterestClusters === null) {
     return { ok: false, error: t.settings.errors.maxNegativeInterestClusters };
   }
+  const maxPositiveInterestFamilies = parseNumberDraft(
+    draft.maxPositiveInterestFamilies,
+    2,
+    64,
+    true
+  );
+  if (maxPositiveInterestFamilies === null) {
+    return { ok: false, error: t.settings.errors.maxPositiveInterestFamilies };
+  }
+  const maxNegativeInterestFamilies = parseNumberDraft(
+    draft.maxNegativeInterestFamilies,
+    1,
+    48,
+    true
+  );
+  if (maxNegativeInterestFamilies === null) {
+    return { ok: false, error: t.settings.errors.maxNegativeInterestFamilies };
+  }
 
   const settings: AppSettings = {
     ...current,
@@ -8317,7 +8395,9 @@ function parseSettingsDraft(
       ...current.ranking,
       cocoonLevel,
       maxPositiveInterestClusters,
-      maxNegativeInterestClusters
+      maxNegativeInterestClusters,
+      maxPositiveInterestFamilies,
+      maxNegativeInterestFamilies
     }
   };
 
@@ -8350,7 +8430,9 @@ function parseSettingsDraft(
       ranking: {
         cocoonLevel,
         maxPositiveInterestClusters,
-        maxNegativeInterestClusters
+        maxNegativeInterestClusters,
+        maxPositiveInterestFamilies,
+        maxNegativeInterestFamilies
       }
     }
   };

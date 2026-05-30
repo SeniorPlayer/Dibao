@@ -115,6 +115,7 @@ export const zhCN = {
     body: "邸报正在修复旧版本产生的兴趣簇数据。完成前会暂停阅读界面，避免旧画像继续影响推荐。",
     failedBody: "推荐画像重建未完成。请重试，或查看服务日志后再继续。",
     progressLabel: "升级进度",
+    costNote: "本次迁移只重建兴趣簇、主题组、标签和排序等派生数据；不会重建 Embedding，也不会产生额外 Embedding API 费用。",
     progress: (current: number, total: number, percent: number) =>
       total > 0 ? `${current} / ${total} 篇文章 · ${percent}%` : "正在准备数据",
     retry: "重试重建",
@@ -385,15 +386,17 @@ export const zhCN = {
             "提高兴趣簇上限主要增加本地排序和向量相似度计算开销，不会按比例增加外部 Embedding 调用。",
           performancePreset: "性能档",
           presets: [
-            "低配 VPS：24 / 16",
-            "中配 NAS：48 / 32",
-            "高性能服务器或本地计算机：96 / 64"
+            "低配 VPS：24 / 16 · 8 / 6",
+            "中配 NAS：48 / 32 · 16 / 12",
+            "高性能服务器或本地计算机：96 / 64 · 28 / 20"
           ],
           customPreset: "自定义",
           positiveLabel: "正向兴趣簇",
           negativeLabel: "负向兴趣簇",
+          positiveFamilyLabel: "正向主题组",
+          negativeFamilyLabel: "负向主题组",
           fieldHint:
-            "正向簇用于识别你更可能想读的主题；负向簇用于压低你主动隐藏或标记不感兴趣的主题。"
+            "兴趣簇用于精确匹配文章，主题组用于解释和多样性。主题组上限只限制成熟主题组，不会强行把零散簇塞进同一组。"
         }
       },
       telemetry: {
@@ -573,7 +576,9 @@ export const zhCN = {
       retentionDays: "保留天数必须是 0 到 3650 的整数，0 表示永久。",
       cocoonLevel: "信息茧房水平必须是 1 到 10 的整数。",
       maxPositiveInterestClusters: "正向兴趣簇上限必须是 8 到 192 之间的整数。",
-      maxNegativeInterestClusters: "负向兴趣簇上限必须是 4 到 128 之间的整数。"
+      maxNegativeInterestClusters: "负向兴趣簇上限必须是 4 到 128 之间的整数。",
+      maxPositiveInterestFamilies: "正向主题组上限必须是 2 到 64 之间的整数。",
+      maxNegativeInterestFamilies: "负向主题组上限必须是 1 到 48 之间的整数。"
     },
     units: {
       px: "px",
@@ -1400,6 +1405,7 @@ export const enUS = {
     body: "Dibao is repairing interest-cluster data created by an older version. The reader is paused until the rebuild finishes so stale profile data cannot affect recommendations.",
     failedBody: "The recommendation profile rebuild did not finish. Retry after checking the server log if needed.",
     progressLabel: "Upgrade progress",
+    costNote: "This migration only rebuilds derived profile data such as clusters, topic families, labels, and ranking rows. It does not rebuild embeddings or create additional embedding API charges.",
     progress: (current: number, total: number, percent: number) =>
       total > 0 ? `${current} / ${total} articles · ${percent}%` : "Preparing data",
     retry: "Retry rebuild",
@@ -1671,15 +1677,17 @@ export const enUS = {
             "Raising this limit mainly increases local ranking and vector-similarity work. It does not increase external embedding calls proportionally.",
           performancePreset: "Performance tier",
           presets: [
-            "Low-end VPS: 24 / 16",
-            "Mid-range NAS: 48 / 32",
-            "Fast server or local machine: 96 / 64"
+            "Low-end VPS: 24 / 16 · 8 / 6",
+            "Mid-range NAS: 48 / 32 · 16 / 12",
+            "Fast server or local machine: 96 / 64 · 28 / 20"
           ],
           customPreset: "Custom",
           positiveLabel: "Positive interest clusters",
           negativeLabel: "Negative interest clusters",
+          positiveFamilyLabel: "Positive topic families",
+          negativeFamilyLabel: "Negative topic families",
           fieldHint:
-            "Positive clusters identify topics you are more likely to read; negative clusters push down topics you hide or mark not interested."
+            "Clusters drive precise article matching; topic families support explanations and diversity. Family limits only cap mature families and do not force leftovers together."
         }
       },
       telemetry: {
@@ -1862,7 +1870,11 @@ export const enUS = {
       maxPositiveInterestClusters:
         "Positive interest cluster limit must be an integer from 8 to 192.",
       maxNegativeInterestClusters:
-        "Negative interest cluster limit must be an integer from 4 to 128."
+        "Negative interest cluster limit must be an integer from 4 to 128.",
+      maxPositiveInterestFamilies:
+        "Positive topic family limit must be an integer from 2 to 64.",
+      maxNegativeInterestFamilies:
+        "Negative topic family limit must be an integer from 1 to 48."
     },
     units: {
       px: "px",
@@ -2674,6 +2686,7 @@ export const jaJP = {
     body: "旧バージョンで作成された興味クラスターデータを修復しています。古いプロファイルが推薦に影響しないよう、完了までリーダーを一時停止します。",
     failedBody: "おすすめプロファイルの再構築が完了しませんでした。必要に応じてサーバーログを確認し、もう一度お試しください。",
     progressLabel: "アップグレード進捗",
+    costNote: "この移行では、クラスター、トピックファミリー、ラベル、並び替えなどの派生データだけを再構築します。Embedding は再生成せず、追加の Embedding API 費用は発生しません。",
     progress: (current: number, total: number, percent: number) =>
       total > 0 ? `${current} / ${total} 件の記事 · ${percent}%` : "データを準備しています",
     retry: "再構築を再試行",
@@ -2945,15 +2958,17 @@ export const jaJP = {
             "上限を上げると主にローカルの並び替えとベクトル類似度計算の負荷が増えます。外部 Embedding 呼び出しが比例して増えるわけではありません。",
           performancePreset: "性能プリセット",
           presets: [
-            "低スペック VPS：24 / 16",
-            "中程度の NAS：48 / 32",
-            "高性能サーバーまたはローカル PC：96 / 64"
+            "低スペック VPS：24 / 16 · 8 / 6",
+            "中程度の NAS：48 / 32 · 16 / 12",
+            "高性能サーバーまたはローカル PC：96 / 64 · 28 / 20"
           ],
           customPreset: "カスタム",
           positiveLabel: "正方向の興味クラスタ",
           negativeLabel: "負方向の興味クラスタ",
+          positiveFamilyLabel: "正方向のテーマグループ",
+          negativeFamilyLabel: "負方向のテーマグループ",
           fieldHint:
-            "正方向クラスタは読みたい可能性が高いテーマを見つけ、負方向クラスタは非表示や興味なしにしたテーマを下げます。"
+            "クラスタは記事との精密な照合に使い、テーマグループは説明と多様性に使います。テーマグループ上限は成熟したグループだけを制限し、余りを無理にまとめません。"
         }
       },
       telemetry: {
@@ -3136,7 +3151,11 @@ export const jaJP = {
       maxPositiveInterestClusters:
         "正方向の興味クラスタ上限は 8 から 192 までの整数で入力してください。",
       maxNegativeInterestClusters:
-        "負方向の興味クラスタ上限は 4 から 128 までの整数で入力してください。"
+        "負方向の興味クラスタ上限は 4 から 128 までの整数で入力してください。",
+      maxPositiveInterestFamilies:
+        "正方向のテーマグループ上限は 2 から 64 までの整数で入力してください。",
+      maxNegativeInterestFamilies:
+        "負方向のテーマグループ上限は 1 から 48 までの整数で入力してください。"
     },
     units: {
       px: "px",

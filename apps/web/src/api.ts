@@ -374,6 +374,8 @@ export type AppSettings = {
     cocoonLevel: number;
     maxPositiveInterestClusters: number;
     maxNegativeInterestClusters: number;
+    maxPositiveInterestFamilies: number;
+    maxNegativeInterestFamilies: number;
     localLearningEnabled: boolean;
     localLearningShadowMode: boolean;
     explorationEnabled: boolean;
@@ -434,6 +436,8 @@ export type UpdateSettingsInput = {
     cocoonLevel?: number;
     maxPositiveInterestClusters?: number;
     maxNegativeInterestClusters?: number;
+    maxPositiveInterestFamilies?: number;
+    maxNegativeInterestFamilies?: number;
     localLearningEnabled?: boolean;
     localLearningShadowMode?: boolean;
     explorationEnabled?: boolean;
@@ -941,8 +945,10 @@ export const defaultAppSettings: AppSettings = {
     preferSource: 0.5,
     preferDiversity: 0.5,
     cocoonLevel: 5,
-    maxPositiveInterestClusters: 24,
-    maxNegativeInterestClusters: 16,
+    maxPositiveInterestClusters: 48,
+    maxNegativeInterestClusters: 32,
+    maxPositiveInterestFamilies: 16,
+    maxNegativeInterestFamilies: 12,
     localLearningEnabled: true,
     localLearningShadowMode: false,
     explorationEnabled: true,
