@@ -256,6 +256,71 @@ test("mobile browser history back returns from article detail to the list", asyn
   expect(backLayout.readerDisplay).toBe("none");
 });
 
+test("mobile load more keeps scroll-past ignore telemetry active for appended articles", async ({
+  page
+}) => {
+  const baseTime = Date.parse("2026-05-25T08:00:00.000Z");
+  const articleIds: string[] = [];
+  for (let index = 1; index <= 70; index += 1) {
+    const articleId = `article_mobile_load_more_ignore_${String(index).padStart(2, "0")}`;
+    articleIds.push(articleId);
+    seedUnreadArticle(
+      articleId,
+      `E2E Load More Ignore ${String(index).padStart(2, "0")}`,
+      baseTime + index * 60_000
+    );
+  }
+
+  try {
+    await login(page);
+    await page.getByRole("link", { name: "最新" }).click();
+    await expect(page.getByRole("heading", { name: "最新" })).toBeVisible();
+    await page.getByTitle("只看未读").click();
+
+    let impressionRequestCount = 0;
+    await page.route("**/api/articles/*/actions", async (route) => {
+      const request = route.request();
+      const body = request.postDataJSON() as { type?: string } | null;
+      if (request.method() === "POST" && body?.type === "impression") {
+        impressionRequestCount += 1;
+        if (impressionRequestCount === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+      await route.continue();
+    });
+
+    await expect(page.getByRole("link", { name: /E2E Load More Ignore 70/ })).toBeVisible();
+    await page.getByRole("button", { name: "加载更多" }).click();
+
+    const appendedTitle = "E2E Load More Ignore 20";
+    await expect(page.getByRole("link", { name: new RegExp(appendedTitle) })).toBeVisible();
+    const listPanel = page.getByTestId("article-list-scroll-container");
+
+    await scrollArticleIntoListView(page, appendedTitle);
+    await expect.poll(() => articleStatusInList(page, appendedTitle)).toBe("unseen");
+
+    await listPanel.evaluate((element, articleTitle) => {
+      const row = Array.from(element.querySelectorAll("[data-article-id]")).find(
+        (candidate) =>
+          candidate instanceof HTMLElement && candidate.textContent?.includes(articleTitle)
+      );
+      if (!(row instanceof HTMLElement)) {
+        throw new Error(`Missing row for ${articleTitle}`);
+      }
+
+      element.scrollTop = row.offsetTop + row.offsetHeight + element.clientHeight;
+      element.dispatchEvent(new Event("scroll"));
+    }, appendedTitle);
+
+    await expect
+      .poll(() => articleStatusInList(page, appendedTitle), { timeout: 20_000 })
+      .toBe("ignored");
+  } finally {
+    deleteSeededArticles(articleIds);
+  }
+});
+
 test("mobile browser history back preserves the unread list queue without refetching", async ({
   page
 }) => {
@@ -472,6 +537,29 @@ function seedUnreadArticle(articleId: string, title: string, publishedAt?: numbe
   }
 }
 
+function deleteSeededArticles(articleIds: string[]): void {
+  if (articleIds.length === 0) {
+    return;
+  }
+
+  const db = new Database(e2eDatabasePath);
+  try {
+    const deleteBehavior = db.prepare("delete from behavior_events where article_id = ?");
+    const deleteState = db.prepare("delete from article_states where article_id = ?");
+    const deleteArticle = db.prepare("delete from articles where id = ?");
+    const cleanup = db.transaction((ids: string[]) => {
+      for (const articleId of ids) {
+        deleteBehavior.run(articleId);
+        deleteState.run(articleId);
+        deleteArticle.run(articleId);
+      }
+    });
+    cleanup(articleIds);
+  } finally {
+    db.close();
+  }
+}
+
 async function articleStatusInList(page: Page, title: string): Promise<string | null> {
   return page.getByTestId("article-list-scroll-container").evaluate((element, articleTitle) => {
     const row = Array.from(element.querySelectorAll("[data-article-id]")).find(
@@ -479,6 +567,21 @@ async function articleStatusInList(page: Page, title: string): Promise<string | 
     );
 
     return row instanceof HTMLElement ? row.dataset.interactionStatus ?? null : null;
+  }, title);
+}
+
+async function scrollArticleIntoListView(page: Page, title: string): Promise<void> {
+  await page.getByTestId("article-list-scroll-container").evaluate((element, articleTitle) => {
+    const row = Array.from(element.querySelectorAll("[data-article-id]")).find(
+      (candidate) => candidate instanceof HTMLElement && candidate.textContent?.includes(articleTitle)
+    );
+
+    if (!(row instanceof HTMLElement)) {
+      throw new Error(`Missing row for ${articleTitle}`);
+    }
+
+    row.scrollIntoView({ block: "center" });
+    element.dispatchEvent(new Event("scroll"));
   }, title);
 }
 

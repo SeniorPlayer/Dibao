@@ -16,6 +16,7 @@ Release date: 2026-05-30
 - 推荐排序收紧 topic family 的作用：cluster 仍是语义匹配主依据，family 主要用于解释和多样性，宽泛主题组不会直接放大推荐匹配分。
 - 升级界面会说明本次阻塞迁移只重建 derived recommendation data，不重算 embeddings，不会产生新的 embedding API 费用。
 - labels/升级相关界面保持分批处理和让出事件循环，降低低功耗 NAS 上 CPU 100% 时“界面像升级失败”的误判。
+- 修复在文章列表点击“加载更多”后，滚过第二页未打开文章可能不再自动标记为已忽略的问题。
 - Docker 发布流水线要求注入私有 Sentry build config，正式镜像会同时包含服务端和浏览器端的运行期 Sentry 配置。
 
 ### 升级影响
@@ -58,6 +59,7 @@ GET /api/system/health
 - Tightens ranking usage of topic families. Clusters remain the primary semantic match signal; families are used for explanation and diversity rather than broad score amplification.
 - The blocking upgrade copy now states that the migration rebuilds derived recommendation data only. It does not recompute embeddings and will not create embedding API cost.
 - Labels and upgrade screens keep batched/yielding behavior so low-power NAS devices remain visibly alive under high CPU load.
+- Fixes scroll-past ignore telemetry after using Load more, so unopened appended articles can still be marked ignored when scrolled past.
 - Docker publishing now requires private Sentry build config so release images include both server and browser runtime Sentry configuration.
 
 ### Upgrade Impact
@@ -100,6 +102,7 @@ To roll back, stop the v0.1.1 container, restore the pre-upgrade SQLite backup, 
 - 推薦ランキングでの topic family の扱いを抑制しました。semantic match の主役は cluster のままで、family は主に説明と多様性に使われます。
 - ブロッキング upgrade 画面に、この移行は derived recommendation data の再構築だけであり、embedding の再生成や API 費用は発生しないことを明記しました。
 - labels / upgrade 画面は分割処理と yield を維持し、低消費電力 NAS で CPU が高くなっても進行中であることが見えるようにしました。
+- 「さらに読み込む」を使った後も、追加された未読記事を開かずに通過した場合に無視済みへ自動反映されるよう修正しました。
 - Docker publish workflow は private Sentry build config を必須にし、正式イメージに server/browser 両方の runtime Sentry 設定を含めます。
 
 ### アップグレード影響

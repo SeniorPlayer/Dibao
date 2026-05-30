@@ -8,7 +8,7 @@ Workspace: `/Users/jeffreywang/dev/邸报`
 
 ## Release Decision
 
-This report is the live evidence log for the v0.1.1 release branch. The branch must remain untagged until the validation table is complete and the user explicitly approves the `main` merge and `v0.1.1` tag.
+This report is the live evidence log for the v0.1.1 release branch. A release-blocking Load more regression was found after the first tag publish attempt, so the final `v0.1.1` tag and GHCR image must be republished from the fixed commit without changing the version number.
 
 ## Gate Results
 
@@ -24,8 +24,8 @@ This report is the live evidence log for the v0.1.1 release branch. The branch m
 | v0.1.0 -> v0.1.1 Docker upgrade | Pass | Previous-release volume started at `0.1.0`, upgraded to `0.1.1`, applied `018`, retained setup, and had `interest_cluster_calibrations`. |
 | `docker compose config --quiet` | Pass | Compose config is valid after making the host port overridable with default `8080`. |
 | `npm run smoke:docker-recommendation` | Pass | Provider setup, backfill, personalized recommendation mode, full embedding coverage, and recommended list passed. |
-| `npm run perf:recommendation` | Pass | 20k-article benchmark regenerated `docs/recommendation-performance.md`; recommended API 47.0 ms, diagnostics/index API 135.1 ms. |
-| `npm run e2e` | Pass | 16/16 Playwright desktop/mobile tests passed. |
+| `npm run perf:recommendation` | Pass | 20k-article benchmark regenerated `docs/recommendation-performance.md`; recommended API 60.6 ms, diagnostics/index API 161.9 ms. |
+| `npm run e2e` | Pass | 17/17 Playwright desktop/mobile tests passed, including the Load more scroll-past ignore telemetry regression. |
 | `git diff --check` | Pass | No whitespace errors before final release commit. |
 
 ## Synology Regression Evidence From Dev Validation

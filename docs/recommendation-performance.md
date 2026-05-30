@@ -1,6 +1,6 @@
 # Recommendation Performance
 
-Generated at: 2026-05-30T13:44:03.868Z
+Generated at: 2026-05-30T14:10:37.332Z
 
 Dataset:
 
@@ -15,12 +15,12 @@ Results:
 
 | Check | Result |
 | --- | ---: |
-| Dataset generation | 4345.9 ms |
-| Ranking chunk job drain | 73.5 ms |
+| Dataset generation | 4756.1 ms |
+| Ranking chunk job drain | 74.0 ms |
 | Ranking jobs succeeded | 1 |
-| Embedding candidate query | 15.9 ms |
-| Recommended API | 47.0 ms |
-| Diagnostics/index API | 135.1 ms |
+| Embedding candidate query | 17.9 ms |
+| Recommended API | 60.6 ms |
+| Diagnostics/index API | 161.9 ms |
 
 Notes:
 
