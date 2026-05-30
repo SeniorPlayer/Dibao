@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -34,6 +34,8 @@ const fixtureRss = `<?xml version="1.0"?>
 </rss>`;
 const tmp = mkdtempSync(join(tmpdir(), "dibao-docker-smoke-"));
 const overridePath = join(tmp, "compose.override.yaml");
+const dataDir = join(tmp, "data");
+mkdirSync(dataDir, { recursive: true });
 
 const fixture = await startFixtureServer();
 const apiBase = `http://127.0.0.1:${hostPort}`;
@@ -45,6 +47,8 @@ writeFileSync(
     environment:
       DIBAO_BACKGROUND_JOBS: "true"
       DIBAO_JOB_RUNNER_INTERVAL_MS: "500"
+    volumes:
+      - "${dataDir}:/data"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 `

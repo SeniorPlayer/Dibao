@@ -417,6 +417,8 @@ export function App() {
     return diagnosticsByFeedId;
   }, [feedDiagnostics]);
   const currentArticleView = appPage.type === "reader" ? appPage.view : "latest";
+  const articlesRef = useRef<ArticleListItem[]>(articles);
+  const currentArticleViewRef = useRef<ArticleView>(currentArticleView);
   const articleListScrollKey = useMemo(
     () =>
       [
@@ -442,6 +444,8 @@ export function App() {
       unreadOnly
     ]
   );
+  articlesRef.current = articles;
+  currentArticleViewRef.current = currentArticleView;
 
   function applyArticleState(articleId: string, state: ArticleState) {
     const previousState =
@@ -2170,7 +2174,7 @@ export function App() {
   }
 
   async function postIgnoredArticle(articleId: string) {
-    const article = articles.find((candidate) => candidate.id === articleId);
+    const article = articlesRef.current.find((candidate) => candidate.id === articleId);
     const interactionStatus = article ? articleInteractionStatusForState(article.state) : "unseen";
 
     if (
@@ -2190,7 +2194,7 @@ export function App() {
         type: "impression",
         metadata: {
           reason: "scrolled_past_unopened",
-          view: currentArticleView
+          view: currentArticleViewRef.current
         }
       });
       applyArticleState(articleId, result.state);
