@@ -60,7 +60,7 @@ describe("server API vertical slice", () => {
           database: "ok",
           fts: "ok",
           vectorStore: "ok",
-          version: "0.1.0"
+          version: "0.1.1"
         }
       });
     } finally {
@@ -778,6 +778,119 @@ describe("server API vertical slice", () => {
           hasFeeds: true,
           hasEmbeddingProvider: false,
           firstRefreshStatus: "idle"
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("blocks ordinary APIs while the v0.1.1 derived-data upgrade is pending", async () => {
+    const db = createEmptyDatabase();
+    const feeds = new SqliteFeedRepository(db);
+    const articles = new SqliteArticleRepository(db);
+    const embeddings = new SqliteEmbeddingRepository(db);
+    const actions = new SqliteArticleActionRepository(db);
+    const vectorStore = new SqliteVecVectorStore(db);
+
+    feeds.upsert({
+      id: "feed_upgrade",
+      title: "Upgrade Feed",
+      feedUrl: "https://example.com/upgrade.xml",
+      now: 1000
+    });
+    articles.upsert({
+      id: "article_upgrade",
+      feedId: "feed_upgrade",
+      url: "https://example.com/upgrade",
+      canonicalUrl: "https://example.com/upgrade",
+      title: "Upgrade article",
+      summary: "Profile signal",
+      publishedAt: 1000,
+      discoveredAt: 1000,
+      contentHash: "hash_upgrade",
+      dedupeKey: "article_upgrade",
+      now: 1000
+    });
+    embeddings.upsertProvider({
+      id: "provider_upgrade",
+      type: "openai_compatible",
+      name: "Provider",
+      baseUrl: "https://api.example.com/v1",
+      model: "fixture",
+      dimension: 3,
+      enabled: true,
+      now: 1000
+    });
+    embeddings.createIndex({
+      id: "index_upgrade",
+      providerId: "provider_upgrade",
+      model: "fixture",
+      dimension: 3,
+      now: 1000
+    });
+    vectorStore.upsertArticleVector({
+      articleId: "article_upgrade",
+      embeddingIndexId: "index_upgrade",
+      vector: [1, 0, 0],
+      contentHash: "hash_upgrade",
+      now: 1000
+    });
+    actions.record({ articleId: "article_upgrade", type: "favorite", now: 2000 });
+
+    const app = buildRealServer({
+      db,
+      logger: false,
+      cookieSecure: false,
+      backgroundJobs: false,
+      now: () => 5000
+    });
+
+    try {
+      const setup = await postJson(app, "/api/auth/setup", {
+        username: "Pls",
+        password: "correct horse battery"
+      });
+      const cookie = cookieHeaderFromSetCookie(setup.headers["set-cookie"]);
+
+      const setupStatus = await app.inject({
+        method: "GET",
+        url: "/api/setup/status",
+        headers: { cookie }
+      });
+      expect(setupStatus.statusCode, setupStatus.body).toBe(200);
+      expect(setupStatus.json()).toMatchObject({
+        data: {
+          derivedDataUpgrade: {
+            state: "pending",
+            blocking: true,
+            activeIndexId: "index_upgrade"
+          }
+        }
+      });
+
+      const blocked = await app.inject({
+        method: "GET",
+        url: "/api/feeds",
+        headers: { cookie }
+      });
+      expect(blocked.statusCode, blocked.body).toBe(423);
+      expect(blocked.json()).toMatchObject({
+        error: {
+          code: "DERIVED_DATA_UPGRADE_IN_PROGRESS"
+        }
+      });
+
+      const upgradeStatus = await app.inject({
+        method: "GET",
+        url: "/api/system/upgrade/status",
+        headers: { cookie }
+      });
+      expect(upgradeStatus.statusCode, upgradeStatus.body).toBe(200);
+      expect(upgradeStatus.json()).toMatchObject({
+        data: {
+          blocking: true
         }
       });
     } finally {
@@ -2695,7 +2808,7 @@ describe("server API vertical slice", () => {
       expect(first.statusCode, first.body).toBe(200);
       expect(first.json()).toMatchObject({
         data: {
-          currentVersion: "0.1.0",
+          currentVersion: "0.1.1",
           latestVersion: "v0.2.0",
           releaseUrl: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
           updateAvailable: true,

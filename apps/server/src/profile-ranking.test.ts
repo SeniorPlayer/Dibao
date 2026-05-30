@@ -17,6 +17,7 @@ import {
   type DibaoDatabase
 } from "@dibao/db";
 import { JobRunner } from "./job-runner.js";
+import { DerivedDataUpgradeService } from "./derived-data-upgrade-service.js";
 import { ProfileDecayJobService } from "./profile-decay-job-service.js";
 import {
   PROFILE_EVENT_PROCESS_JOB_TYPE,
@@ -250,6 +251,93 @@ describe("profile algorithm and recommendation ranking", () => {
     }
   });
 
+  it("runs the v0.1.1 blocking derived-data upgrade from stored behavior without recomputing embeddings", async () => {
+    const fixture = createProfileFixture();
+    const { actions, db, profile, profiles } = fixture;
+    const settings = new SqliteAppSettingsRepository(db);
+
+    try {
+      const result = actions.record({
+        articleId: "article_liked",
+        type: "favorite",
+        now: 2000
+      });
+      profiles.upsertCluster({
+        id: "cluster_polluted",
+        embeddingIndexId: "index_profile",
+        polarity: "positive",
+        centroidVectorBlob: toVectorBlob([0.5, 0.5, 0]),
+        weight: 100,
+        sampleCount: 220,
+        lastMatchedAt: 3000,
+        now: 3000
+      });
+      profiles.upsertTopicSnapshot({
+        articleId: "article_liked",
+        feedId: "feed_profile",
+        topicSnapshotJson: JSON.stringify({
+          profileV0: {
+            index_profile: {
+              hash_liked: {
+                processedEventIds: [result!.eventId]
+              }
+            }
+          }
+        }),
+        now: 3000
+      });
+      const embeddingRowsBefore = countRows(db, "article_embeddings");
+
+      const upgrade = new DerivedDataUpgradeService({
+        db,
+        settings,
+        profileRebuild: new ProfileRebuildService({
+          db,
+          profile
+        }),
+        now: () => 5000
+      });
+
+      expect(upgrade.getStatus()).toMatchObject({
+        state: "pending",
+        blocking: true,
+        activeIndexId: "index_profile"
+      });
+
+      const upgradeResult = await upgrade.startIfRequired();
+
+      expect(upgradeResult).toMatchObject({
+        state: "completed",
+        blocking: false,
+        result: {
+          reset: {
+            clustersDeleted: 1,
+            snapshotsTouched: 1
+          },
+          replay: {
+            articleCount: 1,
+            articleIdsProcessed: 1,
+            profileChanged: true
+          },
+          after: {
+            clusters: 1,
+            evidence: 1
+          }
+        }
+      });
+      expect(profiles.listClusters({ embeddingIndexId: "index_profile" })[0]).toMatchObject({
+        sampleCount: 1
+      });
+      expect(countRows(db, "article_embeddings")).toBe(embeddingRowsBefore);
+      expect(upgrade.getStatus()).toMatchObject({
+        state: "completed",
+        blocking: false
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses positive profile clusters to raise similar articles in ranking v1", () => {
     const fixture = createProfileFixture();
     const { actions, db, profile, ranking } = fixture;
@@ -345,6 +433,89 @@ describe("profile algorithm and recommendation ranking", () => {
       expect(feedStats(db, "feed_like").positiveScore).toBeGreaterThan(
         feedStats(db, "feed_favorite").positiveScore
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps medium-similarity clear signals from widening an existing interest cluster", () => {
+    const fixture = createProfileFixture();
+    const { actions, articles, db, embeddings, profiles, vectorStore } = fixture;
+
+    try {
+      insertArticle(
+        articles,
+        "article_medium_clear",
+        "Medium similarity clear signal",
+        "hash_medium_clear",
+        1300
+      );
+      insertArticle(
+        articles,
+        "article_medium_progress",
+        "Medium similarity progress signal",
+        "hash_medium_progress",
+        1400
+      );
+      vectorStore.upsertArticleVector({
+        articleId: "article_medium_clear",
+        embeddingIndexId: "index_profile",
+        vector: [0.7, 0.714, 0],
+        contentHash: "hash_medium_clear",
+        now: 1000
+      });
+      vectorStore.upsertArticleVector({
+        articleId: "article_medium_progress",
+        embeddingIndexId: "index_profile",
+        vector: [0.7, -0.714, 0],
+        contentHash: "hash_medium_progress",
+        now: 1000
+      });
+
+      let clusterCount = 0;
+      const profile = new ProfileService({
+        embeddings,
+        profiles,
+        clusterIdFactory: () => {
+          clusterCount += 1;
+          return `cluster_medium_${clusterCount}`;
+        },
+        now: () => 5000
+      });
+
+      const favorite = actions.record({ articleId: "article_liked", type: "favorite", now: 2000 });
+      profile.processEvent(favorite!.eventId);
+      const firstCluster = profiles.listClusters({ embeddingIndexId: "index_profile" })[0]!;
+      expect(firstCluster.sampleCount).toBe(1);
+
+      const readLater = actions.record({
+        articleId: "article_medium_clear",
+        type: "read_later",
+        now: 2100
+      });
+      profile.processEvent(readLater!.eventId);
+
+      const clustersAfterClearSignal = profiles.listClusters({ embeddingIndexId: "index_profile" });
+      expect(clustersAfterClearSignal).toHaveLength(2);
+      expect(
+        clustersAfterClearSignal.find((cluster) => cluster.id === firstCluster.id)?.sampleCount
+      ).toBe(1);
+      expect(clusterEvidenceCount(db)).toBe(2);
+
+      const progress = actions.record({
+        articleId: "article_medium_progress",
+        type: "read_progress",
+        progress: 0.75,
+        now: 2200
+      });
+      profile.processEvent(progress!.eventId);
+
+      const clustersAfterProgress = profiles.listClusters({ embeddingIndexId: "index_profile" });
+      expect(clustersAfterProgress).toHaveLength(2);
+      expect(
+        clustersAfterProgress.find((cluster) => cluster.id === firstCluster.id)?.sampleCount
+      ).toBe(1);
+      expect(clusterEvidenceCount(db)).toBe(2);
     } finally {
       db.close();
     }
@@ -1688,6 +1859,7 @@ function createProfileFixture() {
     actions,
     articles,
     db,
+    embeddings,
     jobs,
     profile,
     profiles,

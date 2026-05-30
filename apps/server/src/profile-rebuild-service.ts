@@ -1,3 +1,4 @@
+import { setImmediate as delayImmediate } from "node:timers/promises";
 import type { DibaoDatabase } from "@dibao/db";
 import type { InterestClusterLabelService } from "./interest-cluster-label-service.js";
 import type { InterestFamilyService } from "./interest-family-service.js";
@@ -9,6 +10,19 @@ export type ProfileRebuildInput = {
   rebuildLabels?: boolean;
   rebuildFamilies?: boolean;
   recalculateRanking?: boolean;
+};
+
+export type ProfileRebuildStep = "reset" | "replay" | "labels" | "families" | "ranking";
+
+export type ProfileRebuildProgress = {
+  step: ProfileRebuildStep;
+  articleCount: number;
+  articleIdsProcessed: number;
+  chunksProcessed: number;
+};
+
+export type AsyncProfileRebuildInput = ProfileRebuildInput & {
+  onProgress?: (progress: ProfileRebuildProgress) => void;
 };
 
 export type ProfileRebuildResult = {
@@ -90,6 +104,107 @@ export class ProfileRebuildService {
       input.rebuildFamilies === false
         ? null
         : this.options.interestFamilies?.rebuildFamiliesForIndex(embeddingIndexId) ?? null;
+    const rankingRows =
+      input.recalculateRanking === false
+        ? null
+        : this.options.ranking?.recalculateAll() ?? null;
+
+    return {
+      embeddingIndexId,
+      reset,
+      replay: {
+        articleCount: articleIds.length,
+        articleIdsProcessed,
+        chunksProcessed,
+        profileChanged
+      },
+      rebuilt: {
+        labels,
+        families: familyResult?.familyCount ?? null,
+        familyMembers: familyResult?.memberCount ?? null,
+        rankingRows
+      },
+      after: {
+        clusters: this.countActiveIndexRows("interest_clusters", embeddingIndexId),
+        evidence: this.countActiveIndexEvidence(embeddingIndexId)
+      }
+    };
+  }
+
+  async rebuildActiveIndexProfileAsync(
+    input: AsyncProfileRebuildInput = {}
+  ): Promise<ProfileRebuildResult> {
+    const embeddingIndexId = this.activeEmbeddingIndexId();
+    if (!embeddingIndexId) {
+      return emptyRebuildResult();
+    }
+
+    input.onProgress?.({
+      step: "reset",
+      articleCount: 0,
+      articleIdsProcessed: 0,
+      chunksProcessed: 0
+    });
+    await delayImmediate();
+    const reset = this.resetActiveIndexProfile(embeddingIndexId);
+    const articleIds = this.listReplayArticleIds(embeddingIndexId);
+    const chunkSize = clampChunkSize(input.chunkSize);
+    let articleIdsProcessed = 0;
+    let chunksProcessed = 0;
+    let profileChanged = false;
+
+    input.onProgress?.({
+      step: "replay",
+      articleCount: articleIds.length,
+      articleIdsProcessed,
+      chunksProcessed
+    });
+    for (let offset = 0; offset < articleIds.length; offset += chunkSize) {
+      const chunk = articleIds.slice(offset, offset + chunkSize);
+      const result = this.options.profile.processArticleEvents(chunk);
+      articleIdsProcessed += result.articleIds.length;
+      chunksProcessed += 1;
+      profileChanged = result.profileChanged || profileChanged;
+      input.onProgress?.({
+        step: "replay",
+        articleCount: articleIds.length,
+        articleIdsProcessed,
+        chunksProcessed
+      });
+      await delayImmediate();
+    }
+
+    input.onProgress?.({
+      step: "labels",
+      articleCount: articleIds.length,
+      articleIdsProcessed,
+      chunksProcessed
+    });
+    await delayImmediate();
+    const labels =
+      input.rebuildLabels === false
+        ? null
+        : this.options.clusterLabels?.rebuildIndexLabels(embeddingIndexId) ?? null;
+
+    input.onProgress?.({
+      step: "families",
+      articleCount: articleIds.length,
+      articleIdsProcessed,
+      chunksProcessed
+    });
+    await delayImmediate();
+    const familyResult =
+      input.rebuildFamilies === false
+        ? null
+        : this.options.interestFamilies?.rebuildFamiliesForIndex(embeddingIndexId) ?? null;
+
+    input.onProgress?.({
+      step: "ranking",
+      articleCount: articleIds.length,
+      articleIdsProcessed,
+      chunksProcessed
+    });
+    await delayImmediate();
     const rankingRows =
       input.recalculateRanking === false
         ? null

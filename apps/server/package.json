@@ -1,6 +1,6 @@
 {
   "name": "@dibao/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
@@ -14,10 +14,10 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@dibao/db": "0.1.0",
-    "@dibao/ranking": "0.1.0",
-    "@dibao/rss": "0.1.0",
-    "@dibao/shared": "0.1.0",
+    "@dibao/db": "0.1.1",
+    "@dibao/ranking": "0.1.1",
+    "@dibao/rss": "0.1.1",
+    "@dibao/shared": "0.1.1",
     "@sentry/node": "^10.53.1",
     "fastify": "^5.8.5"
   }

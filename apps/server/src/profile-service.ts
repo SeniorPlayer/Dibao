@@ -339,34 +339,6 @@ export class ProfileService {
       return;
     }
 
-    if (best.similarity >= thresholds.create) {
-      const learningRate = clamp(eventWeight / 36, 0.02, 0.1);
-      const merged = mergeCentroid(best.centroid, vector, learningRate);
-      const dampenedWeight = eventWeight * 0.65;
-      this.options.profiles.updateCluster({
-        id: best.cluster.id,
-        centroidVectorBlob: toVectorBlob(merged),
-        weight: clamp(
-          best.cluster.weight + dampenedWeight,
-          profileAlgorithmDefaults.minClusterWeight,
-          profileAlgorithmDefaults.maxClusterWeight
-        ),
-        sampleCount: best.cluster.sampleCount + 1,
-        lastMatchedAt: now,
-        now
-      });
-      this.recordClusterEvidence(
-        event,
-        best.cluster.id,
-        "live_event",
-        best.similarity,
-        dampenedWeight,
-        now
-      );
-      this.compactAndTrimClusters(event.embeddingIndexId, polarity);
-      return;
-    }
-
     if (forceCreate) {
       const cluster = this.createCluster(
         event.embeddingIndexId,

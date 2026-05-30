@@ -1,4 +1,4 @@
-export const dibaoVersion = "0.1.0";
+export const dibaoVersion = "0.1.1";
 
 export type DibaoSentryConfig = {
   dsn: string;

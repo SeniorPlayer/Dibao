@@ -64,6 +64,10 @@ import {
 import { AuthService, AuthServiceError } from "./auth-service.js";
 import { ArticleRetentionService } from "./article-retention-service.js";
 import {
+  DerivedDataUpgradeService,
+  type DerivedDataUpgradeStatus
+} from "./derived-data-upgrade-service.js";
+import {
   EmbeddingJobService,
   EMBEDDING_GENERATE_JOB_TYPE,
   parseEmbeddingGeneratePayload
@@ -136,6 +140,7 @@ import {
   ProfileEventProcessJobService
 } from "./profile-event-job-service.js";
 import { ProfileService } from "./profile-service.js";
+import { ProfileRebuildService } from "./profile-rebuild-service.js";
 import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_JOB_TYPE
@@ -193,6 +198,7 @@ type SetupStatusResponse = {
   hasFeeds: boolean;
   hasEmbeddingProvider: boolean;
   firstRefreshStatus: "idle" | "running" | "succeeded" | "failed";
+  derivedDataUpgrade?: DerivedDataUpgradeStatus;
 };
 
 type FeedQuery = {
@@ -443,6 +449,20 @@ export function buildServer(options: BuildServerOptions = {}) {
   const interestFamilyService = new InterestFamilyService({
     db,
     now: options.now
+  });
+  const profileRebuildService = new ProfileRebuildService({
+    db,
+    profile: profileService,
+    clusterLabels: clusterLabelService,
+    interestFamilies: interestFamilyService,
+    ranking: rankingService
+  });
+  const derivedDataUpgradeService = new DerivedDataUpgradeService({
+    db,
+    settings,
+    profileRebuild: profileRebuildService,
+    now: options.now,
+    onError: (error) => app.log.error(error)
   });
   const recommendationMaintenanceService = new RecommendationMaintenanceService({
     db,
@@ -855,15 +875,48 @@ export function buildServer(options: BuildServerOptions = {}) {
     if (!authService.authenticate(token)) {
       return sendApiError(reply, 401, "UNAUTHORIZED", "Authentication required");
     }
+
+    if (
+      derivedDataUpgradeService.isBlocking() &&
+      !isUpgradeAllowedRoute(request.method, request.routeOptions.url)
+    ) {
+      return sendApiError(
+        reply,
+        423,
+        "DERIVED_DATA_UPGRADE_IN_PROGRESS",
+        "Dibao is rebuilding derived recommendation data for this version upgrade",
+        derivedDataUpgradeService.getStatus()
+      );
+    }
   });
+
+  function startBackgroundServices(): void {
+    if (!backgroundJobs) {
+      return;
+    }
+    jobRunner.start();
+    feedRefreshScheduler.start();
+    retentionCleanupScheduler.start();
+    profileDecayScheduler.start();
+    recommendationMaintenanceScheduler.start();
+  }
 
   if (backgroundJobs) {
     app.addHook("onReady", async () => {
-      jobRunner.start();
-      feedRefreshScheduler.start();
-      retentionCleanupScheduler.start();
-      profileDecayScheduler.start();
-      recommendationMaintenanceScheduler.start();
+      const status = derivedDataUpgradeService.getStatus();
+      if (!status.blocking) {
+        startBackgroundServices();
+        return;
+      }
+
+      void derivedDataUpgradeService
+        .startIfRequired()
+        .then((result) => {
+          if (!result.blocking) {
+            startBackgroundServices();
+          }
+        })
+        .catch((error) => app.log.error(error));
     });
   }
 
@@ -972,8 +1025,23 @@ export function buildServer(options: BuildServerOptions = {}) {
     data: getSetupStatus(
       credentials.hasCredential(),
       feeds.list().length > 0,
-      embeddingProviderService.hasActiveProviderAndIndex()
+      embeddingProviderService.hasActiveProviderAndIndex(),
+      derivedDataUpgradeService.getStatus()
     )
+  }));
+
+  app.get("/api/system/upgrade/status", async () => {
+    const status = derivedDataUpgradeService.getStatus();
+    if (status.blocking) {
+      void derivedDataUpgradeService.startIfRequired().catch((error) => app.log.error(error));
+    }
+    return {
+      data: status
+    };
+  });
+
+  app.post("/api/system/upgrade/retry", async () => ({
+    data: await derivedDataUpgradeService.retry()
   }));
 
   app.get<{ Querystring: JobQuery }>("/api/jobs", async (request, reply) => {
@@ -1967,12 +2035,29 @@ function isAnonymousRoute(method: string, routePath: string | undefined): boolea
   return anonymousRoutes.has(`${method.toUpperCase()} ${routePath}`);
 }
 
+function isUpgradeAllowedRoute(method: string, routePath: string | undefined): boolean {
+  if (!routePath) {
+    return false;
+  }
+
+  return upgradeAllowedRoutes.has(`${method.toUpperCase()} ${routePath}`);
+}
+
 const anonymousRoutes = new Set([
   "GET /api/auth/session",
   "POST /api/auth/setup",
   "POST /api/auth/login",
   "POST /api/auth/logout",
   "GET /api/system/health"
+]);
+
+const upgradeAllowedRoutes = new Set([
+  "GET /api/auth/session",
+  "POST /api/auth/logout",
+  "GET /api/setup/status",
+  "GET /api/system/health",
+  "GET /api/system/upgrade/status",
+  "POST /api/system/upgrade/retry"
 ]);
 
 function requestMeta(request: FastifyRequest) {
@@ -2016,14 +2101,19 @@ function checkHealth(fn: () => void): HealthStatus {
 function getSetupStatus(
   setupCompleted: boolean,
   hasFeeds: boolean,
-  hasEmbeddingProvider: boolean
+  hasEmbeddingProvider: boolean,
+  derivedDataUpgrade: DerivedDataUpgradeStatus
 ): SetupStatusResponse {
-  return {
+  const status: SetupStatusResponse = {
     setupCompleted,
     hasFeeds,
     hasEmbeddingProvider,
     firstRefreshStatus: "idle"
   };
+  if (derivedDataUpgrade.blocking || derivedDataUpgrade.state === "pending") {
+    status.derivedDataUpgrade = derivedDataUpgrade;
+  }
+  return status;
 }
 
 function getRecommendationStatus(options: {

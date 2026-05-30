@@ -16,6 +16,7 @@ import {
   type AppSettings,
   type AuthSession,
   type CreateEmbeddingProviderInput,
+  type DerivedDataUpgradeStatus,
   type EmbeddingIndex,
   type EmbeddingProvider,
   type EmbeddingProviderType,
@@ -164,6 +165,7 @@ export type AppStage =
   | { type: "setup-password" }
   | { type: "login" }
   | { type: "setup-status-loading" }
+  | { type: "derived-data-upgrade" }
   | { type: "setup-sources" }
   | { type: "setup-provider" }
   | { type: "reader" };
@@ -202,6 +204,10 @@ export function stageForAuthSession(session: AuthSession): AppStage {
 export function stageForSetupStatus(status: SetupStatus): AppStage {
   if (!status.setupCompleted) {
     return { type: "welcome" };
+  }
+
+  if (status.derivedDataUpgrade?.blocking) {
+    return { type: "derived-data-upgrade" };
   }
 
   return { type: status.hasFeeds ? "reader" : "setup-sources" };
@@ -260,6 +266,10 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [setupSourceError, setSetupSourceError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [derivedDataUpgrade, setDerivedDataUpgrade] =
+    useState<DerivedDataUpgradeStatus | null>(null);
+  const [derivedDataUpgradeError, setDerivedDataUpgradeError] = useState<string | null>(null);
+  const [isRetryingDerivedDataUpgrade, setIsRetryingDerivedDataUpgrade] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
   const [telemetryEnabled, setTelemetryEnabled] = useState(() =>
     readStoredTelemetryPreference()
@@ -708,6 +718,7 @@ export function App() {
       try {
         const status = await dibaoApi.getSetupStatus();
         if (!cancelled) {
+          setDerivedDataUpgrade(status.derivedDataUpgrade ?? null);
           const nextStage = stageForSetupStatus(status);
           if (nextStage.type === "welcome") {
             resetReaderState();
@@ -729,6 +740,47 @@ export function App() {
       cancelled = true;
     };
   }, [appStage.type, resetReaderState, t.errors.api]);
+
+  useEffect(() => {
+    if (appStage.type !== "derived-data-upgrade") {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function pollUpgradeStatus() {
+      try {
+        const status = await dibaoApi.getDerivedDataUpgradeStatus();
+        if (cancelled) {
+          return;
+        }
+        setDerivedDataUpgrade(status);
+        setDerivedDataUpgradeError(null);
+        if (!status.blocking) {
+          setAppStage({ type: "setup-status-loading" });
+          return;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDerivedDataUpgradeError(userMessageForError(error, t.errors.api));
+        }
+      }
+
+      if (!cancelled) {
+        timer = window.setTimeout(pollUpgradeStatus, 1500);
+      }
+    }
+
+    void pollUpgradeStatus();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [appStage.type, t.errors.api]);
 
   const applySettings = useCallback(
     (settings: AppSettings) => {
@@ -1345,6 +1397,19 @@ export function App() {
       resetReaderState();
     } catch (error) {
       setLogoutError(userMessageForError(error, t.errors.api) || t.auth.errors.logout);
+    }
+  }
+
+  async function handleRetryDerivedDataUpgrade() {
+    setIsRetryingDerivedDataUpgrade(true);
+    setDerivedDataUpgradeError(null);
+
+    try {
+      setDerivedDataUpgrade(await dibaoApi.retryDerivedDataUpgrade());
+    } catch (error) {
+      setDerivedDataUpgradeError(userMessageForError(error, t.errors.api));
+    } finally {
+      setIsRetryingDerivedDataUpgrade(false);
     }
   }
 
@@ -2377,6 +2442,20 @@ export function App() {
     );
   }
 
+  if (appStage.type === "derived-data-upgrade") {
+    return (
+      <main className={styles.authShell}>
+        {pwaStatusBanner}
+        <DerivedDataUpgradePanel
+          error={derivedDataUpgradeError}
+          isRetrying={isRetryingDerivedDataUpgrade}
+          onRetry={handleRetryDerivedDataUpgrade}
+          status={derivedDataUpgrade}
+        />
+      </main>
+    );
+  }
+
   if (appStage.type === "setup-sources") {
     return (
       <main className={styles.authShell}>
@@ -2979,6 +3058,60 @@ export function AuthGatePanel(props: {
       </form>
 
       {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
+    </section>
+  );
+}
+
+function DerivedDataUpgradePanel(props: {
+  error: string | null;
+  isRetrying: boolean;
+  onRetry: () => void;
+  status: DerivedDataUpgradeStatus | null;
+}) {
+  const { t } = useI18n();
+  const progress = props.status?.progress;
+  const percent = progress ? Math.max(0, Math.min(100, Math.round(progress.percent * 100))) : 0;
+  const step = props.status?.step ?? "detecting";
+  const isFailed = props.status?.state === "failed";
+  const articleTotal = progress?.total ?? 0;
+  const articleCurrent = progress?.current ?? 0;
+
+  return (
+    <section className={styles.authPanel} aria-labelledby="derived-data-upgrade-title">
+      <div className={styles.brand}>
+        <img alt="" className={styles.brandMark} src="/logo-64.png" />
+        <span>
+          <strong>{t.common.brandName}</strong>
+          <small>{t.common.brandSubtitle}</small>
+        </span>
+      </div>
+      <div>
+        <p className={styles.kicker}>{t.upgrade.kicker}</p>
+        <h1 id="derived-data-upgrade-title">{t.upgrade.title}</h1>
+        <p>{isFailed ? t.upgrade.failedBody : t.upgrade.body}</p>
+      </div>
+      <div className={styles.setupStatusBox} aria-live="polite">
+        <strong>{t.upgrade.steps[step]}</strong>
+        <p>{t.upgrade.progress(articleCurrent, articleTotal, percent)}</p>
+        <progress
+          aria-label={t.upgrade.progressLabel}
+          className={styles.upgradeProgress}
+          max={100}
+          value={percent}
+        />
+      </div>
+      {props.status?.error ? <p className={styles.errorText}>{props.status.error}</p> : null}
+      {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
+      {isFailed ? (
+        <button
+          className={styles.primaryButton}
+          disabled={props.isRetrying}
+          onClick={props.onRetry}
+          type="button"
+        >
+          {props.isRetrying ? t.upgrade.retrying : t.upgrade.retry}
+        </button>
+      ) : null}
     </section>
   );
 }

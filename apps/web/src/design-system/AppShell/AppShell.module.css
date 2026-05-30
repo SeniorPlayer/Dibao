@@ -215,6 +215,28 @@
   line-height: 1.5;
 }
 
+.upgradeProgress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-line-subtle);
+  accent-color: var(--color-pine);
+}
+
+.upgradeProgress::-webkit-progress-bar {
+  background: var(--color-line-subtle);
+}
+
+.upgradeProgress::-webkit-progress-value {
+  background: var(--color-pine);
+}
+
+.upgradeProgress::-moz-progress-bar {
+  background: var(--color-pine);
+}
+
 .sidebar {
   border-right: var(--border-default);
   padding: var(--space-4);

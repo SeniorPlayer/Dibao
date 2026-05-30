@@ -109,6 +109,28 @@ export const zhCN = {
       logout: "退出登录失败。"
     }
   },
+  upgrade: {
+    kicker: "版本升级",
+    title: "正在重建推荐画像",
+    body: "邸报正在修复旧版本产生的兴趣簇数据。完成前会暂停阅读界面，避免旧画像继续影响推荐。",
+    failedBody: "推荐画像重建未完成。请重试，或查看服务日志后再继续。",
+    progressLabel: "升级进度",
+    progress: (current: number, total: number, percent: number) =>
+      total > 0 ? `${current} / ${total} 篇文章 · ${percent}%` : "正在准备数据",
+    retry: "重试重建",
+    retrying: "重试中",
+    steps: {
+      detecting: "检查需要修复的数据",
+      reset: "清理旧的兴趣簇与家族",
+      replay: "回放历史阅读信号",
+      labels: "重建兴趣簇标签",
+      families: "重建兴趣家族",
+      ranking: "重算推荐排序",
+      completed: "重建完成",
+      failed: "重建失败",
+      skipped: "无需重建"
+    }
+  },
   setup: {
     kicker: "首次设置",
     welcome: {
@@ -1372,6 +1394,28 @@ export const enUS = {
       logout: "Log out failed."
     }
   },
+  upgrade: {
+    kicker: "Version upgrade",
+    title: "Rebuilding your recommendation profile",
+    body: "Dibao is repairing interest-cluster data created by an older version. The reader is paused until the rebuild finishes so stale profile data cannot affect recommendations.",
+    failedBody: "The recommendation profile rebuild did not finish. Retry after checking the server log if needed.",
+    progressLabel: "Upgrade progress",
+    progress: (current: number, total: number, percent: number) =>
+      total > 0 ? `${current} / ${total} articles · ${percent}%` : "Preparing data",
+    retry: "Retry rebuild",
+    retrying: "Retrying",
+    steps: {
+      detecting: "Checking profile data",
+      reset: "Clearing old clusters and families",
+      replay: "Replaying reading signals",
+      labels: "Rebuilding cluster labels",
+      families: "Rebuilding interest families",
+      ranking: "Recalculating recommendations",
+      completed: "Rebuild complete",
+      failed: "Rebuild failed",
+      skipped: "No rebuild needed"
+    }
+  },
   setup: {
     kicker: "First-run setup",
     welcome: {
@@ -2622,6 +2666,28 @@ export const jaJP = {
     errors: {
       session: "ログイン状態を取得できませんでした。",
       logout: "ログアウトに失敗しました。"
+    }
+  },
+  upgrade: {
+    kicker: "バージョンアップ",
+    title: "おすすめプロファイルを再構築しています",
+    body: "旧バージョンで作成された興味クラスターデータを修復しています。古いプロファイルが推薦に影響しないよう、完了までリーダーを一時停止します。",
+    failedBody: "おすすめプロファイルの再構築が完了しませんでした。必要に応じてサーバーログを確認し、もう一度お試しください。",
+    progressLabel: "アップグレード進捗",
+    progress: (current: number, total: number, percent: number) =>
+      total > 0 ? `${current} / ${total} 件の記事 · ${percent}%` : "データを準備しています",
+    retry: "再構築を再試行",
+    retrying: "再試行中",
+    steps: {
+      detecting: "修復対象のデータを確認",
+      reset: "古いクラスターとファミリーを削除",
+      replay: "読書シグナルを再生",
+      labels: "クラスターラベルを再構築",
+      families: "興味ファミリーを再構築",
+      ranking: "おすすめ順を再計算",
+      completed: "再構築が完了",
+      failed: "再構築に失敗",
+      skipped: "再構築は不要"
     }
   },
   setup: {
