@@ -5,6 +5,7 @@ export type JobHandler = (job: JobRow) => Promise<void> | void;
 export type JobRunnerOptions = {
   jobs: JobRepository;
   handlers: Partial<Record<JobType, JobHandler>>;
+  pluginHandler?: JobHandler;
   now?: () => number;
   pollIntervalMs?: number;
   retryDelayMs?: number;
@@ -89,9 +90,20 @@ export class JobRunner {
       return null;
     }
 
-    const handler = this.options.handlers[job.type];
+    const handler = this.options.handlers[job.type] ?? (
+      isPluginJobType(job.type) ? this.options.pluginHandler : undefined
+    );
     if (!handler) {
-      this.options.jobs.markFailed(job.id, `No handler registered for job type: ${job.type}`, this.now());
+      if (isPluginJobType(job.type)) {
+        this.options.jobs.defer(
+          job.id,
+          `Plugin handler unavailable for job type: ${job.type}`,
+          this.now() + this.retryDelayMs,
+          this.now()
+        );
+      } else {
+        this.options.jobs.markFailed(job.id, `No handler registered for job type: ${job.type}`, this.now());
+      }
       return job;
     }
 
@@ -111,6 +123,10 @@ export class JobRunner {
 
     return job;
   }
+}
+
+function isPluginJobType(type: JobType): boolean {
+  return type.startsWith("plugin:");
 }
 
 function errorMessage(error: unknown): string {

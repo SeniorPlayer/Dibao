@@ -2463,6 +2463,138 @@ POST /api/recommendation/ftrl/promote
 
 ## System
 
+## Plugins
+
+插件 API 用于管理官方和第三方插件。第三方插件安装后默认不启用；启用时执行兼容性、权限和 migration 检查。
+
+插件状态：
+
+```text
+installed
+enabled
+disabled
+incompatible
+failed
+```
+
+### GET /api/plugins
+
+返回已发现和已安装插件。
+
+响应：
+
+```json
+{
+  "data": [
+    {
+      "id": "dev.example.reader-tools",
+      "name": "Reader Tools",
+      "version": "0.1.0",
+      "publisher": "Example",
+      "status": "installed",
+      "sourceType": "local_file",
+      "sourceUrl": null,
+      "updateUrl": "https://example.com/latest.json",
+      "official": false,
+      "bundled": false,
+      "trustLevel": "untrusted",
+      "capabilities": ["articles:read"],
+      "grantedCapabilities": [],
+      "contributes": {
+        "settingsTabs": [],
+        "tabs": [],
+        "actions": [],
+        "hooks": ["settings.afterUpdated"],
+        "tasks": []
+      },
+      "installedAt": "2026-05-31T00:00:00.000Z",
+      "updatedAt": "2026-05-31T00:00:00.000Z",
+      "enabledAt": null,
+      "disabledAt": null,
+      "lastError": null
+    }
+  ]
+}
+```
+
+### GET /api/plugins/catalog
+
+返回随 Release 分发的官方插件。
+
+### POST /api/plugins/install
+
+从 URL 或插件包 JSON 安装。
+
+请求：
+
+```json
+{
+  "url": "https://example.com/plugin.dibao-plugin",
+  "sha256": "optional"
+}
+```
+
+或：
+
+```json
+{
+  "package": "{\"manifest\":{\"manifestVersion\":1}}",
+  "sha256": "optional"
+}
+```
+
+### POST /api/plugins/install/upload
+
+上传 `.dibao-plugin` 文件安装，使用 `multipart/form-data` 或原始 JSON body。
+
+### POST /api/plugins/:id/enable
+
+启用插件。启用时会校验 Dibao 版本兼容性并写入 capability grants。
+
+### POST /api/plugins/:id/disable
+
+停用插件。停用插件不会删除插件数据。
+
+### POST /api/plugins/:id/update
+
+读取插件 `updateUrl`，执行 metadata 检查、checksum 校验和 staged update。失败时保留旧包。
+
+### DELETE /api/plugins/:id
+
+卸载第三方插件。官方插件不能卸载。
+
+查询参数：
+
+- `deleteData=true`: 同时删除 `/data/plugins/data/<plugin-id>`。
+
+### GET/PATCH /api/plugins/:id/settings
+
+读取或更新插件命名空间 settings。PATCH body 必须是 JSON object。
+
+### GET /api/plugins/:id/health
+
+返回插件兼容性、状态、错误、capability 和 task 摘要。
+
+### GET /api/plugins/:id/assets/*
+
+读取插件包内静态资源。第三方 rich UI 通过 sandboxed iframe 加载这里的 asset。
+
+### POST /api/plugins/:id/tasks/:taskId
+
+启动插件任务，返回 core job row。插件任务类型格式：
+
+```text
+plugin:<pluginId>:<taskId>
+```
+
+### GET /api/plugins/:id/tasks/:runId
+
+读取插件任务运行状态。
+
+### POST /api/plugins/:id/tasks/:runId/cancel
+
+取消 queued/running 插件任务，状态变为 `cancelled`。
+
 ### GET /api/system/health
 
 健康检查。

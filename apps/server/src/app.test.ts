@@ -114,6 +114,149 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("installs and manages plugin packages through the plugin API", async () => {
+    const db = createEmptyDatabase();
+    const pluginDataDir = createTempDir();
+    const packageContent = JSON.stringify({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.plugin",
+        name: "Example Plugin",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        capabilities: ["articles:read", "settings:plugin", "jobs:write"],
+        contributes: {
+          hooks: ["settings.afterUpdated"],
+          tasks: [{ id: "refresh", kind: "background", schedule: "manual" }]
+        }
+      },
+      files: {
+        "web/index.html": "<p>Example plugin asset</p>"
+      },
+      updateUrl: "https://example.com/plugin-update.json"
+    });
+    const app = buildServer({ db, logger: false, pluginDataDir, now: () => 10_000 });
+
+    try {
+      const installed = await injectJson(app, "POST", "/api/plugins/install", {
+        package: packageContent
+      });
+      expect(installed.statusCode, installed.body).toBe(200);
+      expect(installed.json().data).toMatchObject({
+        id: "com.example.plugin",
+        status: "installed",
+        sourceType: "local_file"
+      });
+
+      const enabled = await app.inject({
+        method: "POST",
+        url: "/api/plugins/com.example.plugin/enable"
+      });
+      expect(enabled.statusCode, enabled.body).toBe(200);
+      expect(enabled.json().data.status).toBe("enabled");
+
+      const settings = await injectJson(
+        app,
+        "PATCH",
+        "/api/plugins/com.example.plugin/settings",
+        { threshold: 3 }
+      );
+      expect(settings.statusCode, settings.body).toBe(200);
+      expect(settings.json().data).toEqual({ threshold: 3 });
+
+      const asset = await app.inject({
+        method: "GET",
+        url: "/api/plugins/com.example.plugin/assets/web/index.html"
+      });
+      expect(asset.statusCode, asset.body).toBe(200);
+      expect(asset.body).toContain("Example plugin asset");
+
+      const task = await app.inject({
+        method: "POST",
+        url: "/api/plugins/com.example.plugin/tasks/refresh"
+      });
+      expect(task.statusCode, task.body).toBe(200);
+      expect(task.json().data).toMatchObject({
+        type: "plugin:com.example.plugin:refresh",
+        status: "queued"
+      });
+
+      const cancelled = await app.inject({
+        method: "POST",
+        url: `/api/plugins/com.example.plugin/tasks/${task.json().data.id}/cancel`
+      });
+      expect(cancelled.statusCode, cancelled.body).toBe(200);
+      expect(cancelled.json().data.status).toBe("cancelled");
+
+      const listed = await app.inject({ method: "GET", url: "/api/plugins" });
+      expect(listed.statusCode, listed.body).toBe(200);
+      expect(listed.json().data).toMatchObject([
+        {
+          id: "com.example.plugin",
+          status: "enabled",
+          capabilities: ["articles:read", "settings:plugin", "jobs:write"]
+        }
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("installs plugin packages from update metadata URLs", async () => {
+    const db = createEmptyDatabase();
+    const pluginDataDir = createTempDir();
+    const packageContent = JSON.stringify({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.remote",
+        name: "Remote Plugin",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        capabilities: ["articles:read"],
+        contributes: {}
+      }
+    });
+    const app = buildServer({
+      db,
+      logger: false,
+      pluginDataDir,
+      pluginFetcher: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const body = url.endsWith("latest.json")
+          ? JSON.stringify({
+              pluginId: "com.example.remote",
+              latestVersion: "1.0.0",
+              packageUrl: "https://github.com/example/remote/releases/download/v1/remote.dibao-plugin"
+            })
+          : packageContent;
+        return new Response(body, {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    });
+
+    try {
+      const response = await injectJson(app, "POST", "/api/plugins/install", {
+        url: "https://github.com/example/remote/releases/latest/download/latest.json"
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data).toMatchObject({
+        id: "com.example.remote",
+        sourceType: "github_release",
+        sourceUrl: "https://github.com/example/remote/releases/download/v1/remote.dibao-plugin",
+        updateUrl: "https://github.com/example/remote/releases/latest/download/latest.json",
+        status: "installed"
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
   it("serves PWA manifest and service worker static assets with installability headers", async () => {
     const db = createEmptyDatabase();
     const webDistDir = createTempDir();

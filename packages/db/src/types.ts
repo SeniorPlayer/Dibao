@@ -49,7 +49,7 @@ export type FeedListInput = {
   enabled?: boolean;
 };
 
-export type JobType =
+export type CoreJobType =
   | "feed_refresh"
   | "content_extract"
   | "embedding_generate"
@@ -69,6 +69,10 @@ export type JobType =
   | "interest_cluster_merge_diagnostics"
   | "interest_cluster_auto_merge"
   | "interest_family_rebuild";
+
+export type PluginJobType = `plugin:${string}:${string}`;
+
+export type JobType = CoreJobType | PluginJobType;
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -99,6 +103,74 @@ export type EnqueueJobInput = {
   payloadJson?: string | null;
   maxAttempts?: number;
   runAfter?: number;
+  now?: number;
+};
+
+export type PluginSourceType = "official" | "local_file" | "url" | "github_release" | "registry";
+export type PluginInstallStatus =
+  | "installed"
+  | "enabled"
+  | "disabled"
+  | "incompatible"
+  | "failed";
+export type PluginTrustLevel = "official" | "trusted" | "untrusted";
+
+export type PluginInstallRow = {
+  id: string;
+  version: string;
+  sourceType: PluginSourceType;
+  sourceUrl: string | null;
+  updateUrl: string | null;
+  packagePath: string | null;
+  dataPath: string | null;
+  manifestJson: string;
+  status: PluginInstallStatus;
+  official: boolean;
+  bundled: boolean;
+  trustLevel: PluginTrustLevel;
+  installedAt: number;
+  updatedAt: number;
+  enabledAt: number | null;
+  disabledAt: number | null;
+  lastError: string | null;
+};
+
+export type UpsertPluginInstallInput = {
+  id: string;
+  version: string;
+  sourceType: PluginSourceType;
+  sourceUrl?: string | null;
+  updateUrl?: string | null;
+  packagePath?: string | null;
+  dataPath?: string | null;
+  manifestJson: string;
+  status: PluginInstallStatus;
+  official?: boolean;
+  bundled?: boolean;
+  trustLevel: PluginTrustLevel;
+  lastError?: string | null;
+  now?: number;
+};
+
+export type PluginUpdateCheckRow = {
+  pluginId: string;
+  latestVersion: string | null;
+  updateUrl: string | null;
+  packageUrl: string | null;
+  checksum: string | null;
+  metadataJson: string | null;
+  checkedAt: number;
+  error: string | null;
+};
+
+export type UpsertPluginUpdateCheckInput = {
+  pluginId: string;
+  latestVersion?: string | null;
+  updateUrl?: string | null;
+  packageUrl?: string | null;
+  checksum?: string | null;
+  metadataJson?: string | null;
+  error?: string | null;
   now?: number;
 };
 

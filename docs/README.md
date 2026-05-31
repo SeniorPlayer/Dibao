@@ -19,9 +19,13 @@ specific test notes, and generated validation evidence are kept outside Git in
 - [Engineering blueprint](./engineering-blueprint.md)
 - [Database schema](./database-schema.md)
 - [API contract](./api-contract.md)
+- [Developer guide (zh-CN)](./developer-guide.zh-CN.md)
+- [Developer guide (en-US)](./developer-guide.en-US.md)
 - [Profile algorithm v0](./profile-algorithm-v0.md)
 - [Recommendation v2/v3 design](./recommendation-v2-v3.md)
 - [Plugin system design](./plugin-system-design.md)
+- [插件开发指南](./plugin-development.zh-CN.md)
+- [Plugin development guide](./plugin-development.en-US.md)
 
 ## Release And License
 

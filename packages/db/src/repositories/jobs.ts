@@ -29,6 +29,7 @@ export interface JobRepository {
   findById(id: string): JobRow | null;
   list(input?: JobListInput): JobRow[];
   listOpenByType(type: JobType): JobRow[];
+  cancel(id: string, error: string, now: number): JobRow | null;
   defer(id: string, error: string, runAfter: number, now: number): JobRow | null;
   markFailed(id: string, error: string, now: number): JobRow | null;
   markFailedOrRetry(id: string, error: string, now: number, retryDelayMs: number): JobRow | null;
@@ -186,6 +187,25 @@ export class SqliteJobRepository implements JobRepository {
         )
         .all(type) as JobDbRow[]
     ).map(mapJob);
+  }
+
+  cancel(id: string, error: string, now: number): JobRow | null {
+    this.db
+      .prepare(
+        `
+          update jobs
+          set
+            status = 'cancelled',
+            error = ?,
+            finished_at = ?,
+            updated_at = ?
+          where id = ?
+            and status in ('queued', 'running')
+        `
+      )
+      .run(error, now, now, id);
+
+    return this.findById(id);
   }
 
   defer(id: string, error: string, runAfter: number, now: number): JobRow | null {

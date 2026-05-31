@@ -12,6 +12,7 @@ import {
   SqliteFeedFolderRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
+  SqlitePluginRepository,
   SqliteProfileRepository,
   SqliteRankingRepository,
   SqliteReaderCommandEventRepository,
@@ -154,6 +155,12 @@ describe("db package", () => {
         "interest_cluster_family_members",
         "interest_cluster_calibrations",
         "reader_command_events",
+        "plugin_installs",
+        "plugin_capability_grants",
+        "plugin_settings",
+        "plugin_kv",
+        "plugin_migrations",
+        "plugin_update_checks",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -213,7 +220,8 @@ describe("db package", () => {
         "015",
         "016",
         "017",
-        "018"
+        "018",
+        "019"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
@@ -640,7 +648,8 @@ describe("db package", () => {
         "015",
         "016",
         "017",
-        "018"
+        "018",
+        "019"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -710,6 +719,76 @@ describe("db package", () => {
         attempts: 2,
         error: "permanent",
         finishedAt: 6200
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stores plugin installs, grants, settings, kv, and plugin job cancellation", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const plugins = new SqlitePluginRepository(db);
+      const jobs = new SqliteJobRepository(db);
+      const manifest = {
+        manifestVersion: 1,
+        id: "com.example.test",
+        name: "Test Plugin",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        capabilities: ["articles:read"],
+        contributes: { hooks: ["settings.afterUpdated"] }
+      };
+
+      plugins.upsertInstall({
+        id: manifest.id,
+        version: manifest.version,
+        sourceType: "local_file",
+        packagePath: "/tmp/plugin",
+        dataPath: "/tmp/plugin-data",
+        manifestJson: JSON.stringify(manifest),
+        status: "installed",
+        official: false,
+        bundled: false,
+        trustLevel: "untrusted",
+        now: 1000
+      });
+      plugins.grantCapabilities(manifest.id, manifest.capabilities, 1100);
+      plugins.setSetting(manifest.id, "enabledFlag", true, 1200);
+      plugins.setKv(manifest.id, "hook:settings.afterUpdated:last", { ok: true }, 1300);
+      const updateCheck = plugins.upsertUpdateCheck({
+        pluginId: manifest.id,
+        latestVersion: "1.1.0",
+        updateUrl: "https://example.com/plugin.json",
+        checksum: "abc",
+        now: 1400
+      });
+
+      expect(plugins.findInstall(manifest.id)).toMatchObject({
+        id: manifest.id,
+        status: "installed",
+        trustLevel: "untrusted"
+      });
+      expect(plugins.listCapabilityGrants(manifest.id)).toEqual(["articles:read"]);
+      expect(plugins.listSettings(manifest.id)).toEqual({ enabledFlag: true });
+      expect(plugins.getKv(manifest.id, "hook:settings.afterUpdated:last")).toEqual({ ok: true });
+      expect(updateCheck).toMatchObject({
+        pluginId: manifest.id,
+        latestVersion: "1.1.0",
+        checksum: "abc"
+      });
+
+      const pluginJob = jobs.enqueue({
+        id: "job_plugin",
+        type: "plugin:com.example.test:manual",
+        now: 1500
+      });
+      expect(pluginJob.type).toBe("plugin:com.example.test:manual");
+      expect(jobs.cancel(pluginJob.id, "Cancelled by test", 1600)).toMatchObject({
+        status: "cancelled",
+        error: "Cancelled by test",
+        finishedAt: 1600
       });
     } finally {
       db.close();

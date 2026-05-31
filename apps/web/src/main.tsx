@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./App.js";
+import { App } from "./AppRuntime.js";
 import { DibaoI18nProvider } from "./i18n.js";
 import { registerServiceWorker } from "./pwa.js";
 import { configureClientTelemetry, readStoredTelemetryPreference } from "./telemetry.js";

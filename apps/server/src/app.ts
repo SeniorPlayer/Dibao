@@ -20,6 +20,7 @@ import {
   SqliteFeedFolderRepository,
   SqliteFeedRepository,
   SqliteJobRepository,
+  SqlitePluginRepository,
   SqliteProfileRepository,
   SqliteRankingRepository,
   SqliteReaderCommandEventRepository,
@@ -131,6 +132,7 @@ import {
 import { JobRunner } from "./job-runner.js";
 import { LatestReleaseService } from "./latest-release-service.js";
 import { OpmlService, OpmlServiceError } from "./opml-service.js";
+import { PluginService, PluginServiceError } from "./plugin-service.js";
 import {
   DEFAULT_PROFILE_DECAY_INTERVAL_MS,
   ProfileDecayJobService,
@@ -270,6 +272,35 @@ type JobQuery = {
   limit?: string;
 };
 
+type PluginParams = {
+  id: string;
+};
+
+type PluginTaskParams = {
+  id: string;
+  taskId: string;
+};
+
+type PluginTaskRunParams = {
+  id: string;
+  runId: string;
+};
+
+type PluginAssetParams = {
+  id: string;
+  "*": string;
+};
+
+type PluginInstallBody = {
+  url?: unknown;
+  package?: unknown;
+  sha256?: unknown;
+};
+
+type PluginUninstallQuery = {
+  deleteData?: string;
+};
+
 type ArticleParams = {
   id: string;
 };
@@ -348,6 +379,9 @@ type BuildServerOptions = {
   embeddingFetcher?: typeof fetch;
   fullContentFetcher?: typeof fetch;
   latestReleaseFetcher?: typeof fetch;
+  pluginFetcher?: typeof fetch;
+  officialPluginsDir?: string;
+  pluginDataDir?: string;
   webDistDir?: string | false;
 };
 
@@ -360,6 +394,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const folders = new SqliteFeedFolderRepository(db);
   const feeds = new SqliteFeedRepository(db);
   const jobs = new SqliteJobRepository(db);
+  const plugins = new SqlitePluginRepository(db);
   const articles = new SqliteArticleRepository(db);
   const readerCommandEvents = new SqliteReaderCommandEventRepository(db);
   const embeddings = new SqliteEmbeddingRepository(db);
@@ -408,6 +443,16 @@ export function buildServer(options: BuildServerOptions = {}) {
     fetcher: options.latestReleaseFetcher,
     getInstallationCompletedAt: () => settingsService.ensureInstallationCompletedAt()
   });
+  const pluginService = new PluginService({
+    plugins,
+    jobs,
+    dibaoVersion,
+    officialPluginsDir: options.officialPluginsDir,
+    pluginDataDir: options.pluginDataDir,
+    fetcher: options.pluginFetcher,
+    now: options.now
+  });
+  pluginService.reconcileOfficialPlugins();
   const profileService = new ProfileService({
     embeddings,
     profiles,
@@ -686,6 +731,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   };
   const authRequired = options.authRequired ?? true;
   const backgroundJobs = options.backgroundJobs ?? false;
+  let maintenanceTickTimer: NodeJS.Timeout | null = null;
 
   const jobRunner = new JobRunner({
     jobs,
@@ -695,8 +741,13 @@ export function buildServer(options: BuildServerOptions = {}) {
       profile_decay: (job) => profileDecayJobService.handleProfileDecayJob(job),
       [PROFILE_EVENT_PROCESS_JOB_TYPE]: (job) =>
         profileEventJobService.handleProfileEventProcessJob(job),
-      [RANKING_RECALCULATE_JOB_TYPE]: (job) =>
-        rankingJobService.handleRankingRecalculateJob(job),
+      [RANKING_RECALCULATE_JOB_TYPE]: async (job) => {
+        await rankingJobService.handleRankingRecalculateJob(job);
+        await pluginService.emitHook("ranking.afterRanked", {
+          jobId: job.id,
+          rankedAt: options.now?.() ?? Date.now()
+        });
+      },
       [EMBEDDING_GENERATE_JOB_TYPE]: (job) =>
         embeddingJobService.handleEmbeddingGenerateJob(job),
       [VECTOR_INDEX_REBUILD_JOB_TYPE]: (job) =>
@@ -724,6 +775,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       [INTEREST_FAMILY_REBUILD_JOB_TYPE]: (job) =>
         recommendationMaintenanceService.handleJob(job)
     },
+    pluginHandler: pluginService.handlePluginJob,
     now: options.now,
     pollIntervalMs: options.jobRunnerIntervalMs,
     retryDelayMs: options.jobRetryDelayMs,
@@ -860,6 +912,13 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
   app.addContentTypeParser(
+    /^application\/octet-stream(?:;.*)?$/i,
+    { parseAs: "buffer" },
+    (_request, body, done) => {
+      done(null, body);
+    }
+  );
+  app.addContentTypeParser(
     /^text\/xml(?:;.*)?$/i,
     { parseAs: "string" },
     (_request, body, done) => {
@@ -910,6 +969,18 @@ export function buildServer(options: BuildServerOptions = {}) {
     retentionCleanupScheduler.start();
     profileDecayScheduler.start();
     recommendationMaintenanceScheduler.start();
+    if (!maintenanceTickTimer) {
+      const intervalMs =
+        options.recommendationMaintenanceIntervalMs ??
+        DEFAULT_RECOMMENDATION_MAINTENANCE_SCHEDULER_INTERVAL_MS;
+      const emitMaintenanceTick = () => {
+        void pluginService.emitHook("maintenance.tick", {
+          tickedAt: options.now?.() ?? Date.now()
+        }).catch((error) => app.log.error(error));
+      };
+      emitMaintenanceTick();
+      maintenanceTickTimer = setInterval(emitMaintenanceTick, intervalMs);
+    }
   }
 
   if (backgroundJobs) {
@@ -937,6 +1008,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     retentionCleanupScheduler.stop();
     feedRefreshScheduler.stop();
     jobRunner.stop();
+    if (maintenanceTickTimer) {
+      clearInterval(maintenanceTickTimer);
+      maintenanceTickTimer = null;
+    }
   });
 
   if (closeDatabaseOnClose) {
@@ -1064,6 +1139,140 @@ export function buildServer(options: BuildServerOptions = {}) {
     return {
       data: jobs.list(parsed.input).map(mapJob)
     };
+  });
+
+  app.get("/api/plugins", async () => ({
+    data: pluginService.list()
+  }));
+
+  app.get("/api/plugins/catalog", async () => ({
+    data: pluginService.listCatalog()
+  }));
+
+  app.post<{ Body: PluginInstallBody }>("/api/plugins/install", async (request, reply) => {
+    try {
+      const parsed = parsePluginInstallBody(request.body);
+      if (!parsed.ok) {
+        return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+      }
+      const plugin = typeof parsed.packageContent === "string"
+        ? await pluginService.installFromPackageContent(parsed.packageContent, {
+            sourceType: "local_file",
+            sourceUrl: null,
+            expectedSha256: parsed.sha256
+          })
+        : await pluginService.installFromUrl(parsed.url ?? "", {
+            expectedSha256: parsed.sha256
+          });
+      return { data: plugin };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post("/api/plugins/install/upload", async (request, reply) => {
+    try {
+      const parsed = parsePluginUploadBody(request.body, request.headers["content-type"]);
+      if (!parsed.ok) {
+        return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+      }
+      return {
+        data: await pluginService.installFromPackageContent(parsed.packageContent, {
+          sourceType: "local_file",
+          sourceUrl: null,
+          expectedSha256: null
+        })
+      };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post<{ Params: PluginParams }>("/api/plugins/:id/enable", async (request, reply) => {
+    try {
+      return { data: pluginService.enable(request.params.id) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post<{ Params: PluginParams }>("/api/plugins/:id/disable", async (request, reply) => {
+    try {
+      return { data: pluginService.disable(request.params.id) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post<{ Params: PluginParams }>("/api/plugins/:id/update", async (request, reply) => {
+    try {
+      return { data: await pluginService.checkUpdate(request.params.id) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: PluginParams; Querystring: PluginUninstallQuery }>(
+    "/api/plugins/:id",
+    async (request, reply) => {
+      try {
+        pluginService.remove(request.params.id, request.query.deleteData === "true");
+        return { data: { ok: true } };
+      } catch (error) {
+        return sendPluginError(reply, error);
+      }
+    }
+  );
+
+  app.get<{ Params: PluginParams }>("/api/plugins/:id/settings", async (request, reply) => {
+    try {
+      return { data: pluginService.getSettings(request.params.id) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: PluginParams; Body: unknown }>("/api/plugins/:id/settings", async (request, reply) => {
+    try {
+      return { data: pluginService.updateSettings(request.params.id, request.body) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.get<{ Params: PluginParams }>("/api/plugins/:id/health", async (request, reply) => {
+    try {
+      return { data: pluginService.getHealth(request.params.id) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post<{ Params: PluginTaskParams }>("/api/plugins/:id/tasks/:taskId", async (request, reply) => {
+    try {
+      const job = pluginService.startTask(request.params.id, request.params.taskId);
+      drainBackgroundJobs();
+      return { data: mapJob(job) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.get<{ Params: PluginTaskRunParams }>("/api/plugins/:id/tasks/:runId", async (request, reply) => {
+    const job = jobs.findById(request.params.runId);
+    if (!job || !job.type.startsWith(`plugin:${request.params.id}:`)) {
+      return sendApiError(reply, 404, "NOT_FOUND", "Plugin task run not found");
+    }
+    return { data: mapJob(job) };
+  });
+
+  app.post<{ Params: PluginTaskRunParams }>("/api/plugins/:id/tasks/:runId/cancel", async (request, reply) => {
+    const existing = jobs.findById(request.params.runId);
+    if (!existing || !existing.type.startsWith(`plugin:${request.params.id}:`)) {
+      return sendApiError(reply, 404, "NOT_FOUND", "Plugin task run not found");
+    }
+    const job = jobs.cancel(request.params.runId, "Cancelled by user", options.now?.() ?? Date.now()) ?? existing;
+    return { data: mapJob(job) };
   });
 
   app.get<{ Querystring: RecommendationStatusQuery }>(
@@ -1315,6 +1524,10 @@ export function buildServer(options: BuildServerOptions = {}) {
       if (rankingJob || familyJob) {
         drainBackgroundJobs();
       }
+      void pluginService.emitHook("settings.afterUpdated", {
+        before: beforeSettings,
+        after: result.settings
+      }).catch((error) => app.log.error(error));
       return {
         data: {
           ...result,
@@ -1834,6 +2047,11 @@ export function buildServer(options: BuildServerOptions = {}) {
           articleId: request.params.id,
           ...parsed.input
         });
+        void pluginService.emitHook("article.actionRecorded", {
+          articleId: request.params.id,
+          action: parsed.input.type,
+          state: result.state
+        }).catch((error) => app.log.error(error));
 
         return {
           data: {
@@ -1845,6 +2063,21 @@ export function buildServer(options: BuildServerOptions = {}) {
       }
     }
   );
+
+  app.get<{ Params: PluginAssetParams }>("/api/plugins/:id/assets/*", async (request, reply) => {
+    try {
+      const assetPath = pluginService.resolveAssetPath(
+        request.params.id,
+        request.params["*"] || "web/index.html"
+      );
+      if (!assetPath) {
+        return sendApiError(reply, 404, "NOT_FOUND", "Plugin asset not found");
+      }
+      return sendStaticFile(reply, request.method, assetPath);
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
 
   registerWebStaticRoutes(app, options.webDistDir);
 
@@ -4373,6 +4606,65 @@ function parseOpmlImportBody(
   };
 }
 
+function parsePluginInstallBody(
+  body: PluginInstallBody | undefined
+):
+  | { ok: true; url: string; sha256: string | null; packageContent?: undefined }
+  | { ok: true; packageContent: string; sha256: string | null; url?: undefined }
+  | { ok: false; message: string; details?: unknown } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, message: "Plugin install body must be an object" };
+  }
+  const sha256 = typeof body.sha256 === "string" && body.sha256.trim() ? body.sha256.trim() : null;
+  if (typeof body.package === "string" && body.package.trim()) {
+    return { ok: true, packageContent: body.package, sha256 };
+  }
+  if (typeof body.url === "string" && body.url.trim()) {
+    return { ok: true, url: body.url.trim(), sha256 };
+  }
+  return {
+    ok: false,
+    message: "Plugin install requires url or package",
+    details: { fields: ["url", "package"] }
+  };
+}
+
+function parsePluginUploadBody(
+  body: unknown,
+  contentTypeHeader: string | string[] | undefined
+): { ok: true; packageContent: string } | { ok: false; message: string; details?: unknown } {
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader[0]
+    : contentTypeHeader;
+
+  if (typeof body === "string") {
+    return body.trim()
+      ? { ok: true, packageContent: body }
+      : { ok: false, message: "Plugin package body is required" };
+  }
+
+  if (Buffer.isBuffer(body)) {
+    const packageContent = contentType?.toLowerCase().startsWith("multipart/form-data")
+      ? extractMultipartFile(body, contentType)
+      : body.toString("utf8");
+
+    if (!packageContent) {
+      return {
+        ok: false,
+        message: "Plugin package file is required",
+        details: { field: "file" }
+      };
+    }
+
+    return { ok: true, packageContent };
+  }
+
+  return {
+    ok: false,
+    message: "Plugin upload requires multipart/form-data or application/octet-stream"
+  };
+}
+
 function extractMultipartFile(body: Buffer, contentType: string | undefined): string | null {
   const boundaryMatch = contentType?.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
   const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
@@ -4598,9 +4890,11 @@ function parseJobType(value: string | undefined): JobType | undefined | null {
     value === RECOMMENDATION_BACKFILL_JOB_TYPE ||
     value === INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE ||
     value === INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE ||
-    value === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE
+    value === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE ||
+    value === INTEREST_FAMILY_REBUILD_JOB_TYPE ||
+    value.startsWith("plugin:")
   ) {
-    return value;
+    return value as JobType;
   }
 
   return null;
@@ -5028,6 +5322,14 @@ function sendInterestClusterMergeError(reply: FastifyReply, error: unknown) {
 
 function sendEmbeddingProviderError(reply: FastifyReply, error: unknown) {
   if (error instanceof EmbeddingProviderServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendPluginError(reply: FastifyReply, error: unknown) {
+  if (error instanceof PluginServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

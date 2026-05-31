@@ -1174,6 +1174,32 @@ coalesce(published_at, discovered_at) < now - retentionDays
 
 若 rowid 映射丢失，系统可以重新分配 rowid 并重建 `article_vector_rows`。
 
+## Plugin Tables
+
+`019_plugin_system.sql` 增加插件系统基础表：
+
+- `plugin_installs`: 插件安装记录、manifest、状态、来源、包路径和数据路径。
+- `plugin_capability_grants`: 启用插件时授予的 capability 快照。
+- `plugin_settings`: 插件命名空间设置，按 `plugin_id + key` 存储 JSON。
+- `plugin_kv`: 插件运行时 KV，按 `plugin_id + key` 存储 JSON。
+- `plugin_migrations`: 插件自有 migration 应用记录。
+- `plugin_update_checks`: 最近一次 update metadata 检查结果。
+
+插件包目录和插件数据目录必须在 Docker 重建后通过 `/data` 卷持久化：
+
+```text
+/data/plugins/installed
+/data/plugins/data/<plugin-id>
+```
+
+`jobs.type` 从固定 enum 扩展为 core job union 加插件任务格式：
+
+```text
+plugin:<pluginId>:<taskId>
+```
+
+缺失插件 handler 的插件任务不应破坏核心 job runner；任务会保留给插件管理页展示和后续恢复。
+
 ## Migration 实现
 
 MVP 当前以一个初始 migration 建立完整 v0 schema：
@@ -1204,6 +1230,8 @@ packages/db/src/migration-runner.ts
 008_*
 009_*
 011_*
+...
+019_plugin_system.sql
 ```
 
 ## Schema 验收标准

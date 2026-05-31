@@ -455,6 +455,84 @@ export type UpdateSettingsResponse = {
   retentionCleanupJobId?: string | null;
 };
 
+export type PluginInstallStatus =
+  | "installed"
+  | "enabled"
+  | "disabled"
+  | "incompatible"
+  | "failed";
+
+export type PluginSourceType = "official" | "local_file" | "url" | "github_release" | "registry";
+
+export type PluginContribution = {
+  settingsTabs?: Array<{
+    id: string;
+    title: string;
+    slot: string;
+    order?: number;
+    icon?: string;
+  }>;
+  tabs?: Array<{
+    id: string;
+    title: string;
+    slot: string;
+    order?: number;
+    icon?: string;
+  }>;
+  actions?: Array<{
+    id: string;
+    title: string;
+    slot: string;
+    icon?: string;
+    command: string;
+    order?: number;
+  }>;
+  hooks?: string[];
+  tasks?: Array<{
+    id: string;
+    kind: "foreground" | "background";
+    schedule?: "manual" | "interval" | "daily" | "weekly";
+    defaultEnabled?: boolean;
+  }>;
+};
+
+export type PluginListItem = {
+  id: string;
+  name: string;
+  version: string;
+  publisher: string;
+  status: PluginInstallStatus;
+  sourceType: PluginSourceType;
+  sourceUrl: string | null;
+  updateUrl: string | null;
+  official: boolean;
+  bundled: boolean;
+  trustLevel: "official" | "trusted" | "untrusted";
+  capabilities: string[];
+  grantedCapabilities: string[];
+  contributes: PluginContribution;
+  installedAt: string;
+  updatedAt: string;
+  enabledAt: string | null;
+  disabledAt: string | null;
+  lastError: string | null;
+};
+
+export type PluginTaskRun = {
+  id: string;
+  type: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  payloadJson: string | null;
+  error: string | null;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type EmbeddingProviderType =
   | "embedded_local"
   | "ollama"
@@ -1153,6 +1231,140 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
           method: "PATCH",
           body: JSON.stringify(input)
         })
+      ).data;
+    },
+
+    async listPlugins(): Promise<PluginListItem[]> {
+      return (await request<PluginListItem[]>("/api/plugins")).data;
+    },
+
+    async listPluginCatalog(): Promise<PluginListItem[]> {
+      return (await request<PluginListItem[]>("/api/plugins/catalog")).data;
+    },
+
+    async installPluginFromUrl(url: string, sha256?: string | null): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>("/api/plugins/install", {
+          method: "POST",
+          body: JSON.stringify({ url, ...(sha256 ? { sha256 } : {}) })
+        })
+      ).data;
+    },
+
+    async installPluginFromPackage(
+      packageContent: string,
+      sha256?: string | null
+    ): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>("/api/plugins/install", {
+          method: "POST",
+          body: JSON.stringify({ package: packageContent, ...(sha256 ? { sha256 } : {}) })
+        })
+      ).data;
+    },
+
+    async uploadPluginPackage(file: File): Promise<PluginListItem> {
+      const formData = new FormData();
+      formData.append("file", file);
+      return (
+        await request<PluginListItem>("/api/plugins/install/upload", {
+          method: "POST",
+          body: formData
+        })
+      ).data;
+    },
+
+    async enablePlugin(pluginId: string): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>(`/api/plugins/${encodeURIComponent(pluginId)}/enable`, {
+          method: "POST"
+        })
+      ).data;
+    },
+
+    async disablePlugin(pluginId: string): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>(`/api/plugins/${encodeURIComponent(pluginId)}/disable`, {
+          method: "POST"
+        })
+      ).data;
+    },
+
+    async updatePlugin(pluginId: string): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>(`/api/plugins/${encodeURIComponent(pluginId)}/update`, {
+          method: "POST"
+        })
+      ).data;
+    },
+
+    async deletePlugin(pluginId: string, deleteData = false): Promise<DeleteResponse> {
+      const params = deleteData ? "?deleteData=true" : "";
+      return (
+        await request<DeleteResponse>(`/api/plugins/${encodeURIComponent(pluginId)}${params}`, {
+          method: "DELETE"
+        })
+      ).data;
+    },
+
+    async getPluginSettings(pluginId: string): Promise<Record<string, unknown>> {
+      return (
+        await request<Record<string, unknown>>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/settings`
+        )
+      ).data;
+    },
+
+    async updatePluginSettings(
+      pluginId: string,
+      input: Record<string, unknown>
+    ): Promise<Record<string, unknown>> {
+      return (
+        await request<Record<string, unknown>>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/settings`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(input)
+          }
+        )
+      ).data;
+    },
+
+    async getPluginHealth(pluginId: string): Promise<Record<string, unknown>> {
+      return (
+        await request<Record<string, unknown>>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/health`
+        )
+      ).data;
+    },
+
+    async startPluginTask(pluginId: string, taskId: string): Promise<PluginTaskRun> {
+      return (
+        await request<PluginTaskRun>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/tasks/${encodeURIComponent(taskId)}`,
+          {
+            method: "POST"
+          }
+        )
+      ).data;
+    },
+
+    async getPluginTask(pluginId: string, runId: string): Promise<PluginTaskRun> {
+      return (
+        await request<PluginTaskRun>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/tasks/${encodeURIComponent(runId)}`
+        )
+      ).data;
+    },
+
+    async cancelPluginTask(pluginId: string, runId: string): Promise<PluginTaskRun> {
+      return (
+        await request<PluginTaskRun>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/tasks/${encodeURIComponent(runId)}/cancel`,
+          {
+            method: "POST"
+          }
+        )
       ).data;
     },
 
