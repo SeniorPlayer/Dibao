@@ -1,5 +1,5 @@
 export { App } from "./AppRuntime.js";
-export { SetupWelcomePanel, AuthGatePanel, DerivedDataUpgradePanel, SetupSourcesPanel, FeedDiscoveryPanel } from "./setup/SetupPanels.js";
+export { SetupWelcomePanel, AuthGatePanel, DerivedDataUpgradePanel, SetupSourcesPanel, SetupOptionalPluginsPanel, FeedDiscoveryPanel } from "./setup/SetupPanels.js";
 export { SetupProviderPanel } from "./setup/SetupProviderPanel.js";
 export { FullContentPreviewPage } from "./fullContent/FullContentPreviewPage.js";
 export { SettingsWorkspace } from "./settings/SettingsWorkspace.js";

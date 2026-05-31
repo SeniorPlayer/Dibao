@@ -1,0 +1,79 @@
+{
+  "manifestVersion": 1,
+  "id": "app.dibao.daily-brief",
+  "name": "Daily Brief",
+  "version": "0.1.0",
+  "publisher": "Dibao",
+  "dibao": {
+    "minVersion": "0.1.0",
+    "maxVersion": "<0.3.0"
+  },
+  "entry": {
+    "server": "server/index.mjs",
+    "web": "web/index.html"
+  },
+  "capabilities": [
+    "articles:read",
+    "ranking:read",
+    "settings:plugin",
+    "jobs:read",
+    "jobs:write",
+    "files:plugin-data"
+  ],
+  "contributes": {
+    "setupSteps": [
+      {
+        "id": "enable-daily-brief",
+        "title": "每日简报",
+        "body": "每天从过去 24 小时的个性化推荐中整理一份按兴趣主题分组的简报。",
+        "order": 30,
+        "defaultEnabled": true
+      }
+    ],
+    "routes": [
+      {
+        "id": "daily-brief",
+        "path": "daily-brief",
+        "title": "每日简报",
+        "panel": "web/index.html",
+        "order": 45,
+        "icon": "newspaper",
+        "primaryNav": true,
+        "primaryMobile": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "daily-brief",
+        "title": "每日简报",
+        "slot": "app.main.nav.items",
+        "route": "daily-brief",
+        "order": 45,
+        "icon": "newspaper",
+        "primaryNav": true,
+        "primaryMobile": false
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "daily-brief-settings",
+        "title": "每日简报",
+        "slot": "settings.tabs",
+        "route": "settings",
+        "order": 60,
+        "icon": "newspaper"
+      }
+    ],
+    "hooks": [
+      "maintenance.tick"
+    ],
+    "tasks": [
+      {
+        "id": "dailyBrief.generate",
+        "kind": "background",
+        "schedule": "daily",
+        "defaultEnabled": true
+      }
+    ]
+  }
+}

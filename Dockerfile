@@ -48,6 +48,7 @@ COPY --from=builder --chown=node:node /app/apps/server/dist ./apps/server/dist
 COPY --from=builder --chown=node:node /app/apps/web/dist ./apps/web/dist
 COPY --from=builder --chown=node:node /app/.dibao ./.dibao
 COPY --from=builder --chown=node:node /app/packages ./packages
+COPY --from=builder --chown=node:node /app/plugins ./plugins
 
 USER node
 

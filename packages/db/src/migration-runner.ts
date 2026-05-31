@@ -57,6 +57,9 @@ const interestClusterCalibrationsPath = fileURLToPath(
 const pluginSystemPath = fileURLToPath(
   new URL("../migrations/019_plugin_system.sql", import.meta.url)
 );
+const pluginSchedulesPath = fileURLToPath(
+  new URL("../migrations/020_plugin_schedules.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -149,6 +152,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "019",
       name: "plugin_system",
       sql: readFileSync(pluginSystemPath, "utf8")
+    },
+    {
+      version: "020",
+      name: "plugin_schedules",
+      sql: readFileSync(pluginSchedulesPath, "utf8")
     }
   ];
 }

@@ -1,6 +1,6 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useRef, useState } from "react";
-import type { DerivedDataUpgradeStatus, FeedDiscoveryCandidate, FeedDiscoveryResponse, OpmlImportResponse } from "../api.js";
+import type { DerivedDataUpgradeStatus, FeedDiscoveryCandidate, FeedDiscoveryResponse, OpmlImportResponse, PluginListItem } from "../api.js";
 import { useI18n } from "../i18n.js";
 import styles from "../design-system/AppShell/AppShell.module.css";
 import { classNames, type AuthMode } from "../app/shared.js";
@@ -216,6 +216,56 @@ export function DerivedDataUpgradePanel(props: {
         >
           {props.isRetrying ? t.upgrade.retrying : t.upgrade.retry}
         </button>
+      ) : null}
+    </section>
+  );
+}
+
+export function SetupOptionalPluginsPanel(props: {
+  busyPluginId: string | null;
+  error?: string | null;
+  onDecision: (pluginId: string, enabled: boolean) => void;
+  plugins: PluginListItem[];
+}) {
+  const primaryPlugin = props.plugins[0] ?? null;
+  const setupStep = primaryPlugin?.contributions.setupSteps[0] ?? null;
+
+  return (
+    <section className={styles.authPanel} aria-labelledby="setup-plugin-title">
+      <div className={styles.brand}>
+        <img alt="" className={styles.brandMark} src="/logo-64.png" />
+        <span>
+          <strong>邸报</strong>
+          <small>Dibao</small>
+        </span>
+      </div>
+      <div>
+        <p className={styles.kicker}>Official Plugin</p>
+        <h1 id="setup-plugin-title">{setupStep?.title ?? primaryPlugin?.name ?? "插件"}</h1>
+        <p>{setupStep?.body ?? "可以现在启用，也可以稍后在设置中管理。"}</p>
+      </div>
+      {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
+      {primaryPlugin ? (
+        <div className={styles.setupActions}>
+          <button
+            className={styles.primaryButton}
+            disabled={props.busyPluginId !== null}
+            onClick={() => props.onDecision(primaryPlugin.id, true)}
+            type="button"
+          >
+            {props.busyPluginId === primaryPlugin.id
+              ? "处理中"
+              : setupStep?.enableLabel ?? "启用"}
+          </button>
+          <button
+            className={styles.secondaryButton}
+            disabled={props.busyPluginId !== null}
+            onClick={() => props.onDecision(primaryPlugin.id, false)}
+            type="button"
+          >
+            {setupStep?.skipLabel ?? "暂不启用"}
+          </button>
+        </div>
       ) : null}
     </section>
   );

@@ -20,6 +20,9 @@ create table if not exists plugin_installs (
   last_error text
 );
 
+create index if not exists idx_plugin_installs_status
+  on plugin_installs(status);
+
 create table if not exists plugin_capability_grants (
   plugin_id text not null references plugin_installs(id) on delete cascade,
   capability text not null,
@@ -43,14 +46,8 @@ create table if not exists plugin_kv (
   primary key (plugin_id, key)
 );
 
-create table if not exists plugin_migrations (
-  plugin_id text not null references plugin_installs(id) on delete cascade,
-  version text not null,
-  name text not null,
-  checksum text,
-  applied_at integer not null,
-  primary key (plugin_id, version)
-);
+create index if not exists idx_plugin_kv_plugin_key
+  on plugin_kv(plugin_id, key);
 
 create table if not exists plugin_update_checks (
   plugin_id text primary key references plugin_installs(id) on delete cascade,
@@ -61,6 +58,15 @@ create table if not exists plugin_update_checks (
   metadata_json text,
   checked_at integer not null,
   error text
+);
+
+create table if not exists plugin_migrations (
+  plugin_id text not null references plugin_installs(id) on delete cascade,
+  version text not null,
+  name text not null,
+  checksum text,
+  applied_at integer not null,
+  primary key (plugin_id, version)
 );
 
 create table jobs_019 (
@@ -136,5 +142,3 @@ alter table jobs_019 rename to jobs;
 create index if not exists idx_jobs_status_run_after on jobs(status, run_after);
 create index if not exists idx_jobs_type on jobs(type);
 create index if not exists idx_jobs_created_at on jobs(created_at);
-create index if not exists idx_plugin_installs_status on plugin_installs(status);
-create index if not exists idx_plugin_installs_official on plugin_installs(official, bundled);

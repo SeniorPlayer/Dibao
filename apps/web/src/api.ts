@@ -307,6 +307,7 @@ export type SetupStatus = {
   hasEmbeddingProvider: boolean;
   firstRefreshStatus: "idle" | "running" | "succeeded" | "failed";
   derivedDataUpgrade?: DerivedDataUpgradeStatus;
+  optionalPluginSteps?: PluginListItem[];
 };
 
 export type DerivedDataUpgradeStatus = {
@@ -469,6 +470,7 @@ export type PluginContribution = {
     id: string;
     title: string;
     slot: string;
+    route?: string;
     order?: number;
     icon?: string;
   }>;
@@ -476,8 +478,21 @@ export type PluginContribution = {
     id: string;
     title: string;
     slot: string;
+    route?: string;
     order?: number;
     icon?: string;
+    primaryNav?: boolean;
+    primaryMobile?: boolean;
+  }>;
+  routes?: Array<{
+    id: string;
+    path: string;
+    title: string;
+    panel: string;
+    order?: number;
+    icon?: string;
+    primaryNav?: boolean;
+    primaryMobile?: boolean;
   }>;
   actions?: Array<{
     id: string;
@@ -493,6 +508,28 @@ export type PluginContribution = {
     kind: "foreground" | "background";
     schedule?: "manual" | "interval" | "daily" | "weekly";
     defaultEnabled?: boolean;
+  }>;
+  setupSteps?: Array<{
+    id: string;
+    title: string;
+    body?: string;
+    order?: number;
+    defaultEnabled?: boolean;
+  }>;
+};
+
+export type PluginContributions = {
+  routes: Array<{ id: string; title: string; path: string }>;
+  primaryNav: Array<{ label: string; route: string; icon?: string; order?: number }>;
+  primaryMobile: Array<{ label: string; route: string; icon?: string; order?: number }>;
+  settingsTabs: Array<{ id: string; label: string; route: string; order?: number }>;
+  setupSteps: Array<{
+    id: string;
+    title: string;
+    body: string;
+    enableLabel?: string;
+    skipLabel?: string;
+    recommended?: boolean;
   }>;
 };
 
@@ -511,6 +548,8 @@ export type PluginListItem = {
   capabilities: string[];
   grantedCapabilities: string[];
   contributes: PluginContribution;
+  contributions: PluginContributions;
+  webEntryUrl?: string | null;
   installedAt: string;
   updatedAt: string;
   enabledAt: string | null;
@@ -1195,6 +1234,25 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
 
     async getSetupStatus(): Promise<SetupStatus> {
       return (await request<SetupStatus>("/api/setup/status")).data;
+    },
+
+    async selectOptionalPlugin(
+      pluginId: string,
+      input: { enabled: boolean; timezone?: string }
+    ): Promise<PluginListItem> {
+      return (
+        await request<PluginListItem>(
+          `/api/setup/optional-plugins/${encodeURIComponent(pluginId)}`,
+          {
+            method: "POST",
+            body: JSON.stringify(input)
+          }
+        )
+      ).data;
+    },
+
+    async listPluginContributions(): Promise<PluginListItem[]> {
+      return (await request<PluginListItem[]>("/api/plugins/contributions")).data;
     },
 
     async getDerivedDataUpgradeStatus(): Promise<DerivedDataUpgradeStatus> {

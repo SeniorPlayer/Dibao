@@ -1015,3 +1015,31 @@ export type ArticleEmbeddingCandidateRow = {
   contentText: string | null;
   contentHash: string;
 };
+
+export type PluginScheduleRow = {
+  pluginId: string;
+  taskId: string;
+  enabled: boolean;
+  schedule: "manual" | "interval" | "daily" | "weekly";
+  intervalMs: number | null;
+  localTime: string | null;
+  timezone: string | null;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastJobId: string | null;
+  updatedAt: number;
+};
+
+export type UpsertPluginScheduleInput = {
+  pluginId: string;
+  taskId: string;
+  enabled: boolean;
+  schedule: PluginScheduleRow["schedule"];
+  intervalMs?: number | null;
+  localTime?: string | null;
+  timezone?: string | null;
+  nextRunAt?: number | null;
+  lastRunAt?: number | null;
+  lastJobId?: string | null;
+  now?: number;
+};

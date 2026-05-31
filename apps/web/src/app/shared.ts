@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
-import { defaultAppSettings, type ArticleActionRequest, type ArticleDetail, type ArticleListItem, type ArticleSearchSort, type ArticleSearchState, type ArticleState, type ArticleTimeWindow, type ArticleView, type AppSettings, type AuthSession, type CreateEmbeddingProviderInput, type DerivedDataUpgradeStatus, type EmbeddingIndex, type EmbeddingProvider, type EmbeddingProviderType, type FavoriteArticleSort, type Feed, type FeedDiagnosticItem, type FeedFolder, type OpmlImportResponse, type RankExplanationReason, type ReaderSettings, type ReadLaterArticleSort, type RecommendationMaintenanceTask, type RecommendationMaintenanceTaskResponse, type RecommendationStatus, type RecommendationTransparency, type SetupStatus, type UpdateEmbeddingProviderInput, type UpdateSettingsInput } from "../api.js";
+import { defaultAppSettings, type ArticleActionRequest, type ArticleDetail, type ArticleListItem, type ArticleSearchSort, type ArticleSearchState, type ArticleState, type ArticleTimeWindow, type ArticleView, type AppSettings, type AuthSession, type CreateEmbeddingProviderInput, type DerivedDataUpgradeStatus, type EmbeddingIndex, type EmbeddingProvider, type EmbeddingProviderType, type FavoriteArticleSort, type Feed, type FeedDiagnosticItem, type FeedFolder, type OpmlImportResponse, type PluginListItem, type RankExplanationReason, type ReaderSettings, type ReadLaterArticleSort, type RecommendationMaintenanceTask, type RecommendationMaintenanceTaskResponse, type RecommendationStatus, type RecommendationTransparency, type SetupStatus, type UpdateEmbeddingProviderInput, type UpdateSettingsInput } from "../api.js";
 import type { Dictionary, Locale, NavigationItemKey } from "../i18n.js";
 import styles from "../design-system/AppShell/AppShell.module.css";
 
@@ -64,6 +64,7 @@ export type AppPage =
   | { type: "feed-management" }
   | { type: "full-content-preview"; feedId: string }
   | { type: "settings" }
+  | { type: "plugin"; pluginId: string; route: string }
   | { type: "algorithm-transparency" }
   | { type: "algorithm-clusters" };
 
@@ -96,6 +97,7 @@ export type AppStage =
   | { type: "setup-status-loading" }
   | { type: "derived-data-upgrade" }
   | { type: "setup-sources" }
+  | { type: "setup-optional-plugins"; plugins: PluginListItem[] }
   | { type: "setup-provider" }
   | { type: "reader" };
 
@@ -139,6 +141,10 @@ export function stageForSetupStatus(status: SetupStatus): AppStage {
     return { type: "derived-data-upgrade" };
   }
 
+  if (status.hasFeeds && status.optionalPluginSteps && status.optionalPluginSteps.length > 0) {
+    return { type: "setup-optional-plugins", plugins: status.optionalPluginSteps };
+  }
+
   return { type: status.hasFeeds ? "reader" : "setup-sources" };
 }
 
@@ -169,6 +175,10 @@ export function sameAppPage(left: AppPage, right: AppPage): boolean {
 
   if (left.type === "full-content-preview" && right.type === "full-content-preview") {
     return left.feedId === right.feedId;
+  }
+
+  if (left.type === "plugin" && right.type === "plugin") {
+    return left.pluginId === right.pluginId && left.route === right.route;
   }
 
   return true;
@@ -950,6 +960,10 @@ export function urlForAppPage(page: AppPage, state: UrlState = {}): string {
   if (page.type === "full-content-preview") {
     params.set("feedId", page.feedId);
   }
+  if (page.type === "plugin") {
+    params.set("plugin", page.pluginId);
+    params.set("route", page.route);
+  }
   return `/?${params.toString()}`;
 }
 
@@ -1021,6 +1035,12 @@ export function parseUrlPage(
       return { type: "full-content-preview", feedId: params.get("feedId") ?? "" };
     case "settings":
       return { type: "settings" };
+    case "plugin":
+      return {
+        type: "plugin",
+        pluginId: params.get("plugin") ?? "",
+        route: params.get("route") ?? ""
+      };
     case "algorithm":
     case "algorithm-transparency":
       return { type: "algorithm-transparency" };

@@ -18,7 +18,7 @@ import {
   type DibaoDatabase
 } from "@dibao/db";
 import { parseOpml } from "@dibao/rss";
-import { buildServer as buildRealServer } from "./app.js";
+import { buildServer as buildRealServer, getHealth } from "./app.js";
 import type { FeedFetcher } from "./feed-refresh-service.js";
 import { JobRunner } from "./job-runner.js";
 import {
@@ -67,6 +67,28 @@ describe("server API vertical slice", () => {
       await app.close();
       db.close();
     }
+  });
+
+  it("reports database errors when SQLite integrity checks fail", () => {
+    const db = {
+      prepare: (sql: string) => ({
+        get: () => {
+          if (sql.includes("vec_version")) {
+            return { version: "0.1.1" };
+          }
+          return { ok: 1 };
+        }
+      }),
+      pragma: () => "*** in database main *** malformed database image"
+    } as unknown as DibaoDatabase;
+
+    expect(getHealth(db)).toEqual({
+      ok: false,
+      database: "error",
+      fts: "ok",
+      vectorStore: "ok",
+      version: expect.any(String)
+    });
   });
 
   it("serves configured web static files and falls back to index for SPA routes", async () => {
@@ -194,13 +216,15 @@ describe("server API vertical slice", () => {
 
       const listed = await app.inject({ method: "GET", url: "/api/plugins" });
       expect(listed.statusCode, listed.body).toBe(200);
-      expect(listed.json().data).toMatchObject([
-        {
+      expect(listed.json().data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
           id: "com.example.plugin",
           status: "enabled",
           capabilities: ["articles:read", "settings:plugin", "jobs:write"]
-        }
-      ]);
+          })
+        ])
+      );
     } finally {
       await app.close();
       db.close();
@@ -925,7 +949,103 @@ describe("server API vertical slice", () => {
           setupCompleted: true,
           hasFeeds: true,
           hasEmbeddingProvider: false,
-          firstRefreshStatus: "idle"
+          firstRefreshStatus: "idle",
+          optionalPluginSteps: [
+            expect.objectContaining({
+              id: "app.dibao.daily-brief",
+              status: "installed",
+              contributions: expect.objectContaining({
+                setupSteps: [
+                  expect.objectContaining({
+                    id: "enable-daily-brief",
+                    title: "每日简报"
+                  })
+                ]
+              })
+            })
+          ]
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("enables the official Daily Brief plugin from the optional setup prompt", async () => {
+    const db = createEmptyDatabase();
+    const feedRepository = new SqliteFeedRepository(db);
+    feedRepository.upsert({
+      id: "feed_fixture",
+      title: "Fixture Feed",
+      feedUrl: "https://example.com/feed.xml",
+      now: 1000
+    });
+    const app = buildRealServer({ db, logger: false, cookieSecure: false });
+
+    try {
+      const setup = await postJson(app, "/api/auth/setup", {
+        username: "Pls",
+        password: "correct horse battery"
+      });
+      const cookie = cookieHeaderFromSetCookie(setup.headers["set-cookie"]);
+
+      const enabled = await injectJsonWithCookie(
+        app,
+        "POST",
+        "/api/setup/optional-plugins/app.dibao.daily-brief",
+        cookie,
+        {
+          enabled: true,
+          timezone: "Asia/Shanghai"
+        }
+      );
+      expect(enabled.statusCode, enabled.body).toBe(200);
+      expect(enabled.json()).toMatchObject({
+        data: {
+          id: "app.dibao.daily-brief",
+          status: "enabled"
+        }
+      });
+
+      const contributions = await app.inject({
+        method: "GET",
+        url: "/api/plugins/contributions",
+        headers: { cookie }
+      });
+      expect(contributions.statusCode, contributions.body).toBe(200);
+      expect(contributions.json()).toMatchObject({
+        data: [
+          expect.objectContaining({
+            id: "app.dibao.daily-brief",
+            contributions: expect.objectContaining({
+              primaryNav: [
+                expect.objectContaining({
+                  label: "每日简报",
+                  route: "daily-brief"
+                })
+              ]
+            })
+          })
+        ]
+      });
+
+      const health = await app.inject({
+        method: "GET",
+        url: "/api/plugins/app.dibao.daily-brief/health",
+        headers: { cookie }
+      });
+      expect(health.statusCode, health.body).toBe(200);
+      expect(health.json()).toMatchObject({
+        data: {
+          status: "enabled",
+          schedules: [
+            expect.objectContaining({
+              taskId: "dailyBrief.generate",
+              enabled: true,
+              schedule: "daily"
+            })
+          ]
         }
       });
     } finally {

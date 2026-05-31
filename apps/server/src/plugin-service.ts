@@ -10,7 +10,15 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
-import type { JobRepository, JobRow, PluginInstallRow, PluginRepository } from "@dibao/db";
+import { pathToFileURL } from "node:url";
+import type {
+  DibaoDatabase,
+  JobRepository,
+  JobRow,
+  PluginInstallRow,
+  PluginRepository,
+  PluginScheduleRow
+} from "@dibao/db";
 import type { JobHandler } from "./job-runner.js";
 
 export const PLUGIN_CAPABILITIES = [
@@ -25,6 +33,7 @@ export const PLUGIN_CAPABILITIES = [
   "settings:core:write",
   "jobs:read",
   "jobs:write",
+  "database:plugin",
   "network:outbound",
   "files:plugin-data",
   "telemetry:emit"
@@ -32,6 +41,8 @@ export const PLUGIN_CAPABILITIES = [
 
 const PLUGIN_CAPABILITY_SET = new Set<string>(PLUGIN_CAPABILITIES);
 const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
+const PLUGIN_SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const PLUGIN_HOOK_TIMEOUT_MS = 2_000;
 
 export type PluginManifest = {
   manifestVersion: 1;
@@ -49,23 +60,37 @@ export type PluginManifest = {
   };
   capabilities: string[];
   contributes?: {
-    settingsTabs?: PluginSettingsTabContribution[];
-    tabs?: PluginTabContribution[];
+    settingsTabs?: PluginPanelContribution[];
+    tabs?: PluginPanelContribution[];
+    routes?: PluginRouteContribution[];
     actions?: PluginActionContribution[];
     hooks?: string[];
     tasks?: PluginTaskContribution[];
+    setupSteps?: PluginSetupStepContribution[];
   };
 };
 
-export type PluginSettingsTabContribution = {
+export type PluginPanelContribution = {
   id: string;
   title: string;
   slot: string;
   order?: number;
   icon?: string;
+  route?: string;
+  primaryNav?: boolean;
+  primaryMobile?: boolean;
 };
 
-export type PluginTabContribution = PluginSettingsTabContribution;
+export type PluginRouteContribution = {
+  id: string;
+  path: string;
+  title: string;
+  panel: string;
+  order?: number;
+  icon?: string;
+  primaryNav?: boolean;
+  primaryMobile?: boolean;
+};
 
 export type PluginActionContribution = {
   id: string;
@@ -80,6 +105,14 @@ export type PluginTaskContribution = {
   id: string;
   kind: "foreground" | "background";
   schedule?: "manual" | "interval" | "daily" | "weekly";
+  defaultEnabled?: boolean;
+};
+
+export type PluginSetupStepContribution = {
+  id: string;
+  title: string;
+  body?: string;
+  order?: number;
   defaultEnabled?: boolean;
 };
 
@@ -115,11 +148,32 @@ export type PluginListItem = {
   capabilities: string[];
   grantedCapabilities: string[];
   contributes: PluginManifest["contributes"];
+  contributions: PluginRuntimeContributions;
   installedAt: string;
   updatedAt: string;
   enabledAt: string | null;
   disabledAt: string | null;
   lastError: string | null;
+};
+
+export type PluginContributionListItem = PluginListItem & {
+  webEntryUrl: string | null;
+};
+
+export type RankedWinner = {
+  articleId: string;
+  feedId: string;
+  feedTitle: string;
+  title: string;
+  url: string;
+  summary: string | null;
+  publishedAt: number | null;
+  discoveredAt: number;
+  score: number | null;
+  calculatedAt: number | null;
+  familyId: string;
+  familyLabel: string;
+  reason: string | null;
 };
 
 export class PluginServiceError extends Error {
@@ -135,18 +189,78 @@ export class PluginServiceError extends Error {
 }
 
 export type PluginServiceOptions = {
+  db: DibaoDatabase;
   plugins: PluginRepository;
   jobs: JobRepository;
   dibaoVersion: string;
+  getActiveRankContext: () => string;
   officialPluginsDir?: string;
   pluginDataDir?: string;
   fetcher?: typeof fetch;
   now?: () => number;
 };
 
+type PluginRuntime = {
+  pluginId: string;
+  hooks: Map<string, Array<(payload: unknown) => Promise<void> | void>>;
+  tasks: Map<string, (job: JobRow) => Promise<void> | void>;
+  apiGet: Map<string, (input: PluginApiInput) => Promise<unknown> | unknown>;
+  apiPost: Map<string, (input: PluginApiInput) => Promise<unknown> | unknown>;
+};
+
+type PluginApiInput = {
+  params: Record<string, string>;
+  body: unknown;
+};
+
+type PluginRuntimeContributions = {
+  routes: Array<{ id: string; title: string; path: string }>;
+  primaryNav: Array<{ label: string; route: string; icon?: string; order?: number }>;
+  primaryMobile: Array<{ label: string; route: string; icon?: string; order?: number }>;
+  settingsTabs: Array<{ id: string; label: string; route: string; order?: number }>;
+  setupSteps: Array<{
+    id: string;
+    title: string;
+    body: string;
+    enableLabel?: string;
+    skipLabel?: string;
+    recommended?: boolean;
+  }>;
+};
+
+type PluginTableColumnType = "text" | "integer" | "real" | "boolean" | "json";
+
+type PluginTableColumnDefinition = {
+  name: string;
+  type: PluginTableColumnType;
+  nullable?: boolean;
+  unique?: boolean;
+  default?: string | number | boolean | null;
+};
+
+type PluginTableIndexDefinition = {
+  name: string;
+  columns: string[];
+  unique?: boolean;
+};
+
+type PluginTableDefinition = {
+  name: string;
+  columns: PluginTableColumnDefinition[];
+  indexes?: PluginTableIndexDefinition[];
+};
+
+type PluginTableListInput = {
+  where?: Record<string, unknown>;
+  limit?: number;
+  orderBy?: string;
+  direction?: "asc" | "desc";
+};
+
 export class PluginService {
   private readonly now: () => number;
   private readonly fetcher: typeof fetch;
+  private readonly runtimes = new Map<string, Promise<PluginRuntime>>();
   readonly officialPluginsDir: string;
   readonly pluginDataDir: string;
   readonly installedPluginsDir: string;
@@ -158,7 +272,7 @@ export class PluginService {
     this.officialPluginsDir = resolvePluginPath(
       options.officialPluginsDir ??
         process.env.DIBAO_OFFICIAL_PLUGINS_DIR ??
-        "/app/plugins/official"
+        defaultOfficialPluginsDir()
     );
     this.pluginDataDir = resolvePluginPath(
       options.pluginDataDir ?? process.env.DIBAO_PLUGIN_DATA_DIR ?? "/data/plugins"
@@ -197,6 +311,7 @@ export class PluginService {
   disable(pluginId: string): PluginListItem {
     this.requireInstall(pluginId);
     this.options.plugins.setStatus(pluginId, "disabled", null, this.now());
+    this.runtimes.delete(pluginId);
     return this.requireListItem(pluginId);
   }
 
@@ -208,31 +323,66 @@ export class PluginService {
       this.options.plugins.setStatus(pluginId, "incompatible", compatibility.reason, this.now());
       return this.requireListItem(pluginId);
     }
-    this.options.plugins.grantCapabilities(pluginId, manifest.capabilities, this.now());
-    this.options.plugins.setStatus(pluginId, "enabled", null, this.now());
-    return this.requireListItem(pluginId);
+    try {
+      this.seedDefaultSchedules(pluginId, manifest);
+      this.options.plugins.grantCapabilities(pluginId, manifest.capabilities, this.now());
+      this.options.plugins.setStatus(pluginId, "enabled", null, this.now());
+      this.runtimes.delete(pluginId);
+      return this.requireListItem(pluginId);
+    } catch (error) {
+      this.options.plugins.setStatus(pluginId, "failed", errorMessage(error), this.now());
+      throw error;
+    }
   }
 
   async emitHook(hook: string, payload: unknown): Promise<void> {
-    for (const install of this.options.plugins.listInstalls()) {
-      if (install.status !== "enabled") {
+    const installs = this.enabledInstallsForHook(hook);
+    for (const install of installs) {
+      const runtime = await this.ensureRuntime(install);
+      const handlers = runtime.hooks.get(hook) ?? [];
+      for (const handler of handlers) {
+        try {
+          await withTimeout(Promise.resolve(handler(payload)), PLUGIN_HOOK_TIMEOUT_MS);
+          this.options.plugins.setKv(
+            install.id,
+            `hook:${hook}:last`,
+            { hook, receivedAt: this.now(), payload },
+            this.now()
+          );
+        } catch (error) {
+          this.options.plugins.setStatus(install.id, "failed", errorMessage(error), this.now());
+          this.runtimes.delete(install.id);
+        }
+      }
+    }
+  }
+
+  async enqueueDueSchedules(): Promise<JobRow[]> {
+    const enqueued: JobRow[] = [];
+    for (const schedule of this.options.plugins.listDueSchedules(this.now())) {
+      const install = this.options.plugins.findInstall(schedule.pluginId);
+      if (!install || install.status !== "enabled") {
         continue;
       }
       const manifest = parseStoredManifest(install);
-      if (!manifest.contributes?.hooks?.includes(hook)) {
+      const task = manifest.contributes?.tasks?.find((candidate) => candidate.id === schedule.taskId);
+      if (!task) {
         continue;
       }
-      this.options.plugins.setKv(
-        install.id,
-        `hook:${hook}:last`,
-        {
-          hook,
-          receivedAt: this.now(),
-          payload
-        },
-        this.now()
-      );
+      const job = this.startTask(schedule.pluginId, schedule.taskId, {
+        scheduledAt: this.now(),
+        schedule
+      });
+      enqueued.push(job);
+      this.options.plugins.upsertSchedule({
+        ...schedule,
+        lastRunAt: this.now(),
+        lastJobId: job.id,
+        nextRunAt: nextRunForSchedule(schedule, this.now()),
+        now: this.now()
+      });
     }
+    return enqueued;
   }
 
   getHealth(pluginId: string): Record<string, unknown> {
@@ -244,6 +394,7 @@ export class PluginService {
       compatible: isDibaoVersionCompatible(this.options.dibaoVersion, manifest.dibao).ok,
       lastError: install.lastError,
       capabilities: manifest.capabilities,
+      schedules: this.options.plugins.listSchedules(pluginId),
       tasks: manifest.contributes?.tasks ?? []
     };
   }
@@ -262,22 +413,12 @@ export class PluginService {
     if (install.status !== "enabled") {
       throw new Error(`Plugin is not enabled: ${parsed.pluginId}`);
     }
-    const manifest = parseStoredManifest(install);
-    const task = manifest.contributes?.tasks?.find((candidate) => candidate.id === parsed.taskId);
-    if (!task) {
-      throw new Error(`Plugin task is not declared: ${parsed.taskId}`);
+    const runtime = await this.ensureRuntime(install);
+    const handler = runtime.tasks.get(parsed.taskId);
+    if (!handler) {
+      throw new Error(`Plugin task is not registered: ${parsed.taskId}`);
     }
-    this.options.plugins.setKv(
-      parsed.pluginId,
-      `taskRun:${job.id}`,
-      {
-        jobId: job.id,
-        taskId: parsed.taskId,
-        status: "succeeded",
-        finishedAt: this.now()
-      },
-      this.now()
-    );
+    await handler(job);
   };
 
   async installFromPackageContent(
@@ -362,6 +503,31 @@ export class PluginService {
     return this.options.plugins.listInstalls().map((install) => this.toListItem(install));
   }
 
+  listContributions(): PluginContributionListItem[] {
+    this.reconcileOfficialPlugins();
+    return this.options.plugins
+      .listInstalls()
+      .filter((install) => install.status === "enabled")
+      .map((install) => ({
+        ...this.toListItem(install),
+        webEntryUrl: this.webEntryUrl(install)
+      }));
+  }
+
+  listSetupSteps(): PluginContributionListItem[] {
+    this.reconcileOfficialPlugins();
+    return this.options.plugins
+      .listInstalls()
+      .filter((install) => {
+        const manifest = parseStoredManifest(install);
+        return Boolean(manifest.contributes?.setupSteps?.length);
+      })
+      .map((install) => ({
+        ...this.toListItem(install),
+        webEntryUrl: this.webEntryUrl(install)
+      }));
+  }
+
   listCatalog(): PluginListItem[] {
     this.reconcileOfficialPlugins();
     return this.list().filter((plugin) => plugin.official);
@@ -387,9 +553,9 @@ export class PluginService {
         const status = compatibility.ok
           ? existing?.status === "enabled" || existing?.status === "disabled"
             ? existing.status
-            : "disabled"
+            : "installed"
           : "incompatible";
-        this.options.plugins.upsertInstall({
+        const install = this.options.plugins.upsertInstall({
           id: manifest.id,
           version: manifest.version,
           sourceType: "official",
@@ -404,7 +570,7 @@ export class PluginService {
           now: this.now()
         });
         this.options.plugins.grantCapabilities(manifest.id, manifest.capabilities, this.now());
-      } catch (error) {
+      } catch {
         // A broken official plugin must not prevent the app from booting.
       }
     }
@@ -422,6 +588,7 @@ export class PluginService {
       rmSync(install.dataPath, { recursive: true, force: true });
     }
     this.options.plugins.deleteInstall(pluginId);
+    this.runtimes.delete(pluginId);
   }
 
   resolveAssetPath(pluginId: string, assetPath: string): string | null {
@@ -441,7 +608,7 @@ export class PluginService {
     return candidate;
   }
 
-  startTask(pluginId: string, taskId: string): JobRow {
+  startTask(pluginId: string, taskId: string, extraPayload: Record<string, unknown> = {}): JobRow {
     const install = this.requireInstall(pluginId);
     if (install.status !== "enabled") {
       throw new PluginServiceError(409, "CONFLICT", "Plugin is not enabled");
@@ -454,9 +621,23 @@ export class PluginService {
     return this.options.jobs.enqueue({
       id: `plugin_${pluginId.replace(/[^a-z0-9]+/gi, "_")}_${taskId.replace(/[^a-z0-9]+/gi, "_")}_${randomBytes(6).toString("hex")}`,
       type: `plugin:${pluginId}:${taskId}`,
-      payloadJson: JSON.stringify({ pluginId, taskId, requestedAt: this.now() }),
+      payloadJson: JSON.stringify({ pluginId, taskId, requestedAt: this.now(), ...extraPayload }),
       now: this.now()
     });
+  }
+
+  async dispatchApi(pluginId: string, method: "GET" | "POST", path: string, body: unknown): Promise<unknown> {
+    const install = this.requireInstall(pluginId);
+    if (install.status !== "enabled") {
+      throw new PluginServiceError(409, "CONFLICT", "Plugin is not enabled");
+    }
+    const runtime = await this.ensureRuntime(install);
+    const normalizedPath = normalizeApiPath(path);
+    const handler = (method === "GET" ? runtime.apiGet : runtime.apiPost).get(normalizedPath);
+    if (!handler) {
+      throw new PluginServiceError(404, "NOT_FOUND", "Plugin API route not found");
+    }
+    return handler({ params: {}, body });
   }
 
   updateSettings(pluginId: string, body: unknown): Record<string, unknown> {
@@ -470,13 +651,265 @@ export class PluginService {
     return this.getSettings(pluginId);
   }
 
+  private async ensureRuntime(install: PluginInstallRow): Promise<PluginRuntime> {
+    const existing = this.runtimes.get(install.id);
+    if (existing) {
+      return existing;
+    }
+    const runtimePromise = this.activateRuntime(install);
+    this.runtimes.set(install.id, runtimePromise);
+    return runtimePromise;
+  }
+
+  private async activateRuntime(install: PluginInstallRow): Promise<PluginRuntime> {
+    const manifest = parseStoredManifest(install);
+    const runtime: PluginRuntime = {
+      pluginId: install.id,
+      hooks: new Map(),
+      tasks: new Map(),
+      apiGet: new Map(),
+      apiPost: new Map()
+    };
+    if (!install.packagePath || !manifest.entry?.server) {
+      return runtime;
+    }
+    const entryPath = this.resolveAssetPath(install.id, manifest.entry.server);
+    if (!entryPath) {
+      return runtime;
+    }
+    const moduleUrl = pathToFileURL(entryPath);
+    moduleUrl.searchParams.set("pluginVersion", install.version);
+    moduleUrl.searchParams.set("updatedAt", String(install.updatedAt));
+    const module = await import(moduleUrl.href) as {
+      default?: { activate?: (ctx: unknown) => Promise<void> | void } | ((ctx: unknown) => Promise<void> | void);
+      activate?: (ctx: unknown) => Promise<void> | void;
+    };
+    const activate =
+      typeof module.default === "function"
+        ? module.default
+        : module.default?.activate ?? module.activate;
+    if (typeof activate === "function") {
+      await activate(this.createContext(install, runtime));
+    }
+    return runtime;
+  }
+
+  private createContext(install: PluginInstallRow, runtime: PluginRuntime): Record<string, unknown> {
+    const manifest = parseStoredManifest(install);
+    const hasCapability = (capability: string) => manifest.capabilities.includes(capability);
+    const requireCapability = (capability: string) => {
+      if (!hasCapability(capability)) {
+        throw new PluginServiceError(403, "FORBIDDEN", `Plugin capability required: ${capability}`);
+      }
+    };
+    const pluginId = install.id;
+    return {
+      pluginId,
+      manifest,
+      now: this.now,
+      hooks: {
+        on: (hook: string, handler: (payload: unknown) => Promise<void> | void) => {
+          const handlers = runtime.hooks.get(hook) ?? [];
+          handlers.push(handler);
+          runtime.hooks.set(hook, handlers);
+        }
+      },
+      tasks: {
+        register: (taskId: string, handler: (job: JobRow) => Promise<void> | void) => {
+          runtime.tasks.set(taskId, handler);
+        },
+        start: (taskId: string, payload?: Record<string, unknown>) => {
+          requireCapability("jobs:write");
+          return this.startTask(pluginId, taskId, payload);
+        }
+      },
+      api: {
+        get: (path: string, handler: (input: PluginApiInput) => Promise<unknown> | unknown) => {
+          runtime.apiGet.set(normalizeApiPath(path), handler);
+        },
+        post: (path: string, handler: (input: PluginApiInput) => Promise<unknown> | unknown) => {
+          runtime.apiPost.set(normalizeApiPath(path), handler);
+        }
+      },
+      storage: {
+        get: <T>(key: string) => {
+          requireCapability("files:plugin-data");
+          return this.options.plugins.getKv<T>(pluginId, key);
+        },
+        set: (key: string, value: unknown) => {
+          requireCapability("files:plugin-data");
+          this.options.plugins.setKv(pluginId, key, value, this.now());
+        },
+        listByPrefix: <T>(prefix: string) => {
+          requireCapability("files:plugin-data");
+          return this.options.plugins.listKvByPrefix<T>(pluginId, prefix);
+        },
+        delete: (key: string) => {
+          requireCapability("files:plugin-data");
+          this.options.plugins.deleteKv(pluginId, key);
+        }
+      },
+      settings: {
+        get: <T>(key: string) => {
+          requireCapability("settings:plugin");
+          return this.options.plugins.getSetting<T>(pluginId, key);
+        },
+        set: (key: string, value: unknown) => {
+          requireCapability("settings:plugin");
+          this.options.plugins.setSetting(pluginId, key, value, this.now());
+        },
+        list: () => {
+          requireCapability("settings:plugin");
+          return this.options.plugins.listSettings(pluginId);
+        }
+      },
+      database: {
+        defineTable: (definition: PluginTableDefinition) => {
+          requireCapability("database:plugin");
+          this.definePluginTable(pluginId, definition);
+        },
+        insert: (tableName: string, record: Record<string, unknown>) => {
+          requireCapability("database:plugin");
+          return this.insertPluginRow(pluginId, tableName, record);
+        },
+        get: (tableName: string, rowId: number) => {
+          requireCapability("database:plugin");
+          return this.getPluginRow(pluginId, tableName, rowId);
+        },
+        list: (tableName: string, input: PluginTableListInput = {}) => {
+          requireCapability("database:plugin");
+          return this.listPluginRows(pluginId, tableName, input);
+        },
+        delete: (tableName: string, rowId: number) => {
+          requireCapability("database:plugin");
+          this.deletePluginRow(pluginId, tableName, rowId);
+        }
+      },
+      scheduler: {
+        configureDaily: (taskId: string, input: { enabled: boolean; localTime: string; timezone?: string | null }) => {
+          requireCapability("jobs:write");
+          this.options.plugins.upsertSchedule({
+            pluginId,
+            taskId,
+            enabled: input.enabled,
+            schedule: "daily",
+            localTime: input.localTime,
+            timezone: input.timezone ?? "UTC",
+            nextRunAt: nextDailyRunAt(this.now(), input.localTime, input.timezone ?? "UTC"),
+            now: this.now()
+          });
+        }
+      },
+      ranking: {
+        listRankedWinners: (input: { windowMs: number; limit: number }) => {
+          requireCapability("ranking:read");
+          return this.listRankedWinners(input);
+        }
+      },
+      articles: {
+        openableSummary: (articleId: string) => {
+          requireCapability("articles:read");
+          return this.openableArticleSummary(articleId);
+        }
+      }
+    };
+  }
+
+  private listRankedWinners(input: { windowMs: number; limit: number }): RankedWinner[] {
+    const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 250);
+    const since = this.now() - Math.max(input.windowMs, 60_000);
+    const rankContext = this.options.getActiveRankContext();
+    const rows = this.options.db
+      .prepare(
+        `
+          select
+            a.id as articleId,
+            a.feed_id as feedId,
+            f.title as feedTitle,
+            a.title,
+            a.url,
+            a.summary,
+            a.published_at as publishedAt,
+            a.discovered_at as discoveredAt,
+            coalesce(rs.score, base_rs.score) as score,
+            coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt,
+            ex.payload_json as payloadJson
+          from articles a
+          join feeds f on f.id = a.feed_id
+          left join article_states s on s.article_id = a.id
+          left join article_rank_scores rs
+            on rs.article_id = a.id
+            and rs.rank_context = ?
+          left join article_rank_scores base_rs
+            on base_rs.article_id = a.id
+            and base_rs.rank_context = ?
+          left join article_rank_explanations ex
+            on ex.article_id = a.id
+            and ex.rank_context = ?
+          where a.deleted_at is null
+            and a.status != 'deleted'
+            and f.deleted_at is null
+            and f.enabled = 1
+            and s.hidden_at is null
+            and s.not_interested_at is null
+            and coalesce(a.published_at, a.discovered_at) >= ?
+          order by
+            case when rs.rerank_position is null then 1 else 0 end,
+            rs.rerank_position asc,
+            coalesce(rs.score, base_rs.score) desc,
+            coalesce(a.published_at, a.discovered_at) desc,
+            a.id desc
+          limit ?
+        `
+      )
+      .all(rankContext, "base", rankContext, since, limit) as Array<RankedWinner & { payloadJson: string | null }>;
+
+    return rows.map((row) => {
+      const payload = parseJsonObject(row.payloadJson);
+      const components = parseJsonObject(payload?.components);
+      const familyId = stringOrNull(components?.primaryFamilyId) ?? `source:${row.feedId}`;
+      const familyLabel = stringOrNull(components?.primaryFamilyLabel) ?? row.feedTitle;
+      return {
+        articleId: row.articleId,
+        feedId: row.feedId,
+        feedTitle: row.feedTitle,
+        title: row.title,
+        url: row.url,
+        summary: row.summary,
+        publishedAt: row.publishedAt,
+        discoveredAt: row.discoveredAt,
+        score: row.score,
+        calculatedAt: row.calculatedAt,
+        familyId,
+        familyLabel,
+        reason: familyId.startsWith("source:") ? "source" : "interest-family"
+      };
+    });
+  }
+
+  private openableArticleSummary(articleId: string): RankedWinner | null {
+    const rows = this.listRankedWinners({ windowMs: 365 * 24 * 60 * 60 * 1000, limit: 250 });
+    return rows.find((row) => row.articleId === articleId) ?? null;
+  }
+
+  private enabledInstallsForHook(hook: string): PluginInstallRow[] {
+    return this.options.plugins
+      .listInstalls()
+      .filter((install) => {
+        if (install.status !== "enabled") {
+          return false;
+        }
+        const manifest = parseStoredManifest(install);
+        return manifest.contributes?.hooks?.includes(hook) ?? false;
+      });
+  }
+
   private async fetchUpdateMetadata(url: string): Promise<PluginUpdateMetadata> {
     const response = await this.fetcher(url);
     if (!response.ok) {
       throw new PluginServiceError(400, "PROVIDER_ERROR", `Plugin update fetch failed: ${response.status}`);
     }
-    const body = await response.json() as PluginUpdateMetadata;
-    return body;
+    return await response.json() as PluginUpdateMetadata;
   }
 
   private requireInstall(pluginId: string): PluginInstallRow {
@@ -508,12 +941,228 @@ export class PluginService {
       capabilities: manifest.capabilities,
       grantedCapabilities: this.options.plugins.listCapabilityGrants(install.id),
       contributes: manifest.contributes ?? {},
+      contributions: runtimeContributions(manifest.contributes),
       installedAt: new Date(install.installedAt).toISOString(),
       updatedAt: new Date(install.updatedAt).toISOString(),
       enabledAt: install.enabledAt ? new Date(install.enabledAt).toISOString() : null,
       disabledAt: install.disabledAt ? new Date(install.disabledAt).toISOString() : null,
       lastError: install.lastError
     };
+  }
+
+  private webEntryUrl(install: PluginInstallRow): string | null {
+    const manifest = parseStoredManifest(install);
+    return manifest.entry?.web ? `/api/plugins/${encodeURIComponent(install.id)}/assets/${manifest.entry.web}` : null;
+  }
+
+  private seedDefaultSchedules(pluginId: string, manifest: PluginManifest): void {
+    for (const task of manifest.contributes?.tasks ?? []) {
+      if (!task.defaultEnabled || task.schedule !== "daily") {
+        continue;
+      }
+      const existing = this.options.plugins
+        .listSchedules(pluginId)
+        .find((schedule) => schedule.taskId === task.id);
+      if (existing) {
+        continue;
+      }
+      this.options.plugins.upsertSchedule({
+        pluginId,
+        taskId: task.id,
+        enabled: true,
+        schedule: "daily",
+        localTime: "08:00",
+        timezone: "UTC",
+        nextRunAt: nextDailyRunAt(this.now(), "08:00", "UTC"),
+        now: this.now()
+      });
+    }
+  }
+
+  private definePluginTable(pluginId: string, definition: PluginTableDefinition): void {
+    const normalized = normalizePluginTableDefinition(definition);
+    const physicalTable = pluginTableName(pluginId, normalized.name);
+    const checksum = createHash("sha256")
+      .update(JSON.stringify(normalized))
+      .digest("hex");
+    const version = `schema:${normalized.name}`;
+    const existing = this.options.db
+      .prepare(
+        `
+          select name, checksum
+          from plugin_migrations
+          where plugin_id = ?
+            and version = ?
+        `
+      )
+      .get(pluginId, version) as { name: string; checksum: string | null } | undefined;
+
+    if (existing) {
+      if (existing.name !== normalized.name || existing.checksum !== checksum) {
+        throw new PluginServiceError(
+          409,
+          "CONFLICT",
+          `Plugin table schema changed after creation: ${normalized.name}`
+        );
+      }
+      return;
+    }
+
+    const columnSql = normalized.columns.map(pluginColumnSql).join(",\n            ");
+    const uniqueSql = normalized.columns
+      .filter((column) => column.unique)
+      .map((column) => `unique (${quoteIdentifier(column.name)})`);
+    const constraints = uniqueSql.length > 0 ? `,\n            ${uniqueSql.join(",\n            ")}` : "";
+
+    this.options.db.transaction(() => {
+      this.options.db.exec(
+        `
+          create table if not exists ${quoteIdentifier(physicalTable)} (
+            id integer primary key autoincrement,
+            ${columnSql},
+            created_at integer not null,
+            updated_at integer not null${constraints}
+          )
+        `
+      );
+      for (const index of normalized.indexes ?? []) {
+        const physicalIndex = pluginIndexName(pluginId, normalized.name, index.name);
+        const columns = index.columns.map(quoteIdentifier).join(", ");
+        this.options.db.exec(
+          `create ${index.unique ? "unique " : ""}index if not exists ${quoteIdentifier(physicalIndex)}
+           on ${quoteIdentifier(physicalTable)} (${columns})`
+        );
+      }
+      this.options.db
+        .prepare(
+          `
+            insert into plugin_migrations (plugin_id, version, name, checksum, applied_at)
+            values (?, ?, ?, ?, ?)
+          `
+        )
+        .run(pluginId, version, normalized.name, checksum, this.now());
+      this.options.plugins.setKv(pluginId, `schema:${normalized.name}`, normalized, this.now());
+    })();
+  }
+
+  private insertPluginRow(
+    pluginId: string,
+    tableName: string,
+    record: Record<string, unknown>
+  ): { id: number } {
+    const schema = this.requirePluginTableSchema(pluginId, tableName);
+    const columns = schema.columns.filter((column) => Object.hasOwn(record, column.name));
+    if (columns.length === 0) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", "Plugin row has no known columns");
+    }
+    const now = this.now();
+    const names = [...columns.map((column) => column.name), "created_at", "updated_at"];
+    const placeholders = names.map(() => "?").join(", ");
+    const values = [
+      ...columns.map((column) => pluginColumnValue(column, record[column.name])),
+      now,
+      now
+    ];
+    const result = this.options.db
+      .prepare(
+        `
+          insert into ${quoteIdentifier(pluginTableName(pluginId, schema.name))}
+            (${names.map(quoteIdentifier).join(", ")})
+          values (${placeholders})
+        `
+      )
+      .run(...values);
+    return { id: Number(result.lastInsertRowid) };
+  }
+
+  private getPluginRow(pluginId: string, tableName: string, rowId: number): Record<string, unknown> | null {
+    const schema = this.requirePluginTableSchema(pluginId, tableName);
+    const row = this.options.db
+      .prepare(
+        `
+          select *
+          from ${quoteIdentifier(pluginTableName(pluginId, schema.name))}
+          where id = ?
+        `
+      )
+      .get(rowId) as Record<string, unknown> | undefined;
+    return row ? decodePluginRow(schema, row) : null;
+  }
+
+  private listPluginRows(
+    pluginId: string,
+    tableName: string,
+    input: PluginTableListInput
+  ): Array<Record<string, unknown>> {
+    const schema = this.requirePluginTableSchema(pluginId, tableName);
+    const physicalTable = pluginTableName(pluginId, schema.name);
+    const columns = new Map(schema.columns.map((column) => [column.name, column]));
+    const where = input.where ?? {};
+    const whereSql: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, value] of Object.entries(where)) {
+      const column = columns.get(key);
+      if (!column) {
+        throw new PluginServiceError(400, "VALIDATION_ERROR", `Unknown plugin table column: ${key}`);
+      }
+      whereSql.push(`${quoteIdentifier(key)} = ?`);
+      values.push(pluginColumnValue(column, value));
+    }
+    const orderBy =
+      input.orderBy && (columns.has(input.orderBy) || input.orderBy === "created_at" || input.orderBy === "updated_at")
+        ? input.orderBy
+        : "id";
+    const direction = input.direction === "asc" ? "asc" : "desc";
+    const limit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 500);
+    const rows = this.options.db
+      .prepare(
+        `
+          select *
+          from ${quoteIdentifier(physicalTable)}
+          ${whereSql.length > 0 ? `where ${whereSql.join(" and ")}` : ""}
+          order by ${quoteIdentifier(orderBy)} ${direction}
+          limit ?
+        `
+      )
+      .all(...values, limit) as Array<Record<string, unknown>>;
+    return rows.map((row) => decodePluginRow(schema, row));
+  }
+
+  private deletePluginRow(pluginId: string, tableName: string, rowId: number): void {
+    const schema = this.requirePluginTableSchema(pluginId, tableName);
+    this.options.db
+      .prepare(
+        `
+          delete from ${quoteIdentifier(pluginTableName(pluginId, schema.name))}
+          where id = ?
+        `
+      )
+      .run(rowId);
+  }
+
+  private requirePluginTableSchema(pluginId: string, tableName: string): PluginTableDefinition {
+    const normalizedName = normalizePluginName(tableName, "table");
+    const row = this.options.db
+      .prepare(
+        `
+          select checksum
+          from plugin_migrations
+          where plugin_id = ?
+            and version = ?
+        `
+      )
+      .get(pluginId, `schema:${normalizedName}`) as { checksum: string } | undefined;
+    if (!row) {
+      throw new PluginServiceError(404, "NOT_FOUND", "Plugin table is not defined");
+    }
+    const schema = this.options.plugins.getKv<PluginTableDefinition>(
+      pluginId,
+      `schema:${normalizedName}`
+    );
+    if (!schema) {
+      throw new PluginServiceError(500, "INTERNAL_ERROR", "Plugin table schema metadata is missing");
+    }
+    return schema;
   }
 
   private writeInstalledPackage(
@@ -673,19 +1322,108 @@ function parsePluginManifest(input: unknown): PluginManifest {
   };
 }
 
-function normalizeContributions(contributes: PluginManifest["contributes"]): PluginManifest["contributes"] {
+function normalizeContributions(
+  contributes: PluginManifest["contributes"]
+): NonNullable<PluginManifest["contributes"]> {
   if (!contributes || typeof contributes !== "object") {
     return {};
   }
   return {
     settingsTabs: Array.isArray(contributes.settingsTabs) ? contributes.settingsTabs : [],
     tabs: Array.isArray(contributes.tabs) ? contributes.tabs : [],
+    routes: Array.isArray(contributes.routes) ? contributes.routes : [],
     actions: Array.isArray(contributes.actions) ? contributes.actions : [],
     hooks: Array.isArray(contributes.hooks)
       ? contributes.hooks.filter((hook): hook is string => typeof hook === "string")
       : [],
-    tasks: Array.isArray(contributes.tasks) ? contributes.tasks : []
+    tasks: Array.isArray(contributes.tasks) ? contributes.tasks : [],
+    setupSteps: Array.isArray(contributes.setupSteps) ? contributes.setupSteps : []
   };
+}
+
+function runtimeContributions(contributes: PluginManifest["contributes"]): PluginRuntimeContributions {
+  const normalized = normalizeContributions(contributes);
+  const routes = (normalized.routes ?? []).map((route) => ({
+    id: route.id,
+    title: route.title,
+    path: route.path
+  }));
+  const primaryNav = dedupePluginNav([
+    ...(normalized.tabs ?? [])
+      .filter((tab) => tab.primaryNav)
+      .map((tab) => ({
+        label: tab.title,
+        route: tab.route ?? tab.id,
+        icon: tab.icon,
+        order: tab.order
+      })),
+    ...(normalized.routes ?? [])
+      .filter((route) => route.primaryNav)
+      .map((route) => ({
+        label: route.title,
+        route: route.id,
+        icon: route.icon,
+        order: route.order
+      }))
+  ]).sort(sortContributionByOrder);
+  const primaryMobile = dedupePluginNav([
+    ...(normalized.tabs ?? [])
+      .filter((tab) => tab.primaryMobile)
+      .map((tab) => ({
+        label: tab.title,
+        route: tab.route ?? tab.id,
+        icon: tab.icon,
+        order: tab.order
+      })),
+    ...(normalized.routes ?? [])
+      .filter((route) => route.primaryMobile)
+      .map((route) => ({
+        label: route.title,
+        route: route.id,
+        icon: route.icon,
+        order: route.order
+      }))
+  ]).sort(sortContributionByOrder);
+  return {
+    routes,
+    primaryNav,
+    primaryMobile,
+    settingsTabs: (normalized.settingsTabs ?? [])
+      .map((tab) => ({
+        id: tab.id,
+        label: tab.title,
+        route: tab.route ?? tab.id,
+        order: tab.order
+      }))
+      .sort(sortContributionByOrder),
+    setupSteps: (normalized.setupSteps ?? [])
+      .map((step) => ({
+        id: step.id,
+        title: step.title,
+        body: step.body ?? "",
+        recommended: step.defaultEnabled
+      }))
+      .sort(sortContributionByOrder)
+  };
+}
+
+function sortContributionByOrder(
+  left: { order?: number; label?: string; title?: string },
+  right: { order?: number; label?: string; title?: string }
+): number {
+  return (left.order ?? 100) - (right.order ?? 100) ||
+    (left.label ?? left.title ?? "").localeCompare(right.label ?? right.title ?? "");
+}
+
+function dedupePluginNav<T extends { route: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.route)) {
+      return false;
+    }
+    seen.add(item.route);
+    return true;
+  });
 }
 
 function parseStoredManifest(install: PluginInstallRow): PluginManifest {
@@ -722,6 +1460,16 @@ function resolvePluginPath(path: string): string {
   return isAbsolute(path) ? path : resolve(process.cwd(), path);
 }
 
+function defaultOfficialPluginsDir(): string {
+  const candidates = [
+    resolve(process.cwd(), "plugins/official"),
+    process.env.INIT_CWD ? resolve(process.env.INIT_CWD, "plugins/official") : null,
+    resolve(process.cwd(), "../../plugins/official")
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -737,4 +1485,292 @@ function isGitHubUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function normalizePluginTableDefinition(definition: PluginTableDefinition): PluginTableDefinition {
+  const name = normalizePluginName(definition.name, "table");
+  if (!Array.isArray(definition.columns) || definition.columns.length === 0) {
+    throw new PluginServiceError(400, "VALIDATION_ERROR", "Plugin table needs columns");
+  }
+  const seenColumns = new Set<string>();
+  const columns = definition.columns.map((column) => {
+    const columnName = normalizePluginName(column.name, "column");
+    if (columnName === "id" || columnName === "created_at" || columnName === "updated_at") {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Reserved plugin column: ${columnName}`);
+    }
+    if (seenColumns.has(columnName)) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Duplicate plugin column: ${columnName}`);
+    }
+    seenColumns.add(columnName);
+    if (!["text", "integer", "real", "boolean", "json"].includes(column.type)) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Unsupported plugin column type: ${String(column.type)}`);
+    }
+    return {
+      name: columnName,
+      type: column.type,
+      nullable: column.nullable === true,
+      unique: column.unique === true,
+      default: normalizePluginDefault(column)
+    };
+  });
+  const indexes = Array.isArray(definition.indexes)
+    ? definition.indexes.map((index) => {
+        const indexName = normalizePluginName(index.name, "index");
+        const indexColumns = Array.isArray(index.columns)
+          ? index.columns.map((columnName) => normalizePluginName(columnName, "column"))
+          : [];
+        if (indexColumns.length === 0 || indexColumns.some((columnName) => !seenColumns.has(columnName))) {
+          throw new PluginServiceError(400, "VALIDATION_ERROR", `Invalid plugin index columns: ${indexName}`);
+        }
+        return {
+          name: indexName,
+          columns: indexColumns,
+          unique: index.unique === true
+        };
+      })
+    : [];
+  return { name, columns, indexes };
+}
+
+function normalizePluginName(value: unknown, label: string): string {
+  const normalized = stringValue(value);
+  if (!PLUGIN_SCHEMA_NAME_PATTERN.test(normalized)) {
+    throw new PluginServiceError(400, "VALIDATION_ERROR", `Invalid plugin ${label} name`);
+  }
+  return normalized;
+}
+
+function normalizePluginDefault(column: PluginTableColumnDefinition): string | number | boolean | null | undefined {
+  if (!Object.hasOwn(column, "default")) {
+    return undefined;
+  }
+  if (column.default === null) {
+    return null;
+  }
+  if (column.type === "text" && typeof column.default === "string") {
+    return column.default;
+  }
+  if ((column.type === "integer" || column.type === "real") && typeof column.default === "number") {
+    return column.default;
+  }
+  if (column.type === "boolean" && typeof column.default === "boolean") {
+    return column.default;
+  }
+  throw new PluginServiceError(400, "VALIDATION_ERROR", `Invalid default for plugin column: ${column.name}`);
+}
+
+function pluginTableName(pluginId: string, tableName: string): string {
+  const scope = createHash("sha256").update(pluginId).digest("hex").slice(0, 12);
+  return `plugin_${scope}_${tableName}`;
+}
+
+function pluginIndexName(pluginId: string, tableName: string, indexName: string): string {
+  const scope = createHash("sha256").update(`${pluginId}:${tableName}:${indexName}`).digest("hex").slice(0, 16);
+  return `idx_plugin_${scope}`;
+}
+
+function pluginColumnSql(column: PluginTableColumnDefinition): string {
+  const type = column.type === "json" || column.type === "boolean" ? "text" : column.type;
+  const notNull = column.nullable ? "" : " not null";
+  const defaultSql = Object.hasOwn(column, "default")
+    ? ` default ${pluginDefaultSql(column.default)}`
+    : "";
+  return `${quoteIdentifier(column.name)} ${type}${notNull}${defaultSql}`;
+}
+
+function pluginDefaultSql(value: string | number | boolean | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "'true'" : "'false'";
+  }
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function pluginColumnValue(column: PluginTableColumnDefinition, value: unknown): unknown {
+  if (value === null || value === undefined) {
+    if (!column.nullable) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Plugin column is required: ${column.name}`);
+    }
+    return null;
+  }
+  if (column.type === "text") {
+    if (typeof value !== "string") {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Plugin column must be text: ${column.name}`);
+    }
+    return value;
+  }
+  if (column.type === "integer") {
+    if (!Number.isInteger(value)) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Plugin column must be integer: ${column.name}`);
+    }
+    return value;
+  }
+  if (column.type === "real") {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Plugin column must be real: ${column.name}`);
+    }
+    return value;
+  }
+  if (column.type === "boolean") {
+    if (typeof value !== "boolean") {
+      throw new PluginServiceError(400, "VALIDATION_ERROR", `Plugin column must be boolean: ${column.name}`);
+    }
+    return value ? "true" : "false";
+  }
+  return JSON.stringify(value);
+}
+
+function decodePluginRow(
+  schema: PluginTableDefinition,
+  row: Record<string, unknown>
+): Record<string, unknown> {
+  const decoded: Record<string, unknown> = {
+    id: row.id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+  for (const column of schema.columns) {
+    const value = row[column.name];
+    decoded[column.name] =
+      column.type === "json"
+        ? parseJsonObject(value)
+        : column.type === "boolean"
+          ? value === "true"
+          : value;
+  }
+  return decoded;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") {
+    try {
+      return parseJsonObject(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function normalizeApiPath(path: string): string {
+  const trimmed = path.trim();
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => rejectPromise(new Error("Plugin hook timed out")), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        rejectPromise(error);
+      }
+    );
+  });
+}
+
+function nextRunForSchedule(schedule: PluginScheduleRow, now: number): number | null {
+  if (schedule.schedule === "daily" && schedule.localTime) {
+    return nextDailyRunAt(now + 1_000, schedule.localTime, schedule.timezone ?? "UTC");
+  }
+  if (schedule.schedule === "interval" && schedule.intervalMs) {
+    return now + schedule.intervalMs;
+  }
+  return null;
+}
+
+function nextDailyRunAt(now: number, localTime: string, timezone: string): number {
+  const [hourText, minuteText] = localTime.split(":");
+  const hour = clampInteger(Number.parseInt(hourText ?? "", 10), 0, 23, 8);
+  const minute = clampInteger(Number.parseInt(minuteText ?? "", 10), 0, 59, 0);
+  const parts = zonedParts(now, timezone);
+  let candidate = zonedTimeToUtc({
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour,
+    minute,
+    timezone
+  });
+  if (candidate <= now) {
+    const nextDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
+    candidate = zonedTimeToUtc({
+      year: nextDate.getUTCFullYear(),
+      month: nextDate.getUTCMonth() + 1,
+      day: nextDate.getUTCDate(),
+      hour,
+      minute,
+      timezone
+    });
+  }
+  return candidate;
+}
+
+function zonedParts(value: number, timezone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date(value));
+  return {
+    year: Number(parts.find((part) => part.type === "year")?.value ?? "1970"),
+    month: Number(parts.find((part) => part.type === "month")?.value ?? "1"),
+    day: Number(parts.find((part) => part.type === "day")?.value ?? "1")
+  };
+}
+
+function zonedTimeToUtc(input: {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  timezone: string;
+}): number {
+  const utcGuess = Date.UTC(input.year, input.month - 1, input.day, input.hour, input.minute, 0, 0);
+  const offset = timeZoneOffsetMs(utcGuess, input.timezone);
+  return utcGuess - offset;
+}
+
+function timeZoneOffsetMs(value: number, timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(new Date(value));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return asUtc - value;
+}
+
+function clampInteger(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isInteger(value)) {
+    return fallback;
+  }
+  return Math.min(Math.max(value, min), max);
 }

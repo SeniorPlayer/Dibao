@@ -221,7 +221,8 @@ describe("db package", () => {
         "016",
         "017",
         "018",
-        "019"
+        "019",
+        "020"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
@@ -649,7 +650,8 @@ describe("db package", () => {
         "016",
         "017",
         "018",
-        "019"
+        "019",
+        "020"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);

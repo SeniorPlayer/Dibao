@@ -190,6 +190,12 @@
   gap: var(--space-2);
 }
 
+.setupActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .setupSourceActions .secondaryButton {
   width: 100%;
 }
@@ -384,6 +390,20 @@
   display: grid;
   grid-template-columns: minmax(360px, 520px) minmax(0, 1fr);
   overflow: hidden;
+}
+
+.pluginWorkspace {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  background: var(--color-surface);
+}
+
+.pluginFrame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--color-surface);
 }
 
 .sourceBackdrop,
@@ -3137,6 +3157,10 @@
   height: auto;
   display: block;
   margin: 0 auto var(--reader-paragraph-gap);
+}
+
+.readerBody img[data-dibao-load-state="failed"] {
+  display: none;
 }
 
 .readerBody blockquote {

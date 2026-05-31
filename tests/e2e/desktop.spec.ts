@@ -39,6 +39,9 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
     await expect(page.getByText("E2E Article Alpha")).toBeVisible();
     await page.getByRole("button", { name: "添加此源" }).first().click();
 
+    await expect(page.getByRole("heading", { name: "每日简报" })).toBeVisible();
+    await page.getByRole("button", { name: "暂不启用" }).click();
+
     await expect(page.getByRole("heading", { name: "推荐能力" })).toBeVisible();
     await page.getByRole("button", { name: "跳过，使用基础排序" }).click();
 
@@ -202,6 +205,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
 
     await page.getByRole("link", { name: "设置" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "设置" })).toBeVisible();
+    await page.getByRole("tab", { name: "算法" }).click();
     await page.getByLabel("Base URL").fill(`${fixture.origin}/v1`);
     await page.getByLabel("模型").fill("e2e-embedding");
     await page.getByLabel("维度").fill("4");
@@ -224,7 +228,7 @@ test("desktop MVP self-host smoke flow", async ({ page }) => {
 
     await page.getByRole("link", { name: "订阅源" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "订阅源管理" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "导入、导出与刷新" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "订阅源" })).toBeVisible();
     await expect(page.getByLabel("网站或 RSS / Atom URL")).toBeVisible();
     await expect(page.getByRole("heading", { name: "订阅源健康" })).toBeVisible();
     await expect(page.getByText("正常").first()).toBeVisible();

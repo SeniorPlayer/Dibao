@@ -2,10 +2,12 @@ import type {
   DibaoDatabase,
   PluginInstallRow,
   PluginInstallStatus,
+  PluginScheduleRow,
   PluginSourceType,
   PluginTrustLevel,
   PluginUpdateCheckRow,
   UpsertPluginInstallInput,
+  UpsertPluginScheduleInput,
   UpsertPluginUpdateCheckInput
 } from "../types.js";
 
@@ -40,19 +42,38 @@ type PluginUpdateCheckDbRow = {
   error: string | null;
 };
 
+type PluginScheduleDbRow = {
+  pluginId: string;
+  taskId: string;
+  enabled: number;
+  schedule: PluginScheduleRow["schedule"];
+  intervalMs: number | null;
+  localTime: string | null;
+  timezone: string | null;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastJobId: string | null;
+  updatedAt: number;
+};
+
 export interface PluginRepository {
   deleteInstall(pluginId: string): void;
+  deleteKv(pluginId: string, key: string): void;
   findInstall(pluginId: string): PluginInstallRow | null;
   getKv<T>(pluginId: string, key: string): T | null;
   getSetting<T>(pluginId: string, key: string): T | null;
   grantCapabilities(pluginId: string, capabilities: string[], now?: number): void;
   listCapabilityGrants(pluginId: string): string[];
+  listDueSchedules(now: number): PluginScheduleRow[];
   listInstalls(): PluginInstallRow[];
+  listKvByPrefix<T>(pluginId: string, prefix: string): Array<{ key: string; value: T; updatedAt: number }>;
   listSettings(pluginId: string): Record<string, unknown>;
+  listSchedules(pluginId: string): PluginScheduleRow[];
   setKv(pluginId: string, key: string, value: unknown, now?: number): void;
   setSetting(pluginId: string, key: string, value: unknown, now?: number): void;
   setStatus(pluginId: string, status: PluginInstallStatus, error?: string | null, now?: number): void;
   upsertInstall(input: UpsertPluginInstallInput): PluginInstallRow;
+  upsertSchedule(input: UpsertPluginScheduleInput): PluginScheduleRow;
   upsertUpdateCheck(input: UpsertPluginUpdateCheckInput): PluginUpdateCheckRow;
 }
 
@@ -63,11 +84,14 @@ export class SqlitePluginRepository implements PluginRepository {
     this.db.prepare("delete from plugin_installs where id = ?").run(pluginId);
   }
 
+  deleteKv(pluginId: string, key: string): void {
+    this.db.prepare("delete from plugin_kv where plugin_id = ? and key = ?").run(pluginId, key);
+  }
+
   findInstall(pluginId: string): PluginInstallRow | null {
     const row = this.db
       .prepare(`${basePluginInstallSelect()} where id = ?`)
       .get(pluginId) as PluginInstallDbRow | undefined;
-
     return row ? mapPluginInstall(row) : null;
   }
 
@@ -108,6 +132,22 @@ export class SqlitePluginRepository implements PluginRepository {
     ).map((row) => row.capability);
   }
 
+  listDueSchedules(now: number): PluginScheduleRow[] {
+    return (
+      this.db
+        .prepare(
+          `
+            ${basePluginScheduleSelect()}
+            where enabled = 1
+              and next_run_at is not null
+              and next_run_at <= ?
+            order by next_run_at, plugin_id, task_id
+          `
+        )
+        .all(now) as PluginScheduleDbRow[]
+    ).map(mapPluginSchedule);
+  }
+
   listInstalls(): PluginInstallRow[] {
     return (
       this.db
@@ -119,6 +159,30 @@ export class SqlitePluginRepository implements PluginRepository {
         )
         .all() as PluginInstallDbRow[]
     ).map(mapPluginInstall);
+  }
+
+  listKvByPrefix<T>(pluginId: string, prefix: string): Array<{ key: string; value: T; updatedAt: number }> {
+    const rows = this.db
+      .prepare(
+        `
+          select key, value_json as valueJson, updated_at as updatedAt
+          from plugin_kv
+          where plugin_id = ?
+            and key like ? escape '\\'
+          order by key
+        `
+      )
+      .all(pluginId, `${escapeLikePattern(prefix)}%`) as Array<{
+        key: string;
+        valueJson: string;
+        updatedAt: number;
+      }>;
+
+    return rows.map((row) => ({
+      key: row.key,
+      value: JSON.parse(row.valueJson) as T,
+      updatedAt: row.updatedAt
+    }));
   }
 
   listSettings(pluginId: string): Record<string, unknown> {
@@ -138,6 +202,20 @@ export class SqlitePluginRepository implements PluginRepository {
       settings[row.key] = JSON.parse(row.valueJson);
     }
     return settings;
+  }
+
+  listSchedules(pluginId: string): PluginScheduleRow[] {
+    return (
+      this.db
+        .prepare(
+          `
+            ${basePluginScheduleSelect()}
+            where plugin_id = ?
+            order by task_id
+          `
+        )
+        .all(pluginId) as PluginScheduleDbRow[]
+    ).map(mapPluginSchedule);
   }
 
   setKv(pluginId: string, key: string, value: unknown, now = Date.now()): void {
@@ -172,23 +250,9 @@ export class SqlitePluginRepository implements PluginRepository {
       .prepare(
         `
           insert into plugin_installs (
-            id,
-            version,
-            source_type,
-            source_url,
-            update_url,
-            package_path,
-            data_path,
-            manifest_json,
-            status,
-            official,
-            bundled,
-            trust_level,
-            installed_at,
-            updated_at,
-            enabled_at,
-            disabled_at,
-            last_error
+            id, version, source_type, source_url, update_url, package_path, data_path,
+            manifest_json, status, official, bundled, trust_level, installed_at, updated_at,
+            enabled_at, disabled_at, last_error
           )
           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(id) do update set
@@ -236,20 +300,58 @@ export class SqlitePluginRepository implements PluginRepository {
     return install;
   }
 
+  upsertSchedule(input: UpsertPluginScheduleInput): PluginScheduleRow {
+    const now = input.now ?? Date.now();
+    this.db
+      .prepare(
+        `
+          insert into plugin_schedules (
+            plugin_id, task_id, enabled, schedule, interval_ms, local_time, timezone,
+            next_run_at, last_run_at, last_job_id, updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(plugin_id, task_id) do update set
+            enabled = excluded.enabled,
+            schedule = excluded.schedule,
+            interval_ms = excluded.interval_ms,
+            local_time = excluded.local_time,
+            timezone = excluded.timezone,
+            next_run_at = excluded.next_run_at,
+            last_run_at = excluded.last_run_at,
+            last_job_id = excluded.last_job_id,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(
+        input.pluginId,
+        input.taskId,
+        input.enabled ? 1 : 0,
+        input.schedule,
+        input.intervalMs ?? null,
+        input.localTime ?? null,
+        input.timezone ?? null,
+        input.nextRunAt ?? null,
+        input.lastRunAt ?? null,
+        input.lastJobId ?? null,
+        now
+      );
+
+    const row = this.db
+      .prepare(`${basePluginScheduleSelect()} where plugin_id = ? and task_id = ?`)
+      .get(input.pluginId, input.taskId) as PluginScheduleDbRow | undefined;
+    if (!row) {
+      throw new Error(`Failed to upsert plugin schedule: ${input.pluginId}:${input.taskId}`);
+    }
+    return mapPluginSchedule(row);
+  }
+
   upsertUpdateCheck(input: UpsertPluginUpdateCheckInput): PluginUpdateCheckRow {
     const now = input.now ?? Date.now();
     this.db
       .prepare(
         `
           insert into plugin_update_checks (
-            plugin_id,
-            latest_version,
-            update_url,
-            package_url,
-            checksum,
-            metadata_json,
-            checked_at,
-            error
+            plugin_id, latest_version, update_url, package_url, checksum, metadata_json, checked_at, error
           )
           values (?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(plugin_id) do update set
@@ -290,7 +392,6 @@ export class SqlitePluginRepository implements PluginRepository {
         `
       )
       .get(input.pluginId) as PluginUpdateCheckDbRow | undefined;
-
     if (!row) {
       throw new Error(`Failed to upsert plugin update check: ${input.pluginId}`);
     }
@@ -322,11 +423,36 @@ function basePluginInstallSelect(): string {
   `;
 }
 
+function basePluginScheduleSelect(): string {
+  return `
+    select
+      plugin_id as pluginId,
+      task_id as taskId,
+      enabled,
+      schedule,
+      interval_ms as intervalMs,
+      local_time as localTime,
+      timezone,
+      next_run_at as nextRunAt,
+      last_run_at as lastRunAt,
+      last_job_id as lastJobId,
+      updated_at as updatedAt
+    from plugin_schedules
+  `;
+}
+
 function mapPluginInstall(row: PluginInstallDbRow): PluginInstallRow {
   return {
     ...row,
     official: row.official === 1,
     bundled: row.bundled === 1
+  };
+}
+
+function mapPluginSchedule(row: PluginScheduleDbRow): PluginScheduleRow {
+  return {
+    ...row,
+    enabled: row.enabled === 1
   };
 }
 
@@ -367,4 +493,8 @@ function writeJsonRow(
         updated_at = excluded.updated_at
     `
   ).run(pluginId, key, JSON.stringify(value), now);
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }

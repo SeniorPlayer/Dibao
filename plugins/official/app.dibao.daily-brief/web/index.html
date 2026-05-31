@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>每日简报</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f7f4ed;
+        --surface: #fffefa;
+        --paper: #f1eee6;
+        --line: #d8d6ca;
+        --line-soft: #e9e5da;
+        --ink: #202421;
+        --muted: #6d716b;
+        --pine: #315f72;
+        --pine-soft: #dce8ec;
+        --matsu: #4f6f5b;
+        --matsu-soft: #dfe8dc;
+        --vermilion: #a64235;
+        --vermilion-soft: #edd8d4;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+          "PingFang SC", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--ink);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .page {
+        min-height: 100vh;
+        padding: 28px;
+      }
+
+      .shell {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      .header,
+      .settings,
+      .empty,
+      .group {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .header {
+        padding: 22px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .kicker {
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 8px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .header p,
+      .empty p,
+      .settings p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .button {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--muted);
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border-color: var(--pine);
+        background: var(--pine-soft);
+        color: var(--pine);
+      }
+
+      .button:disabled {
+        cursor: progress;
+        opacity: 0.65;
+      }
+
+      .history {
+        margin: 18px 0;
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .history button {
+        white-space: nowrap;
+      }
+
+      .history .active {
+        border-color: var(--pine);
+        background: var(--pine-soft);
+        color: var(--pine);
+      }
+
+      .settings {
+        margin-top: 18px;
+        padding: 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      input {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--ink);
+        padding: 0 10px;
+      }
+
+      .content {
+        display: grid;
+        gap: 14px;
+      }
+
+      .group {
+        overflow: hidden;
+      }
+
+      .group-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line-soft);
+        background: var(--paper);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .group-head h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .count {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .article {
+        padding: 14px 16px;
+        border-top: 1px solid var(--line-soft);
+        display: grid;
+        gap: 7px;
+      }
+
+      .article:first-of-type {
+        border-top: 0;
+      }
+
+      .article button {
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        padding: 0;
+        text-align: left;
+        font-size: 16px;
+        font-weight: 750;
+        cursor: pointer;
+      }
+
+      .meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .summary {
+        margin: 0;
+        color: #3d423d;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .empty {
+        padding: 22px;
+      }
+
+      .error {
+        color: var(--vermilion);
+        background: var(--vermilion-soft);
+        border: 1px solid var(--vermilion);
+        border-radius: 6px;
+        padding: 10px 12px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 14px;
+        }
+
+        .header {
+          display: grid;
+        }
+
+        .settings-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="shell">
+        <section class="header">
+          <div>
+            <p class="kicker">Daily Brief</p>
+            <h1 id="title">每日简报</h1>
+            <p id="subtitle">从过去 24 小时的个性化推荐中，按兴趣主题整理一份可复核的阅读清单。</p>
+          </div>
+          <button class="button primary" id="generate" type="button">立即生成</button>
+        </section>
+
+        <section class="settings" id="settings-panel" hidden>
+          <div>
+            <h2>简报设置</h2>
+            <p>保存后会更新每日计划任务；不会调用额外 AI，也不会重算 embedding。</p>
+          </div>
+          <div class="settings-grid">
+            <label>
+              更新时间
+              <input id="time" type="time" />
+            </label>
+            <label>
+              时区
+              <input id="timezone" type="text" />
+            </label>
+            <label>
+              内容数量
+              <input id="count" min="5" max="50" type="number" />
+            </label>
+          </div>
+          <label>
+            <span>启用每日计划</span>
+            <input id="enabled" type="checkbox" />
+          </label>
+          <button class="button primary" id="save" type="button">保存设置</button>
+        </section>
+
+        <div class="history" id="history"></div>
+        <p class="error" id="error" hidden></p>
+        <section class="empty" id="empty" hidden>
+          <h2>还没有简报</h2>
+          <p>点击“立即生成”，邸报会从当前推荐排序中挑选过去 24 小时的文章并按兴趣主题分组。</p>
+        </section>
+        <section class="content" id="content"></section>
+      </div>
+    </main>
+
+    <script>
+      const pluginId = "app.dibao.daily-brief";
+      const params = new URLSearchParams(window.location.search);
+      const isSettings = params.get("panel") === "settings";
+      const state = { briefs: [], selectedId: null, settings: null };
+      const api = async (path, options = {}) => {
+        const response = await fetch(`/api/plugins/${pluginId}/api/${path}`, {
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          ...options
+        });
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(body.error?.message || "Plugin request failed");
+        }
+        return body.data;
+      };
+
+      document.getElementById("settings-panel").hidden = !isSettings;
+      document.getElementById("generate").addEventListener("click", async () => {
+        await runBusy("generate", async () => {
+          const result = await api("generate", { method: "POST", body: "{}" });
+          state.briefs = result.briefs;
+          state.selectedId = result.brief.id;
+          render();
+        });
+      });
+      document.getElementById("save").addEventListener("click", async () => {
+        await runBusy("save", async () => {
+          const result = await api("settings", {
+            method: "POST",
+            body: JSON.stringify(readFormSettings())
+          });
+          state.settings = result.settings;
+          state.briefs = result.briefs;
+          render();
+        });
+      });
+
+      load();
+
+      async function load() {
+        try {
+          const result = await api("state");
+          state.settings = result.settings;
+          state.briefs = result.briefs;
+          state.selectedId = result.latest?.id || state.briefs[0]?.id || null;
+          render();
+        } catch (error) {
+          showError(error.message);
+        }
+      }
+
+      async function runBusy(buttonId, fn) {
+        const button = document.getElementById(buttonId);
+        button.disabled = true;
+        try {
+          await fn();
+          showError(null);
+        } catch (error) {
+          showError(error.message);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function render() {
+        renderSettings();
+        renderHistory();
+        renderBrief();
+      }
+
+      function renderSettings() {
+        if (!state.settings) return;
+        document.getElementById("time").value = state.settings.scheduledLocalTime;
+        document.getElementById("timezone").value = state.settings.timezone;
+        document.getElementById("count").value = String(state.settings.articleCount);
+        document.getElementById("enabled").checked = state.settings.enabled;
+      }
+
+      function renderHistory() {
+        const history = document.getElementById("history");
+        history.replaceChildren();
+        for (const brief of state.briefs) {
+          const button = document.createElement("button");
+          button.className = `button${brief.id === state.selectedId ? " active" : ""}`;
+          button.type = "button";
+          button.textContent = brief.id;
+          button.addEventListener("click", () => {
+            state.selectedId = brief.id;
+            render();
+          });
+          history.append(button);
+        }
+      }
+
+      function renderBrief() {
+        const brief = state.briefs.find((item) => item.id === state.selectedId) || state.briefs[0];
+        const empty = document.getElementById("empty");
+        const content = document.getElementById("content");
+        content.replaceChildren();
+        empty.hidden = Boolean(brief);
+        if (!brief) return;
+
+        for (const group of brief.groups) {
+          const section = document.createElement("section");
+          section.className = "group";
+          section.innerHTML = `<div class="group-head"><h2></h2><span class="count"></span></div>`;
+          section.querySelector("h2").textContent = group.label;
+          section.querySelector(".count").textContent = `${group.articles.length} 篇`;
+          for (const article of group.articles) {
+            const row = document.createElement("article");
+            row.className = "article";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = article.title;
+            button.addEventListener("click", () => {
+              window.parent.postMessage({ type: "dibao.openArticle", articleId: article.articleId }, window.location.origin);
+            });
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            meta.textContent = `${article.feedTitle} · ${formatTime(article.publishedAt || article.discoveredAt)} · score ${formatScore(article.score)}`;
+            row.append(button, meta);
+            if (article.summary) {
+              const summary = document.createElement("p");
+              summary.className = "summary";
+              summary.textContent = article.summary;
+              row.append(summary);
+            }
+            section.append(row);
+          }
+          content.append(section);
+        }
+      }
+
+      function readFormSettings() {
+        return {
+          enabled: document.getElementById("enabled").checked,
+          scheduledLocalTime: document.getElementById("time").value || "08:00",
+          timezone: document.getElementById("timezone").value || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          articleCount: Number(document.getElementById("count").value)
+        };
+      }
+
+      function showError(message) {
+        const element = document.getElementById("error");
+        element.hidden = !message;
+        element.textContent = message || "";
+      }
+
+      function formatTime(value) {
+        return value ? new Date(value).toLocaleString() : "未知时间";
+      }
+
+      function formatScore(value) {
+        return typeof value === "number" ? value.toFixed(3) : "-";
+      }
+    </script>
+  </body>
+</html>

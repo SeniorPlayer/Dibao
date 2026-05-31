@@ -48,6 +48,7 @@ import {
   type InterestClusterRow,
   type JobRow,
   type JobStatus,
+  type PluginJobType,
   type JobType,
   type ProfileSignalCountRow
 } from "@dibao/db";
@@ -202,6 +203,7 @@ type SetupStatusResponse = {
   hasEmbeddingProvider: boolean;
   firstRefreshStatus: "idle" | "running" | "succeeded" | "failed";
   derivedDataUpgrade?: DerivedDataUpgradeStatus;
+  optionalPluginSteps?: unknown[];
 };
 
 type FeedQuery = {
@@ -286,15 +288,22 @@ type PluginTaskRunParams = {
   runId: string;
 };
 
-type PluginAssetParams = {
+type PluginApiParams = {
   id: string;
   "*": string;
 };
+
+type PluginAssetParams = PluginApiParams;
 
 type PluginInstallBody = {
   url?: unknown;
   package?: unknown;
   sha256?: unknown;
+};
+
+type OptionalPluginBody = {
+  enabled?: unknown;
+  timezone?: unknown;
 };
 
 type PluginUninstallQuery = {
@@ -443,16 +452,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     fetcher: options.latestReleaseFetcher,
     getInstallationCompletedAt: () => settingsService.ensureInstallationCompletedAt()
   });
-  const pluginService = new PluginService({
-    plugins,
-    jobs,
-    dibaoVersion,
-    officialPluginsDir: options.officialPluginsDir,
-    pluginDataDir: options.pluginDataDir,
-    fetcher: options.pluginFetcher,
-    now: options.now
-  });
-  pluginService.reconcileOfficialPlugins();
   const profileService = new ProfileService({
     embeddings,
     profiles,
@@ -473,6 +472,18 @@ export function buildServer(options: BuildServerOptions = {}) {
     getRankingSettings: () => settingsService.getSettings().ranking,
     now: options.now
   });
+  const pluginService = new PluginService({
+    db,
+    plugins,
+    jobs,
+    dibaoVersion,
+    getActiveRankContext: () => rankingService.getActiveRankContext(),
+    officialPluginsDir: options.officialPluginsDir,
+    pluginDataDir: options.pluginDataDir,
+    fetcher: options.pluginFetcher,
+    now: options.now
+  });
+  pluginService.reconcileOfficialPlugins();
   const rankingJobService = new RankingRecalculateJobService({
     jobs,
     ranking: rankingService,
@@ -974,12 +985,19 @@ export function buildServer(options: BuildServerOptions = {}) {
         options.recommendationMaintenanceIntervalMs ??
         DEFAULT_RECOMMENDATION_MAINTENANCE_SCHEDULER_INTERVAL_MS;
       const emitMaintenanceTick = () => {
-        void pluginService.emitHook("maintenance.tick", {
-          tickedAt: options.now?.() ?? Date.now()
-        }).catch((error) => app.log.error(error));
+        void pluginService
+          .enqueueDueSchedules()
+          .then(() =>
+            pluginService.emitHook("maintenance.tick", {
+              tickedAt: options.now?.() ?? Date.now()
+            })
+          )
+          .then(() => jobRunner.drainDue())
+          .catch((error) => app.log.error(error));
       };
       emitMaintenanceTick();
       maintenanceTickTimer = setInterval(emitMaintenanceTick, intervalMs);
+      maintenanceTickTimer.unref?.();
     }
   }
 
@@ -1107,14 +1125,42 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/setup/status", async () => ({
-    data: getSetupStatus(
-      credentials.hasCredential(),
-      feeds.list().length > 0,
-      embeddingProviderService.hasActiveProviderAndIndex(),
-      derivedDataUpgradeService.getStatus()
-    )
-  }));
+  app.get("/api/setup/status", async () => {
+    const hasFeeds = feeds.list().length > 0;
+    return {
+      data: getSetupStatus(
+        credentials.hasCredential(),
+        hasFeeds,
+        embeddingProviderService.hasActiveProviderAndIndex(),
+        derivedDataUpgradeService.getStatus(),
+        hasFeeds
+          ? pluginService.listSetupSteps().filter(
+              (plugin) => settings.getJson(`setup.optionalPlugin.${plugin.id}`) === null
+            )
+          : []
+      )
+    };
+  });
+
+  app.post<{ Params: PluginParams; Body: OptionalPluginBody }>(
+    "/api/setup/optional-plugins/:id",
+    async (request, reply) => {
+      const parsed = parseOptionalPluginBody(request.body);
+      if (!parsed.ok) {
+        return sendApiError(reply, 400, "VALIDATION_ERROR", parsed.message, parsed.details);
+      }
+      try {
+        const plugin = parsed.enabled ? pluginService.enable(request.params.id) : pluginService.disable(request.params.id);
+        if (parsed.enabled && parsed.timezone) {
+          pluginService.updateSettings(request.params.id, { timezone: parsed.timezone });
+        }
+        settings.setJson(`setup.optionalPlugin.${request.params.id}`, parsed.enabled ? "enabled" : "skipped", options.now?.() ?? Date.now());
+        return { data: plugin };
+      } catch (error) {
+        return sendPluginError(reply, error);
+      }
+    }
+  );
 
   app.get("/api/system/upgrade/status", async () => {
     const status = derivedDataUpgradeService.getStatus();
@@ -1147,6 +1193,10 @@ export function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/plugins/catalog", async () => ({
     data: pluginService.listCatalog()
+  }));
+
+  app.get("/api/plugins/contributions", async () => ({
+    data: pluginService.listContributions()
   }));
 
   app.post<{ Body: PluginInstallBody }>("/api/plugins/install", async (request, reply) => {
@@ -1273,6 +1323,22 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
     const job = jobs.cancel(request.params.runId, "Cancelled by user", options.now?.() ?? Date.now()) ?? existing;
     return { data: mapJob(job) };
+  });
+
+  app.get<{ Params: PluginApiParams }>("/api/plugins/:id/api/*", async (request, reply) => {
+    try {
+      return { data: await pluginService.dispatchApi(request.params.id, "GET", request.params["*"], null) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
+  });
+
+  app.post<{ Params: PluginApiParams; Body: unknown }>("/api/plugins/:id/api/*", async (request, reply) => {
+    try {
+      return { data: await pluginService.dispatchApi(request.params.id, "POST", request.params["*"], request.body) };
+    } catch (error) {
+      return sendPluginError(reply, error);
+    }
   });
 
   app.get<{ Querystring: RecommendationStatusQuery }>(
@@ -2339,9 +2405,9 @@ function requestMeta(request: FastifyRequest) {
   };
 }
 
-function getHealth(db: DibaoDatabase): HealthResponse {
+export function getHealth(db: DibaoDatabase): HealthResponse {
   const database = checkHealth(() => {
-    db.prepare("select 1 as ok").get();
+    checkDatabaseIntegrity(db);
   });
   const fts = checkHealth(() => {
     db.prepare("select count(*) as count from article_fts").get();
@@ -2359,6 +2425,15 @@ function getHealth(db: DibaoDatabase): HealthResponse {
   };
 }
 
+function checkDatabaseIntegrity(db: DibaoDatabase): void {
+  db.prepare("select 1 as ok").get();
+
+  const quickCheck = db.pragma("quick_check(1)", { simple: true });
+  if (quickCheck !== "ok") {
+    throw new Error("SQLite quick_check failed");
+  }
+}
+
 function checkHealth(fn: () => void): HealthStatus {
   try {
     fn();
@@ -2372,7 +2447,8 @@ function getSetupStatus(
   setupCompleted: boolean,
   hasFeeds: boolean,
   hasEmbeddingProvider: boolean,
-  derivedDataUpgrade: DerivedDataUpgradeStatus
+  derivedDataUpgrade: DerivedDataUpgradeStatus,
+  optionalPluginSteps: unknown[] = []
 ): SetupStatusResponse {
   const status: SetupStatusResponse = {
     setupCompleted,
@@ -2380,6 +2456,9 @@ function getSetupStatus(
     hasEmbeddingProvider,
     firstRefreshStatus: "idle"
   };
+  if (optionalPluginSteps.length > 0) {
+    status.optionalPluginSteps = optionalPluginSteps;
+  }
   if (derivedDataUpgrade.blocking || derivedDataUpgrade.state === "pending") {
     status.derivedDataUpgrade = derivedDataUpgrade;
   }
@@ -3944,6 +4023,25 @@ function parseJobQuery(query: JobQuery):
   };
 }
 
+function parseOptionalPluginBody(
+  body: OptionalPluginBody | undefined
+): { ok: true; enabled: boolean; timezone?: string } | { ok: false; message: string; details?: unknown } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, message: "request body must be an object" };
+  }
+  if (typeof body.enabled !== "boolean") {
+    return {
+      ok: false,
+      message: "enabled must be a boolean",
+      details: { field: "enabled" }
+    };
+  }
+  const timezone = typeof body.timezone === "string" && body.timezone.trim()
+    ? body.timezone.trim()
+    : undefined;
+  return { ok: true, enabled: body.enabled, ...(timezone ? { timezone } : {}) };
+}
+
 function parseArticleQuery(
   query: ArticleQuery,
   now: (() => number) | undefined
@@ -4914,10 +5012,13 @@ function parseJobType(value: string | undefined): JobType | undefined | null {
     value === INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE ||
     value === INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE ||
     value === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE ||
-    value === INTEREST_FAMILY_REBUILD_JOB_TYPE ||
-    value.startsWith("plugin:")
+    value === INTEREST_FAMILY_REBUILD_JOB_TYPE
   ) {
     return value as JobType;
+  }
+
+  if (value.startsWith("plugin:")) {
+    return value as PluginJobType;
   }
 
   return null;

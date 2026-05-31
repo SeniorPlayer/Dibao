@@ -31,6 +31,7 @@ import {
   type FullContentPreviewResponse,
   type LatestReleaseStatus,
   type OpmlImportResponse,
+  type PluginListItem,
   type RankExplanation,
   type RankExplanationReason,
   type ReadLaterArticleSort,
@@ -73,7 +74,7 @@ import {
   readStoredTelemetryPreference,
   storeTelemetryPreference
 } from "./telemetry.js";
-import { PwaStatusBanner, SetupWelcomePanel, AuthGatePanel, DerivedDataUpgradePanel, SetupSourcesPanel } from "./setup/SetupPanels.js";
+import { PwaStatusBanner, SetupWelcomePanel, AuthGatePanel, DerivedDataUpgradePanel, SetupSourcesPanel, SetupOptionalPluginsPanel } from "./setup/SetupPanels.js";
 import { FeedPanel, ArticleListPanel, SearchResultsPanel, ArticleDetailPanel, ArticleExplanationDialog, NavigationIcon, ActionIcon } from "./reader/ReaderPanels.js";
 import {
   actionErrorMessageFor,
@@ -181,6 +182,9 @@ export function App() {
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [pluginContributions, setPluginContributions] = useState<PluginListItem[]>([]);
+  const [pluginError, setPluginError] = useState<string | null>(null);
+  const [optionalPluginDecisionId, setOptionalPluginDecisionId] = useState<string | null>(null);
   const [embeddingProviders, setEmbeddingProviders] = useState<EmbeddingProvider[]>([]);
   const [embeddingIndexes, setEmbeddingIndexes] = useState<EmbeddingIndex[]>([]);
   const [isEmbeddingLoading, setIsEmbeddingLoading] = useState(false);
@@ -687,6 +691,34 @@ export function App() {
       if (timer !== null) {
         window.clearTimeout(timer);
       }
+    };
+  }, [appStage.type, t.errors.api]);
+
+  useEffect(() => {
+    if (appStage.type !== "reader") {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPluginContributions() {
+      try {
+        const plugins = await dibaoApi.listPluginContributions();
+        if (!cancelled) {
+          setPluginContributions(plugins);
+          setPluginError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPluginError(userMessageForError(error, t.errors.api));
+        }
+      }
+    }
+
+    void loadPluginContributions();
+
+    return () => {
+      cancelled = true;
     };
   }, [appStage.type, t.errors.api]);
 
@@ -1375,11 +1407,28 @@ export function App() {
     const status = await dibaoApi.getSetupStatus();
     if (status.hasFeeds) {
       setSetupSourceError(null);
-      setAppStage({ type: "setup-provider" });
+      const nextStage = stageForSetupStatus(status);
+      setAppStage(nextStage.type === "setup-sources" ? { type: "setup-provider" } : nextStage);
       return;
     }
 
     setSetupSourceError(noFeedsMessage);
+  }
+
+  async function handleOptionalPluginDecision(pluginId: string, enabled: boolean) {
+    setOptionalPluginDecisionId(pluginId);
+    setAuthError(null);
+
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+      await dibaoApi.selectOptionalPlugin(pluginId, { enabled, timezone });
+      setPluginContributions(await dibaoApi.listPluginContributions());
+      setAppStage({ type: "setup-provider" });
+    } catch (error) {
+      setAuthError(userMessageForError(error, t.errors.api));
+    } finally {
+      setOptionalPluginDecisionId(null);
+    }
   }
 
   async function handleSetupAddFeed(event: FormEvent<HTMLFormElement>) {
@@ -2264,6 +2313,15 @@ export function App() {
     navigateToAppPage(page);
   }
 
+  function handlePluginNavigationClick(event: MouseEvent<HTMLAnchorElement>, page: AppPage) {
+    if (shouldLetBrowserHandleLinkClick(event)) {
+      return;
+    }
+    event.preventDefault();
+    setIsUtilityMenuOpen(false);
+    navigateToAppPage(page);
+  }
+
   const noticeText = notice ? noticeTextFor(notice, t) : null;
   const pwaStatusBanner = (
     <PwaStatusBanner
@@ -2271,6 +2329,23 @@ export function App() {
       onApplyUpdate={pwaUpdateApply}
       onDismissUpdate={() => setPwaUpdateApply(null)}
     />
+  );
+  const activePlugin =
+    appPage.type === "plugin"
+      ? pluginContributions.find((plugin) => plugin.id === appPage.pluginId) ?? null
+      : null;
+  const activePluginRoute =
+    activePlugin && appPage.type === "plugin"
+      ? activePlugin.contributions.routes.find((route) => route.id === appPage.route) ??
+        activePlugin.contributions.routes[0] ??
+        null
+      : null;
+  const pluginNavItems = pluginContributions.flatMap((plugin) =>
+    plugin.contributions.primaryNav.map((nav) => ({
+      plugin,
+      nav,
+      page: { type: "plugin", pluginId: plugin.id, route: nav.route } satisfies AppPage
+    }))
   );
   const pageTitle =
     appPage.type === "feed-management"
@@ -2281,6 +2356,8 @@ export function App() {
         ? t.search.pageTitle
       : appPage.type === "settings"
         ? t.settings.pageTitle
+        : appPage.type === "plugin"
+          ? activePluginRoute?.title ?? activePlugin?.name ?? "Plugin"
         : appPage.type === "algorithm-transparency" || appPage.type === "algorithm-clusters"
           ? t.algorithmTransparency.pageTitle
           : t.shell.pageTitles[currentArticleView];
@@ -2303,6 +2380,8 @@ export function App() {
           embeddingError ??
           noticeText ??
           (isSettingsLoading || isEmbeddingLoading ? t.settings.loading : t.settings.status)
+        : appPage.type === "plugin"
+          ? pluginError ?? activePlugin?.name ?? "Plugin"
         : appPage.type === "algorithm-transparency"
           ? recommendationStatusError ??
             (isRecommendationStatusLoading
@@ -2386,6 +2465,20 @@ export function App() {
     );
   }
 
+  if (appStage.type === "setup-optional-plugins") {
+    return (
+      <main className={styles.authShell}>
+        {pwaStatusBanner}
+        <SetupOptionalPluginsPanel
+          busyPluginId={optionalPluginDecisionId}
+          error={authError}
+          onDecision={handleOptionalPluginDecision}
+          plugins={appStage.plugins}
+        />
+      </main>
+    );
+  }
+
   if (appStage.type === "setup-provider") {
     return (
       <main className={styles.authShell}>
@@ -2452,6 +2545,19 @@ export function App() {
               </a>
             );
           })}
+          {pluginNavItems.map(({ plugin, nav, page }) => (
+            <a
+              aria-label={nav.label}
+              className={sameAppPage(appPage, page) ? styles.navItemActive : styles.navItem}
+              href={urlForAppPage(page)}
+              key={`${plugin.id}:${nav.route}`}
+              onClick={(event) => handlePluginNavigationClick(event, page)}
+              title={nav.label}
+            >
+              <ActionIcon name={iconNameForPlugin(nav.icon)} />
+              <span className={styles.navLabel}>{nav.label}</span>
+            </a>
+          ))}
           <button
             aria-controls="mobile-utility-menu"
             aria-expanded={isUtilityMenuOpen}
@@ -2493,6 +2599,18 @@ export function App() {
                   </a>
                 );
               })}
+              {pluginNavItems.map(({ plugin, nav, page }) => (
+                <a
+                  className={styles.utilityMenuItem}
+                  href={urlForAppPage(page)}
+                  key={`${plugin.id}:${nav.route}`}
+                  onClick={(event) => handlePluginNavigationClick(event, page)}
+                  role="menuitem"
+                >
+                  <ActionIcon name={iconNameForPlugin(nav.icon)} />
+                  <span>{nav.label}</span>
+                </a>
+              ))}
             </div>
           ) : null}
         </nav>
@@ -2594,6 +2712,15 @@ export function App() {
             settings={appSettings}
           />
           </Suspense>
+        ) : appPage.type === "plugin" ? (
+          <PluginWorkspace
+            plugin={activePlugin}
+            route={appPage.route}
+            onOpenArticle={(articleId) => {
+              navigateToAppPage({ type: "reader", view: currentArticleView });
+              setSelectedArticleId(articleId);
+            }}
+          />
         ) : appPage.type === "algorithm-transparency" ? (
           <Suspense fallback={<p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>}>
           <LazyAlgorithmTransparencyPage
@@ -2817,4 +2944,76 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function PluginWorkspace(props: {
+  plugin: PluginListItem | null;
+  route: string;
+  onOpenArticle: (articleId: string) => void;
+}) {
+  const { t } = useI18n();
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const data = event.data as { type?: unknown; articleId?: unknown };
+      if (data.type === "dibao.openArticle" && typeof data.articleId === "string") {
+        props.onOpenArticle(data.articleId);
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [props.onOpenArticle]);
+
+  if (!props.plugin) {
+    return (
+      <section className={styles.pluginWorkspace}>
+        <div className={styles.emptyState}>
+          <strong>插件不可用</strong>
+          <p>这个插件尚未启用，或当前贡献点已经失效。</p>
+        </div>
+      </section>
+    );
+  }
+
+  const baseUrl =
+    props.plugin.webEntryUrl ??
+    `/api/plugins/${encodeURIComponent(props.plugin.id)}/assets/web/index.html`;
+  const params = new URLSearchParams();
+  params.set("route", props.route);
+  if (props.route === "settings") {
+    params.set("panel", "settings");
+  }
+
+  return (
+    <section className={styles.pluginWorkspace} aria-label={props.plugin.name}>
+      <iframe
+        className={styles.pluginFrame}
+        src={`${baseUrl}?${params.toString()}`}
+        title={props.plugin.name || t.common.brandName}
+      />
+    </section>
+  );
+}
+
+function iconNameForPlugin(icon: string | undefined): Parameters<typeof ActionIcon>[0]["name"] {
+  if (icon === "settings" || icon === "gear") {
+    return "gear";
+  }
+  if (icon === "search") {
+    return "search";
+  }
+  if (icon === "star" || icon === "favorites") {
+    return "star";
+  }
+  if (icon === "bookmark" || icon === "read_later") {
+    return "bookmark";
+  }
+  if (icon === "sparkle" || icon === "recommended") {
+    return "sparkle";
+  }
+  return "feed";
 }
