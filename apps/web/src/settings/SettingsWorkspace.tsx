@@ -17,9 +17,9 @@ const settingsTabLabels: Record<SettingsTabId, { zhCN: string; enUS: string; jaJ
 };
 
 const pluginInstallDocsUrl: Record<AppSettings["ui"]["locale"], string> = {
-  "zh-CN": "https://github.com/Pls-1q43/Dibao/blob/0.2/docs/plugin-installation.zh-CN.md",
-  "en-US": "https://github.com/Pls-1q43/Dibao/blob/0.2/docs/plugin-installation.en-US.md",
-  "ja-JP": "https://github.com/Pls-1q43/Dibao/blob/0.2/docs/plugin-installation.en-US.md"
+  "zh-CN": "https://docs.dibao.app/zh/plugins/installation/",
+  "en-US": "https://docs.dibao.app/en/plugins/installation/",
+  "ja-JP": "https://docs.dibao.app/ja/plugins/installation/"
 };
 
 const pluginCopy = {
@@ -379,6 +379,32 @@ export function SettingsWorkspace(props: {
         <div>
           <p className={styles.kicker}>{t.navigation.items.settings}</p>
           <h2 id="settings-title">{t.settings.pageTitle}</h2>
+          <div className={styles.settingsTabBar} aria-label={t.settings.pageTitle}>
+            {(["basic", "algorithm", "plugins"] as const).map((tabId) => {
+              const labels = settingsTabLabels[tabId];
+              const label =
+                props.settings.ui.locale === "en-US"
+                  ? labels.enUS
+                  : props.settings.ui.locale === "ja-JP"
+                    ? labels.jaJP
+                    : labels.zhCN;
+              return (
+                <button
+                  aria-pressed={activeTab === tabId}
+                  className={
+                    activeTab === tabId
+                      ? styles.feedDiagnosticFilterActive
+                      : styles.feedDiagnosticFilter
+                  }
+                  key={tabId}
+                  onClick={() => setActiveTab(tabId)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <button
           className={styles.primaryButton}
@@ -394,33 +420,6 @@ export function SettingsWorkspace(props: {
         {props.isLoading ? <p className={styles.settingsNotice}>{t.settings.loading}</p> : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
         {localError ? <p className={styles.errorText}>{localError}</p> : null}
-
-        <div className={styles.segmentedControl} aria-label={t.settings.pageTitle}>
-          {(["basic", "algorithm", "plugins"] as const).map((tabId) => {
-            const labels = settingsTabLabels[tabId];
-            const label =
-              props.settings.ui.locale === "en-US"
-                ? labels.enUS
-                : props.settings.ui.locale === "ja-JP"
-                  ? labels.jaJP
-                  : labels.zhCN;
-            return (
-              <button
-                aria-pressed={activeTab === tabId}
-                className={
-                  activeTab === tabId
-                    ? styles.segmentedControlActive
-                    : styles.segmentedControlButton
-                }
-                key={tabId}
-                onClick={() => setActiveTab(tabId)}
-                type="button"
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
 
         <section className={classNames(styles.settingsSection, "settings-card")} hidden={activeTab !== "basic"} aria-labelledby="settings-language-title">
           <div>

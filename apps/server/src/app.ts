@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, {
   type FastifyInstance,
@@ -2216,11 +2216,34 @@ function decodeStaticPathname(pathname: string): string | null {
 
 function sendStaticFile(reply: FastifyReply, method: string, filePath: string) {
   reply.type(contentTypeForStaticFile(filePath));
+  applyStaticCacheHeaders(reply, filePath);
   if (method.toUpperCase() === "HEAD") {
     return reply.send();
   }
 
   return reply.send(readFileSync(filePath));
+}
+
+function applyStaticCacheHeaders(reply: FastifyReply, filePath: string): void {
+  const fileName = basename(filePath);
+  const extension = extname(filePath).toLowerCase();
+
+  if (fileName === "index.html") {
+    reply.header("Cache-Control", "no-store");
+    return;
+  }
+
+  if (fileName === "sw.js" || extension === ".webmanifest") {
+    reply.header("Cache-Control", "no-cache, no-store, must-revalidate");
+    return;
+  }
+
+  if (filePath.includes(`${sep}assets${sep}`)) {
+    reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+  }
+
+  reply.header("Cache-Control", "public, max-age=3600");
 }
 
 function contentTypeForStaticFile(filePath: string): string {

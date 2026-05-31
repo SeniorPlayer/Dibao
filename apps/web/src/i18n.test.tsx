@@ -375,8 +375,7 @@ describe("web i18n", () => {
     expect(sourcesHtml).toContain("网站或 RSS / Atom URL");
     expect(providerHtml).toContain("推荐能力");
     expect(providerHtml).toContain("查看这里选择合适的（免费）Provider。");
-    expect(providerHtml).toContain("tree/main");
-    expect(providerHtml).toContain("#%E6%8E%A8%E8%8D%90-provider");
+    expect(providerHtml).toContain("https://docs.dibao.app/zh/providers/");
     expect(providerHtml).toContain("跳过，使用基础排序");
     expect(providerHtml).toContain("保存配置并测试连接");
     expect(providerHtml).toContain("API Key");
@@ -386,11 +385,9 @@ describe("web i18n", () => {
     expect(testedProviderHtml).toContain("启用 Provider 并继续");
     expect(testedProviderHtml).not.toContain("保存配置并测试连接</button>");
     expect(testedProviderHtml).not.toContain("删除");
-    expect(providerEnglishHtml).toContain("tree/main");
-    expect(providerEnglishHtml).toContain("#%E6%8E%A8%E8%8D%90-provider");
-    expect(providerJapaneseHtml).toContain("README.ja.md");
-    expect(providerJapaneseHtml).toContain("blob/main");
-    expect(providerJapaneseHtml).not.toContain("%E3%81%8A%E3%81%99%E3%81%99%E3%82%81-provider");
+    expect(providerEnglishHtml).toContain("https://docs.dibao.app/en/providers/");
+    expect(providerJapaneseHtml).toContain("https://docs.dibao.app/ja/providers/");
+    expect(providerJapaneseHtml).not.toContain("README.ja.md");
   });
 
   it("renders OPML, folder, and pagination copy from the dictionary", () => {
@@ -1129,7 +1126,7 @@ describe("web i18n", () => {
     expect(html).toContain("新的向量空间");
     expect(html).toContain("测试连接");
     expect(html).toContain("查看插件安装说明");
-    expect(html).toContain("plugin-installation.zh-CN.md");
+    expect(html).toContain("https://docs.dibao.app/zh/plugins/installation/");
     expect(html).not.toContain("插件包 URL");
     expect(html).not.toContain("插件包 JSON");
     expect(html.indexOf("智能能力")).toBeLessThan(html.indexOf("关于"));

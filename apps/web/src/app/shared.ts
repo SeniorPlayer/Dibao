@@ -478,14 +478,14 @@ export function supportedProviderType(
 
 export function providerRecommendationReadmeUrl(locale: Locale): string {
   if (locale === "en-US") {
-    return "https://github.com/Pls-1q43/Dibao/tree/main?tab=readme-ov-file#%E6%8E%A8%E8%8D%90-provider";
+    return "https://docs.dibao.app/en/providers/";
   }
 
   if (locale === "ja-JP") {
-    return "https://github.com/Pls-1q43/Dibao/blob/main/README.ja.md";
+    return "https://docs.dibao.app/ja/providers/";
   }
 
-  return "https://github.com/Pls-1q43/Dibao/tree/main?tab=readme-ov-file#%E6%8E%A8%E8%8D%90-provider";
+  return "https://docs.dibao.app/zh/providers/";
 }
 
 export function parseSettingsDraft(

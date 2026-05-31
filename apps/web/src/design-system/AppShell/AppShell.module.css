@@ -819,6 +819,13 @@
   line-height: 1.25;
 }
 
+.settingsTabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 .settingsContent {
   width: min(100%, var(--layout-settings-max));
   min-height: 0;

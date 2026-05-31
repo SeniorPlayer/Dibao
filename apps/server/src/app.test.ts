@@ -100,11 +100,14 @@ describe("server API vertical slice", () => {
 
       expect(root.statusCode, root.body).toBe(200);
       expect(root.headers["content-type"]).toContain("text/html");
+      expect(root.headers["cache-control"]).toBe("no-store");
       expect(root.body).toContain("Dibao shell");
       expect(asset.statusCode, asset.body).toBe(200);
       expect(asset.headers["content-type"]).toContain("text/javascript");
+      expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
       expect(asset.body).toContain("dibao");
       expect(spaRoute.statusCode, spaRoute.body).toBe(200);
+      expect(spaRoute.headers["cache-control"]).toBe("no-store");
       expect(spaRoute.body).toContain("Dibao shell");
       expect(head.statusCode, head.body).toBe(200);
       expect(head.body).toBe("");
@@ -305,6 +308,7 @@ describe("server API vertical slice", () => {
 
       expect(manifest.statusCode, manifest.body).toBe(200);
       expect(manifest.headers["content-type"]).toContain("application/manifest+json");
+      expect(manifest.headers["cache-control"]).toBe("no-cache, no-store, must-revalidate");
       const manifestJson = manifest.json() as {
         icons: Array<{ sizes: string }>;
         scope: string;
@@ -317,6 +321,7 @@ describe("server API vertical slice", () => {
 
       expect(serviceWorker.statusCode, serviceWorker.body).toBe(200);
       expect(serviceWorker.headers["content-type"]).toMatch(/javascript/);
+      expect(serviceWorker.headers["cache-control"]).toBe("no-cache, no-store, must-revalidate");
       expect(serviceWorker.body).toContain("fetch");
 
       expect(searchRoute.statusCode, searchRoute.body).toBe(200);
