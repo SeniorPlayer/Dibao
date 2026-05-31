@@ -472,6 +472,7 @@ describe("web i18n", () => {
             title: "设计",
             sortOrder: 0
           }}
+          sourceSelection={{ type: "folder", folderId: "folder_design" }}
           showRecommendationStatus={false}
           showQuickFilters={true}
           timeWindow="all"
@@ -561,6 +562,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "all" }}
           showRecommendationStatus
           showQuickFilters={true}
           timeWindow="all"
@@ -637,6 +639,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "folder", folderId: "folder_design" }}
           showRecommendationStatus={false}
           showQuickFilters={true}
           timeWindow="all"
@@ -647,6 +650,7 @@ describe("web i18n", () => {
     );
 
     expect(html).toContain("摘要 正文 &amp; 线索");
+    expect(html).toContain("view=latest&amp;folderId=folder_design&amp;article=article_html_summary");
     expect(html).not.toContain("&lt;strong&gt;");
   });
 
@@ -685,6 +689,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "all" }}
           showRecommendationStatus={false}
           showQuickFilters={true}
           timeWindow="all"
@@ -726,6 +731,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "all" }}
           showRecommendationStatus={false}
           showQuickFilters={true}
           timeWindow="all"
@@ -774,6 +780,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "all" }}
           showRecommendationStatus={false}
           showQuickFilters={false}
           timeWindow="all"
@@ -815,6 +822,7 @@ describe("web i18n", () => {
           selectedArticleId={null}
           selectedFeed={null}
           selectedFolder={null}
+          sourceSelection={{ type: "all" }}
           showRecommendationStatus={false}
           showQuickFilters={false}
           timeWindow="all"
@@ -1020,21 +1028,23 @@ describe("web i18n", () => {
           onUpdateFeed={() => Promise.resolve()}
           onUpdateFeedUrl={() => undefined}
           onUpdateFolder={() => Promise.resolve()}
+          onViewFeedArticles={() => undefined}
+          onViewFolderArticles={() => undefined}
           opmlSummary={null}
           refreshingFeedId={null}
         />
       </DibaoI18nProvider>
     );
 
-    expect(html).toContain("新建分组");
+    expect(html).toContain("订阅源管理");
+    expect(html).toContain("订阅源分组管理");
     expect(html).toContain("导入 OPML");
     expect(html).toContain("导出 OPML");
     expect(html).toContain("刷新全部");
     expect(html).toContain("检查");
     expect(html).toContain("网站或 RSS / Atom URL");
     expect(html).toContain("订阅源健康");
-    expect(html).toContain("导入、导出与刷新");
-    expect(html).toContain("重命名");
+    expect(html).toContain("查看文章");
     expect(html).toContain("删除");
     expect(html).toContain("Design Feed");
     expect(html).toContain("Feed URL");
@@ -1103,7 +1113,7 @@ describe("web i18n", () => {
     expect(html).toContain("保留天数");
     expect(html).toContain("retention.retentionDays");
     expect(html).toContain("关于");
-    expect(html).toContain("v0.1.1");
+    expect(html).toContain("v0.1.2");
     expect(html).toContain("评论尸");
     expect(html).toContain("https://x.com/JeffreyCalm");
     expect(html).toContain("https://1q43.blog");

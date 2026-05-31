@@ -6,6 +6,7 @@ import {
   type EmbeddingTestResult,
   type EmbeddingVector
 } from "./types.js";
+import { providerHttpError, providerNetworkError } from "./provider-http-errors.js";
 
 export const OLLAMA_TEST_TEXT = "Dibao embedding provider test";
 export const OLLAMA_TIMEOUT_MS = 30_000;
@@ -98,14 +99,12 @@ export class OllamaEmbeddingAdapter implements EmbeddingProviderAdapter {
       const payload = parseJson(text);
 
       if (!response.ok) {
-        throw new EmbeddingProviderError(
-          "Ollama request failed",
-          response.status === 429 || response.status >= 500,
-          {
-            status: response.status,
-            body: payload ?? text.slice(0, 500)
-          }
-        );
+        throw providerHttpError({
+          providerLabel: "Ollama",
+          status: response.status,
+          payload,
+          text
+        });
       }
 
       return payload;
@@ -114,15 +113,7 @@ export class OllamaEmbeddingAdapter implements EmbeddingProviderAdapter {
         throw error;
       }
 
-      throw new EmbeddingProviderError(
-        error instanceof Error && error.name === "AbortError"
-          ? "Ollama request timed out"
-          : "Ollama request failed",
-        true,
-        {
-          cause: error instanceof Error ? error.message : String(error)
-        }
-      );
+      throw providerNetworkError({ providerLabel: "Ollama", error });
     } finally {
       clearTimeout(timeout);
     }
@@ -142,7 +133,10 @@ function parseOllamaEmbedResponse(
   items: EmbeddingInput[]
 ): EmbeddingVector[] {
   if (!isOllamaEmbedResponse(payload) || !Array.isArray(payload.embeddings)) {
-    throw new EmbeddingProviderError("Ollama response must include embeddings array", false);
+    throw new EmbeddingProviderError(
+      "Ollama provider returned a malformed response: missing embeddings array",
+      false
+    );
   }
 
   if (payload.embeddings.length !== items.length) {
@@ -158,9 +152,13 @@ function parseOllamaEmbedResponse(
 
   return payload.embeddings.map((embedding, index) => {
     if (!Array.isArray(embedding) || !embedding.every(isFiniteNumber)) {
-      throw new EmbeddingProviderError("Ollama embedding must be a number array", false, {
-        index
-      });
+      throw new EmbeddingProviderError(
+        "Ollama provider returned a malformed response: embedding must be a number array",
+        false,
+        {
+          index
+        }
+      );
     }
 
     return {
