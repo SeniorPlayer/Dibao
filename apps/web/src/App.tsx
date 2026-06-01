@@ -2621,7 +2621,6 @@ export function App() {
       <section className={styles.content} aria-labelledby="page-title">
         <header className={styles.topbar}>
           <div>
-            <p className={styles.kicker}>{t.shell.kicker}</p>
             <h1 id="page-title">{pageTitle}</h1>
           </div>
           <div className={styles.topbarMeta}>
@@ -3049,7 +3048,6 @@ export function AuthGatePanel(props: {
         </span>
       </div>
       <div>
-        <p className={styles.kicker}>{t.shell.kicker}</p>
         <h1 id="auth-title">{title}</h1>
         <p>{body}</p>
       </div>

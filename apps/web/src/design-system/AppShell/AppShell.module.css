@@ -448,7 +448,7 @@
 
 .feedManagementSection {
   display: grid;
-  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -584,6 +584,34 @@
   border-bottom: var(--border-subtle);
   padding: var(--space-4);
   background: var(--color-surface);
+}
+
+.feedManagementControls {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(420px, 1.25fr) minmax(360px, 0.85fr);
+  align-items: start;
+  border-bottom: var(--border-default);
+  background: var(--color-surface);
+}
+
+.feedManagementControls > .managementForm {
+  align-self: stretch;
+  padding: var(--space-3) var(--space-4);
+}
+
+.feedManagementControls > .feedDiagnosticsPanel {
+  min-height: 100%;
+  border-bottom: 0;
+  border-left: var(--border-default);
+  padding: var(--space-3) var(--space-4);
+}
+
+.feedManagementControls > .feedDiscoveryPanel,
+.feedManagementControls > .opmlSummary,
+.feedManagementControls > .errorText {
+  grid-column: 1 / -1;
+  border-top: var(--border-subtle);
 }
 
 .feedDiscoveryHeader,
@@ -3201,6 +3229,16 @@
 @media (max-width: 1180px) {
   .workspace {
     grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  }
+
+  .feedManagementControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feedManagementControls > .feedDiagnosticsPanel {
+    min-height: 0;
+    border-top: var(--border-subtle);
+    border-left: 0;
   }
 
   .feedManagementGrid {

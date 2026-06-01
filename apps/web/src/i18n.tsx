@@ -28,7 +28,6 @@ export const zhCN = {
     }
   },
   shell: {
-    kicker: "RSS Ingestion",
     pageTitle: "最新文章",
     pageTitles: {
       latest: "最新文章",
@@ -1325,7 +1324,6 @@ export const enUS = {
     }
   },
   shell: {
-    kicker: "RSS feeds",
     pageTitle: "Latest",
     pageTitles: {
       latest: "Latest",
@@ -2613,7 +2611,6 @@ export const jaJP = {
     }
   },
   shell: {
-    kicker: "RSS Ingestion",
     pageTitle: "最新記事",
     pageTitles: {
       latest: "最新記事",

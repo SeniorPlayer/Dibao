@@ -340,99 +340,101 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
           </div>
         </div>
 
-        {props.opmlSummary ? (
-          <div className={styles.opmlSummary}>
-            <p>
-              {t.opml.importSummary(
-                props.opmlSummary.feedsCreated,
-                props.opmlSummary.feedsSkipped,
-                props.opmlSummary.foldersCreated
-              )}
-            </p>
-            {props.opmlSummary.errors.length > 0 ? (
-              <>
-                <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
-                <ul>
-                  {props.opmlSummary.errors.map((summaryError, index) => (
-                    <li key={`${summaryError}-${index}`}>{summaryError}</li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-
-        <form className={styles.managementForm} onSubmit={props.onAddFeed}>
-          <label htmlFor="managed-new-feed-url">{t.feeds.inputLabel}</label>
-          <div className={styles.managementInlineForm}>
-            <input
-              id="managed-new-feed-url"
-              inputMode="url"
-              onChange={(event) => props.onUpdateFeedUrl(event.target.value)}
-              placeholder={t.feeds.inputPlaceholder}
-              type="url"
-              value={props.feedUrl}
-            />
-            <button
-              className={styles.primaryButton}
-              disabled={props.isAddingFeed || props.isDiscoveringFeeds}
-              type="submit"
-            >
-              {props.isDiscoveringFeeds ? t.feedDiscovery.checking : t.feedDiscovery.check}
-            </button>
-          </div>
-        </form>
-
-        <ManagementFeedDiscoveryPanel
-          discovery={props.feedDiscovery}
-          error={props.feedDiscoveryError}
-          isAddingFeed={props.isAddingFeed}
-          onAddCandidate={props.onAddCandidate}
-        />
-
-        <section className={styles.feedDiagnosticsPanel} aria-labelledby="feed-diagnostics-title">
-          <div className={styles.feedDiagnosticsHeader}>
-            <div>
-              <h3 id="feed-diagnostics-title">{t.feedDiagnostics.title}</h3>
+        <div className={styles.feedManagementControls}>
+          {props.opmlSummary ? (
+            <div className={styles.opmlSummary}>
               <p>
-                {props.diagnostics
-                  ? t.feedDiagnostics.summary(
-                      props.diagnostics.summary.total,
-                      props.diagnostics.summary.error,
-                      props.diagnostics.summary.warning
-                    )
-                  : props.isFeedDiagnosticsLoading
-                    ? t.feedManagement.loading
-                    : t.feedManagement.na}
+                {t.opml.importSummary(
+                  props.opmlSummary.feedsCreated,
+                  props.opmlSummary.feedsSkipped,
+                  props.opmlSummary.foldersCreated
+                )}
               </p>
+              {props.opmlSummary.errors.length > 0 ? (
+                <>
+                  <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
+                  <ul>
+                    {props.opmlSummary.errors.map((summaryError, index) => (
+                      <li key={`${summaryError}-${index}`}>{summaryError}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </div>
-            <div className={styles.feedDiagnosticSummaryPills}>
-              <span>{t.feedDiagnostics.statuses.healthy}: {props.diagnostics?.summary.healthy ?? 0}</span>
-              <span>{t.feedDiagnostics.statuses.failing}: {props.diagnostics?.summary.error ?? 0}</span>
-              <span>{t.feedDiagnostics.statuses.never_fetched}: {props.diagnostics?.summary.neverFetched ?? 0}</span>
-              <span>{t.feedDiagnostics.statuses.disabled}: {props.diagnostics?.summary.disabled ?? 0}</span>
-            </div>
-          </div>
-          <div className={styles.feedDiagnosticFilters} aria-label={t.feedDiagnostics.title}>
-            {(["all", "unhealthy", "disabled", "neverFetched"] as const).map((filter) => (
-              <button
-                className={
-                  diagnosticFilter === filter
-                    ? styles.feedDiagnosticFilterActive
-                    : styles.feedDiagnosticFilter
-                }
-                key={filter}
-                onClick={() => setDiagnosticFilter(filter)}
-                type="button"
-              >
-                {t.feedDiagnostics.filters[filter]}
-              </button>
-            ))}
-          </div>
-        </section>
+          ) : null}
 
-        {props.feedError ? <p className={styles.errorText}>{props.feedError}</p> : null}
-        {error ? <p className={styles.errorText}>{error}</p> : null}
+          <form className={styles.managementForm} onSubmit={props.onAddFeed}>
+            <label htmlFor="managed-new-feed-url">{t.feeds.inputLabel}</label>
+            <div className={styles.managementInlineForm}>
+              <input
+                id="managed-new-feed-url"
+                inputMode="url"
+                onChange={(event) => props.onUpdateFeedUrl(event.target.value)}
+                placeholder={t.feeds.inputPlaceholder}
+                type="url"
+                value={props.feedUrl}
+              />
+              <button
+                className={styles.primaryButton}
+                disabled={props.isAddingFeed || props.isDiscoveringFeeds}
+                type="submit"
+              >
+                {props.isDiscoveringFeeds ? t.feedDiscovery.checking : t.feedDiscovery.check}
+              </button>
+            </div>
+          </form>
+
+          <section className={styles.feedDiagnosticsPanel} aria-labelledby="feed-diagnostics-title">
+            <div className={styles.feedDiagnosticsHeader}>
+              <div>
+                <h3 id="feed-diagnostics-title">{t.feedDiagnostics.title}</h3>
+                <p>
+                  {props.diagnostics
+                    ? t.feedDiagnostics.summary(
+                        props.diagnostics.summary.total,
+                        props.diagnostics.summary.error,
+                        props.diagnostics.summary.warning
+                      )
+                    : props.isFeedDiagnosticsLoading
+                      ? t.feedManagement.loading
+                      : t.feedManagement.na}
+                </p>
+              </div>
+              <div className={styles.feedDiagnosticSummaryPills}>
+                <span>{t.feedDiagnostics.statuses.healthy}: {props.diagnostics?.summary.healthy ?? 0}</span>
+                <span>{t.feedDiagnostics.statuses.failing}: {props.diagnostics?.summary.error ?? 0}</span>
+                <span>{t.feedDiagnostics.statuses.never_fetched}: {props.diagnostics?.summary.neverFetched ?? 0}</span>
+                <span>{t.feedDiagnostics.statuses.disabled}: {props.diagnostics?.summary.disabled ?? 0}</span>
+              </div>
+            </div>
+            <div className={styles.feedDiagnosticFilters} aria-label={t.feedDiagnostics.title}>
+              {(["all", "unhealthy", "disabled", "neverFetched"] as const).map((filter) => (
+                <button
+                  className={
+                    diagnosticFilter === filter
+                      ? styles.feedDiagnosticFilterActive
+                      : styles.feedDiagnosticFilter
+                  }
+                  key={filter}
+                  onClick={() => setDiagnosticFilter(filter)}
+                  type="button"
+                >
+                  {t.feedDiagnostics.filters[filter]}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <ManagementFeedDiscoveryPanel
+            discovery={props.feedDiscovery}
+            error={props.feedDiscoveryError}
+            isAddingFeed={props.isAddingFeed}
+            onAddCandidate={props.onAddCandidate}
+          />
+
+          {props.feedError ? <p className={styles.errorText}>{props.feedError}</p> : null}
+          {error ? <p className={styles.errorText}>{error}</p> : null}
+        </div>
 
         <div className={styles.feedManagementGrid}>
           <div className={styles.managementList}>
