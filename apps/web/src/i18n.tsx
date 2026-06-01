@@ -35,6 +35,12 @@ export const zhCN = {
       favorites: "收藏文章",
       read_later: "稍后读"
     },
+    pageKickers: {
+      latest: "Latest",
+      recommended: "For You",
+      favorites: "Favorites",
+      read_later: "Read Later"
+    },
     loadingArticles: "正在加载文章",
     latestView: "最新视图",
     viewStatus: {
@@ -45,6 +51,7 @@ export const zhCN = {
     }
   },
   search: {
+    kicker: "Search",
     pageTitle: "搜索",
     title: "搜索文章",
     body: "在本地文章库中搜索标题、摘要和正文。",
@@ -248,6 +255,7 @@ export const zhCN = {
     feedCount: (count: number) => `${count} 个订阅源`
   },
   feedManagement: {
+    kicker: "Feed Management",
     pageTitle: "订阅源管理",
     loading: "正在加载订阅源",
     status: (feedCount: number, folderCount: number) =>
@@ -344,6 +352,7 @@ export const zhCN = {
     }
   },
   settings: {
+    kicker: "Settings",
     pageTitle: "设置",
     loading: "正在加载设置",
     status: "设置已就绪",
@@ -695,6 +704,7 @@ export const zhCN = {
     }
   },
   algorithmTransparency: {
+    kicker: "Personalization Details",
     pageTitle: "算法透明说明",
     status: "算法说明已就绪",
     backToSettings: "返回设置",
@@ -1332,6 +1342,12 @@ export const enUS = {
       favorites: "Favorites",
       read_later: "Read Later"
     },
+    pageKickers: {
+      latest: "Latest",
+      recommended: "For You",
+      favorites: "Favorites",
+      read_later: "Read Later"
+    },
     loadingArticles: "Loading articles",
     latestView: "Latest",
     viewStatus: {
@@ -1342,6 +1358,7 @@ export const enUS = {
     }
   },
   search: {
+    kicker: "Search",
     pageTitle: "Search",
     title: "Search Articles",
     body: "Search titles, summaries, and full text in your local article library.",
@@ -1545,6 +1562,7 @@ export const enUS = {
     feedCount: (count: number) => `${count} ${count === 1 ? "feed" : "feeds"}`
   },
   feedManagement: {
+    kicker: "Feed Management",
     pageTitle: "Feed Management",
     loading: "Loading feeds",
     status: (feedCount: number, folderCount: number) =>
@@ -1642,6 +1660,7 @@ export const enUS = {
     }
   },
   settings: {
+    kicker: "Settings",
     pageTitle: "Settings",
     loading: "Loading settings",
     status: "Settings ready",
@@ -1987,6 +2006,7 @@ export const enUS = {
     }
   },
   algorithmTransparency: {
+    kicker: "Personalization Details",
     pageTitle: "Personalization Details",
     status: "Personalization details ready",
     backToSettings: "Back to settings",
@@ -2620,6 +2640,12 @@ export const jaJP = {
       favorites: "お気に入り記事",
       read_later: "あとで読む"
     },
+    pageKickers: {
+      latest: "Latest",
+      recommended: "For You",
+      favorites: "Favorites",
+      read_later: "Read Later"
+    },
     loadingArticles: "記事を読み込んでいます",
     latestView: "最新ビュー",
     viewStatus: {
@@ -2630,6 +2656,7 @@ export const jaJP = {
     }
   },
   search: {
+    kicker: "Search",
     pageTitle: "検索",
     title: "記事を検索",
     body: "ローカルの記事ライブラリから、タイトル、要約、本文を検索します。",
@@ -2833,6 +2860,7 @@ export const jaJP = {
     feedCount: (count: number) => `${count} 件のフィード`
   },
   feedManagement: {
+    kicker: "Feed Management",
     pageTitle: "フィード管理",
     loading: "フィードを読み込んでいます",
     status: (feedCount: number, folderCount: number) =>
@@ -2930,6 +2958,7 @@ export const jaJP = {
     }
   },
   settings: {
+    kicker: "Settings",
     pageTitle: "設定",
     loading: "設定を読み込んでいます",
     status: "設定は最新です",
@@ -3275,6 +3304,7 @@ export const jaJP = {
     }
   },
   algorithmTransparency: {
+    kicker: "Personalization Details",
     pageTitle: "アルゴリズムの透明性",
     status: "アルゴリズム情報は最新です",
     backToSettings: "設定に戻る",

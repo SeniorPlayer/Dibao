@@ -253,7 +253,7 @@ function sameAppPage(left: AppPage, right: AppPage): boolean {
 }
 
 export function App() {
-  const { t, setLocale } = useI18n();
+  const { locale, t, setLocale } = useI18n();
   const initialRoute = useMemo(
     () => routeFromLocation(defaultAppSettings.ui.defaultHomeView),
     []
@@ -2406,6 +2406,20 @@ export function App() {
         : appPage.type === "algorithm-transparency" || appPage.type === "algorithm-clusters"
           ? t.algorithmTransparency.pageTitle
           : t.shell.pageTitles[currentArticleView];
+  const pageKicker =
+    locale === "en-US"
+      ? null
+      : appPage.type === "feed-management"
+        ? t.feedManagement.kicker
+        : appPage.type === "full-content-preview"
+          ? t.fullContentPreview.kicker
+          : appPage.type === "search"
+            ? t.search.kicker
+            : appPage.type === "settings"
+              ? t.settings.kicker
+              : appPage.type === "algorithm-transparency" || appPage.type === "algorithm-clusters"
+                ? t.algorithmTransparency.kicker
+                : t.shell.pageKickers[currentArticleView];
   const topbarStatus =
     appPage.type === "feed-management"
       ? isFeedsLoading
@@ -2621,6 +2635,7 @@ export function App() {
       <section className={styles.content} aria-labelledby="page-title">
         <header className={styles.topbar}>
           <div>
+            {pageKicker ? <p className={styles.kicker}>{pageKicker}</p> : null}
             <h1 id="page-title">{pageTitle}</h1>
           </div>
           <div className={styles.topbarMeta}>
