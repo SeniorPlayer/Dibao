@@ -126,8 +126,8 @@ async function generateBrief(ctx, settings, options = {}) {
 }
 
 function readTargets(ctx) {
-  return typeof ctx.ranking.listDailyBriefTargets === "function"
-    ? ctx.ranking.listDailyBriefTargets()
+  return typeof ctx.ranking.listTopicTargets === "function"
+    ? ctx.ranking.listTopicTargets()
     : { families: [], clusters: [] };
 }
 

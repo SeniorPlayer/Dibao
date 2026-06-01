@@ -849,9 +849,9 @@ export class PluginService {
           requireCapability("ranking:read");
           return this.listRankedWinners(input);
         },
-        listDailyBriefTargets: () => {
+        listTopicTargets: () => {
           requireCapability("ranking:read");
-          return this.listDailyBriefTargets();
+          return this.listTopicTargets();
         }
       },
       articles: {
@@ -942,7 +942,7 @@ export class PluginService {
     });
   }
 
-  private listDailyBriefTargets(): PluginTopicTargets {
+  private listTopicTargets(): PluginTopicTargets {
     const activeIndex = this.options.db
       .prepare(
         `
