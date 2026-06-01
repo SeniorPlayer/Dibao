@@ -64,7 +64,7 @@ describe("server API vertical slice", () => {
           database: "ok",
           fts: "ok",
           vectorStore: "ok",
-          version: "0.1.1"
+          version: "0.2.0"
         }
       });
     } finally {
@@ -1097,7 +1097,8 @@ describe("server API vertical slice", () => {
         headers: { cookie }
       });
       expect(contributions.statusCode, contributions.body).toBe(200);
-      expect(contributions.json()).toMatchObject({
+      const contributionBody = contributions.json();
+      expect(contributionBody).toMatchObject({
         data: [
           expect.objectContaining({
             id: "app.dibao.daily-brief",
@@ -1112,6 +1113,10 @@ describe("server API vertical slice", () => {
           })
         ]
       });
+      const dailyBrief = contributionBody.data.find(
+        (plugin: { id: string }) => plugin.id === "app.dibao.daily-brief"
+      );
+      expect(dailyBrief.contributions.actions).toEqual([]);
 
       const health = await app.inject({
         method: "GET",
@@ -3452,11 +3457,11 @@ describe("server API vertical slice", () => {
       expect(first.statusCode, first.body).toBe(200);
       expect(first.json()).toMatchObject({
         data: {
-          currentVersion: "0.1.1",
+          currentVersion: "0.2.0",
           latestVersion: "v0.2.0",
           releaseUrl: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
-          updateAvailable: true,
-          status: "update_available",
+          updateAvailable: false,
+          status: "current",
           checkedAt: "2026-05-28T09:30:00.000Z",
           nextAutoCheckAt: "2026-05-29T09:30:00.000Z"
         }
