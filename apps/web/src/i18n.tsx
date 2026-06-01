@@ -278,6 +278,7 @@ export const zhCN = {
     feeds: {
       kicker: "Feeds",
       title: "订阅源",
+      addFeed: "添加订阅源",
       emptyTitle: "还没有订阅源",
       emptyBody: "可以在阅读器侧栏添加 RSS / Atom 源，或导入 OPML。",
       ungrouped: "未分组",
@@ -1574,6 +1575,7 @@ export const enUS = {
     feeds: {
       kicker: "Feeds",
       title: "Feeds",
+      addFeed: "Add feed",
       emptyTitle: "No feeds yet",
       emptyBody: "Add an RSS / Atom feed in the reader sidebar, or import OPML.",
       ungrouped: "Ungrouped",
@@ -2861,6 +2863,7 @@ export const jaJP = {
     feeds: {
       kicker: "Feeds",
       title: "フィード",
+      addFeed: "フィードを追加",
       emptyTitle: "フィードはまだありません",
       emptyBody: "リーダーのサイドバーから RSS / Atom フィードを追加するか、OPML をインポートしてください。",
       ungrouped: "未分類",

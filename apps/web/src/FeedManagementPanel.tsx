@@ -100,9 +100,11 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingManagementAction | null>(null);
   const [diagnosticFilter, setDiagnosticFilter] = useState<FeedDiagnosticFilter>("all");
+  const [isAddFeedDialogOpen, setIsAddFeedDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<FeedManagementTab>("feeds");
   const [error, setError] = useState<string | null>(null);
   const [backfillResult, setBackfillResult] = useState<FullContentBackfillResponse | null>(null);
+  const wasAddingFeedRef = useRef(false);
   const visibleFeeds = useMemo(
     () =>
       props.feeds.filter((feed) =>
@@ -133,6 +135,19 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
     setConfirmDeleteFeedId(null);
     setBackfillResult(null);
   }, [selectedFeedIdentity]);
+
+  useEffect(() => {
+    if (
+      isAddFeedDialogOpen &&
+      wasAddingFeedRef.current &&
+      !props.isAddingFeed &&
+      !props.feedError &&
+      !props.feedDiscovery
+    ) {
+      setIsAddFeedDialogOpen(false);
+    }
+    wasAddingFeedRef.current = props.isAddingFeed;
+  }, [isAddFeedDialogOpen, props.feedDiscovery, props.feedError, props.isAddingFeed]);
 
   async function runManagementAction(action: PendingManagementAction, fn: () => Promise<void>) {
     setPendingAction(action);
@@ -303,6 +318,13 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
             <h2 id="feed-management-title">{t.feedManagement.feeds.title}</h2>
           </div>
           <div className={styles.managementHeaderActions}>
+            <button
+              className={styles.primaryButton}
+              onClick={() => setIsAddFeedDialogOpen(true)}
+              type="button"
+            >
+              {t.feedManagement.feeds.addFeed}
+            </button>
             <span className={styles.count}>{props.feeds.length}</span>
             <input
               accept=".opml,.xml,text/xml,application/xml"
@@ -340,165 +362,194 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
           </div>
         </div>
 
-        <div className={styles.feedManagementControls}>
-          {props.opmlSummary ? (
-            <div className={styles.opmlSummary}>
-              <p>
-                {t.opml.importSummary(
-                  props.opmlSummary.feedsCreated,
-                  props.opmlSummary.feedsSkipped,
-                  props.opmlSummary.foldersCreated
-                )}
-              </p>
-              {props.opmlSummary.errors.length > 0 ? (
-                <>
-                  <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
-                  <ul>
-                    {props.opmlSummary.errors.map((summaryError, index) => (
-                      <li key={`${summaryError}-${index}`}>{summaryError}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-
-          <form className={styles.managementForm} onSubmit={props.onAddFeed}>
-            <label htmlFor="managed-new-feed-url">{t.feeds.inputLabel}</label>
-            <div className={styles.managementInlineForm}>
-              <input
-                id="managed-new-feed-url"
-                inputMode="url"
-                onChange={(event) => props.onUpdateFeedUrl(event.target.value)}
-                placeholder={t.feeds.inputPlaceholder}
-                type="url"
-                value={props.feedUrl}
-              />
-              <button
-                className={styles.primaryButton}
-                disabled={props.isAddingFeed || props.isDiscoveringFeeds}
-                type="submit"
-              >
-                {props.isDiscoveringFeeds ? t.feedDiscovery.checking : t.feedDiscovery.check}
-              </button>
-            </div>
-          </form>
-
-          <section className={styles.feedDiagnosticsPanel} aria-labelledby="feed-diagnostics-title">
-            <div className={styles.feedDiagnosticsHeader}>
-              <div>
-                <h3 id="feed-diagnostics-title">{t.feedDiagnostics.title}</h3>
-                <p>
-                  {props.diagnostics
-                    ? t.feedDiagnostics.summary(
-                        props.diagnostics.summary.total,
-                        props.diagnostics.summary.error,
-                        props.diagnostics.summary.warning
-                      )
-                    : props.isFeedDiagnosticsLoading
-                      ? t.feedManagement.loading
-                      : t.feedManagement.na}
-                </p>
-              </div>
-              <div className={styles.feedDiagnosticSummaryPills}>
-                <span>{t.feedDiagnostics.statuses.healthy}: {props.diagnostics?.summary.healthy ?? 0}</span>
-                <span>{t.feedDiagnostics.statuses.failing}: {props.diagnostics?.summary.error ?? 0}</span>
-                <span>{t.feedDiagnostics.statuses.never_fetched}: {props.diagnostics?.summary.neverFetched ?? 0}</span>
-                <span>{t.feedDiagnostics.statuses.disabled}: {props.diagnostics?.summary.disabled ?? 0}</span>
-              </div>
-            </div>
-            <div className={styles.feedDiagnosticFilters} aria-label={t.feedDiagnostics.title}>
-              {(["all", "unhealthy", "disabled", "neverFetched"] as const).map((filter) => (
+        {isAddFeedDialogOpen ? (
+          <div
+            className={styles.managementDialogOverlay}
+            onClick={() => setIsAddFeedDialogOpen(false)}
+            role="presentation"
+          >
+            <div
+              aria-labelledby="add-feed-dialog-title"
+              aria-modal="true"
+              className={styles.managementDialog}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+            >
+              <div className={styles.managementDialogHeader}>
+                <div>
+                  <p className={styles.kicker}>{t.feedManagement.feeds.kicker}</p>
+                  <h3 id="add-feed-dialog-title">{t.feedManagement.feeds.addFeed}</h3>
+                </div>
                 <button
-                  className={
-                    diagnosticFilter === filter
-                      ? styles.feedDiagnosticFilterActive
-                      : styles.feedDiagnosticFilter
-                  }
-                  key={filter}
-                  onClick={() => setDiagnosticFilter(filter)}
+                  className={styles.secondaryButton}
+                  onClick={() => setIsAddFeedDialogOpen(false)}
                   type="button"
                 >
-                  {t.feedDiagnostics.filters[filter]}
+                  {t.feedManagement.actions.cancel}
                 </button>
-              ))}
+              </div>
+
+              <form className={styles.managementForm} onSubmit={props.onAddFeed}>
+                <label htmlFor="managed-new-feed-url">{t.feeds.inputLabel}</label>
+                <div className={styles.managementInlineForm}>
+                  <input
+                    id="managed-new-feed-url"
+                    inputMode="url"
+                    onChange={(event) => props.onUpdateFeedUrl(event.target.value)}
+                    placeholder={t.feeds.inputPlaceholder}
+                    type="url"
+                    value={props.feedUrl}
+                  />
+                  <button
+                    className={styles.primaryButton}
+                    disabled={props.isAddingFeed || props.isDiscoveringFeeds}
+                    type="submit"
+                  >
+                    {props.isDiscoveringFeeds ? t.feedDiscovery.checking : t.feedDiscovery.check}
+                  </button>
+                </div>
+              </form>
+
+              <ManagementFeedDiscoveryPanel
+                discovery={props.feedDiscovery}
+                error={props.feedDiscoveryError}
+                isAddingFeed={props.isAddingFeed}
+                onAddCandidate={props.onAddCandidate}
+              />
+
+              {props.feedError ? <p className={styles.errorText}>{props.feedError}</p> : null}
             </div>
-          </section>
-
-          <ManagementFeedDiscoveryPanel
-            discovery={props.feedDiscovery}
-            error={props.feedDiscoveryError}
-            isAddingFeed={props.isAddingFeed}
-            onAddCandidate={props.onAddCandidate}
-          />
-
-          {props.feedError ? <p className={styles.errorText}>{props.feedError}</p> : null}
-          {error ? <p className={styles.errorText}>{error}</p> : null}
-        </div>
+          </div>
+        ) : null}
 
         <div className={styles.feedManagementGrid}>
-          <div className={styles.managementList}>
-            {props.isLoading ? <SkeletonRows count={6} /> : null}
-            {!props.isLoading && props.feeds.length === 0 ? (
-              <ManagementEmptyState
-                title={t.feedManagement.feeds.emptyTitle}
-                body={t.feedManagement.feeds.emptyBody}
-              />
+          <div className={styles.feedManagementListPane}>
+            {props.opmlSummary ? (
+              <div className={styles.opmlSummary}>
+                <p>
+                  {t.opml.importSummary(
+                    props.opmlSummary.feedsCreated,
+                    props.opmlSummary.feedsSkipped,
+                    props.opmlSummary.foldersCreated
+                  )}
+                </p>
+                {props.opmlSummary.errors.length > 0 ? (
+                  <>
+                    <p>{t.opml.importErrors(props.opmlSummary.errors.length)}</p>
+                    <ul>
+                      {props.opmlSummary.errors.map((summaryError, index) => (
+                        <li key={`${summaryError}-${index}`}>{summaryError}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </div>
             ) : null}
-            {!props.isLoading && props.feeds.length > 0 && visibleFeeds.length === 0 ? (
-              <ManagementEmptyState
-                title={t.feedDiagnostics.noIssues}
-                body={t.feedDiagnostics.noIssues}
-              />
-            ) : null}
-            {!props.isLoading &&
-              visibleFeeds.map((feed) => {
-                const diagnostic = props.diagnosticsByFeedId[feed.id] ?? null;
-                return (
-                <button
-                  className={
-                    selectedFeed?.id === feed.id
-                      ? styles.managementFeedItemActive
-                      : styles.managementFeedItem
-                  }
-                  key={feed.id}
-                  onClick={() => setSelectedFeedId(feed.id)}
-                  type="button"
-                >
-                  <span className={styles.managementFeedTitle}>
-                    {feed.title}
-                    {diagnostic ? (
-                      <span
-                        className={`${styles.feedHealthBadge} ${feedHealthBadgeClass(diagnostic.severity, styles)}`}
-                      >
-                        {t.feedDiagnostics.statuses[diagnostic.status]}
-                      </span>
+
+            <section className={styles.feedListFilters} aria-labelledby="feed-diagnostics-title">
+              <div className={styles.feedListFilterHeader}>
+                <div>
+                  <h3 id="feed-diagnostics-title">{t.feedDiagnostics.title}</h3>
+                  <p>
+                    {props.diagnostics
+                      ? t.feedDiagnostics.summary(
+                          props.diagnostics.summary.total,
+                          props.diagnostics.summary.error,
+                          props.diagnostics.summary.warning
+                        )
+                      : props.isFeedDiagnosticsLoading
+                        ? t.feedManagement.loading
+                        : t.feedManagement.na}
+                  </p>
+                </div>
+                <div className={styles.feedDiagnosticSummaryPills}>
+                  <span>{t.feedDiagnostics.statuses.healthy}: {props.diagnostics?.summary.healthy ?? 0}</span>
+                  <span>{t.feedDiagnostics.statuses.failing}: {props.diagnostics?.summary.error ?? 0}</span>
+                  <span>{t.feedDiagnostics.statuses.never_fetched}: {props.diagnostics?.summary.neverFetched ?? 0}</span>
+                  <span>{t.feedDiagnostics.statuses.disabled}: {props.diagnostics?.summary.disabled ?? 0}</span>
+                </div>
+              </div>
+              <div className={styles.feedDiagnosticFilters} aria-label={t.feedDiagnostics.title}>
+                {(["all", "unhealthy", "disabled", "neverFetched"] as const).map((filter) => (
+                  <button
+                    className={
+                      diagnosticFilter === filter
+                        ? styles.feedDiagnosticFilterActive
+                        : styles.feedDiagnosticFilter
+                    }
+                    key={filter}
+                    onClick={() => setDiagnosticFilter(filter)}
+                    type="button"
+                  >
+                    {t.feedDiagnostics.filters[filter]}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <div className={styles.managementList}>
+              {props.isLoading ? <SkeletonRows count={6} /> : null}
+              {!props.isLoading && props.feeds.length === 0 ? (
+                <ManagementEmptyState
+                  title={t.feedManagement.feeds.emptyTitle}
+                  body={t.feedManagement.feeds.emptyBody}
+                />
+              ) : null}
+              {!props.isLoading && props.feeds.length > 0 && visibleFeeds.length === 0 ? (
+                <ManagementEmptyState
+                  title={t.feedDiagnostics.noIssues}
+                  body={t.feedDiagnostics.noIssues}
+                />
+              ) : null}
+              {!props.isLoading &&
+                visibleFeeds.map((feed) => {
+                  const diagnostic = props.diagnosticsByFeedId[feed.id] ?? null;
+                  return (
+                  <button
+                    className={
+                      selectedFeed?.id === feed.id
+                        ? styles.managementFeedItemActive
+                        : styles.managementFeedItem
+                    }
+                    key={feed.id}
+                    onClick={() => setSelectedFeedId(feed.id)}
+                    type="button"
+                  >
+                    <span className={styles.managementFeedTitle}>
+                      {feed.title}
+                      {diagnostic ? (
+                        <span
+                          className={`${styles.feedHealthBadge} ${feedHealthBadgeClass(diagnostic.severity, styles)}`}
+                        >
+                          {t.feedDiagnostics.statuses[diagnostic.status]}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className={styles.managementFeedUrl}>{feed.feedUrl}</span>
+                    <span className={styles.managementFeedMeta}>
+                      {folderLabel(feed, folderById, t.feedManagement.feeds.ungrouped)} ·{" "}
+                      {feed.enabled
+                        ? t.feedManagement.feeds.enabled
+                        : t.feedManagement.feeds.disabled}{" "}
+                      · {t.feedManagement.feeds.weight(feed.sourceWeight)}
+                    </span>
+                    <span className={styles.managementFeedMeta}>
+                      {t.feedManagement.feeds.lastSuccess(
+                        feed.lastSuccessAt ? formatDate(feed.lastSuccessAt) : t.feedManagement.na
+                      )}
+                    </span>
+                    <span className={styles.managementFeedMeta}>
+                      {t.feedManagement.feeds.nextRefresh(
+                        feed.nextRefreshAt ? formatDate(feed.nextRefreshAt) : t.feedManagement.na
+                      )}
+                    </span>
+                    {feed.lastError ? (
+                      <span className={styles.managementFeedError}>{feed.lastError}</span>
                     ) : null}
-                  </span>
-                  <span className={styles.managementFeedUrl}>{feed.feedUrl}</span>
-                  <span className={styles.managementFeedMeta}>
-                    {folderLabel(feed, folderById, t.feedManagement.feeds.ungrouped)} ·{" "}
-                    {feed.enabled
-                      ? t.feedManagement.feeds.enabled
-                      : t.feedManagement.feeds.disabled}{" "}
-                    · {t.feedManagement.feeds.weight(feed.sourceWeight)}
-                  </span>
-                  <span className={styles.managementFeedMeta}>
-                    {t.feedManagement.feeds.lastSuccess(
-                      feed.lastSuccessAt ? formatDate(feed.lastSuccessAt) : t.feedManagement.na
-                    )}
-                  </span>
-                  <span className={styles.managementFeedMeta}>
-                    {t.feedManagement.feeds.nextRefresh(
-                      feed.nextRefreshAt ? formatDate(feed.nextRefreshAt) : t.feedManagement.na
-                    )}
-                  </span>
-                  {feed.lastError ? (
-                    <span className={styles.managementFeedError}>{feed.lastError}</span>
-                  ) : null}
-                </button>
-                );
-              })}
+                  </button>
+                  );
+                })}
+            </div>
           </div>
 
           <section className={styles.managementEditor} aria-labelledby="feed-editor-title">
@@ -517,6 +568,7 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
                     </span>
                   ) : null}
                 </div>
+                {error ? <p className={styles.errorText}>{error}</p> : null}
                 <form className={styles.managementForm} onSubmit={handleUpdateFeed}>
                   <label htmlFor="managed-feed-title">
                     {t.feedManagement.editor.titleLabel}

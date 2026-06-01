@@ -1041,8 +1041,7 @@ describe("web i18n", () => {
     expect(html).toContain("导入 OPML");
     expect(html).toContain("导出 OPML");
     expect(html).toContain("刷新全部");
-    expect(html).toContain("检查");
-    expect(html).toContain("网站或 RSS / Atom URL");
+    expect(html).toContain("添加订阅源");
     expect(html).toContain("订阅源健康");
     expect(html).toContain("查看文章");
     expect(html).toContain("删除");
