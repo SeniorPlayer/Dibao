@@ -14,6 +14,7 @@ import {
 } from "./api.js";
 import styles from "./design-system/AppShell/AppShell.module.css";
 import { useI18n } from "./i18n.js";
+import type { PluginActionButton, PluginActionContext } from "./reader/ReaderPanels.js";
 
 const UNGROUPED_FOLDER_VALUE = "__ungrouped__";
 
@@ -55,6 +56,7 @@ export type FeedManagementWorkspaceProps = {
   isRefreshingAllFeeds: boolean;
   onAddCandidate: (candidate: FeedDiscoveryCandidate) => void;
   onAddFeed: (event: FormEvent<HTMLFormElement>) => void;
+  onPluginAction?: (action: PluginActionButton, context: PluginActionContext) => void;
   onCreateFolder: (title: string) => Promise<void>;
   onDeleteFeed: (feedId: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
@@ -68,6 +70,7 @@ export type FeedManagementWorkspaceProps = {
   onUpdateFeedUrl: (value: string) => void;
   onUpdateFolder: (folderId: string, input: UpdateFeedFolderInput) => Promise<void>;
   opmlSummary: OpmlImportResponse | null;
+  pluginToolbarActions?: PluginActionButton[];
   refreshingFeedId: string | null;
 };
 
@@ -300,6 +303,17 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
           >
             {props.isRefreshingAllFeeds ? t.feeds.refreshingAll : t.feeds.refreshAll}
           </button>
+          {(props.pluginToolbarActions ?? []).map((action) => (
+            <button
+              className={styles.secondaryButton}
+              key={`${action.pluginId}:${action.id}`}
+              onClick={() => props.onPluginAction?.(action, { slot: action.slot })}
+              title={`${action.pluginName}: ${action.label}`}
+              type="button"
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
 
         {props.opmlSummary ? (

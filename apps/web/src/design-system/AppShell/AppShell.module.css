@@ -313,6 +313,10 @@
   display: none;
 }
 
+.navMobileOnly {
+  display: none;
+}
+
 .navItem svg,
 .navItemActive svg {
   flex: 0 0 auto;
@@ -3313,6 +3317,14 @@
 
   .navUtilityItem {
     display: none;
+  }
+
+  .navDesktopOnly {
+    display: none;
+  }
+
+  .navMobileOnly {
+    display: grid;
   }
 
   .navUtilityToggle {

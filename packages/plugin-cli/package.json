@@ -1,0 +1,26 @@
+{
+  "name": "@dibao/plugin-cli",
+  "version": "0.1.1",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "bin": {
+    "dibao-plugin": "dist/index.js",
+    "create-dibao-plugin": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@dibao/plugin-sdk": "0.1.1"
+  }
+}

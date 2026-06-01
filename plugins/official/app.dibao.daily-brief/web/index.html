@@ -52,7 +52,8 @@
       .header,
       .settings,
       .empty,
-      .group {
+      .group,
+      .topic-family {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--surface);
@@ -93,6 +94,14 @@
         line-height: 1.55;
       }
 
+      .actions,
+      .tabs,
+      .history {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
       .button {
         min-height: 38px;
         border: 1px solid var(--line);
@@ -105,7 +114,8 @@
         cursor: pointer;
       }
 
-      .button.primary {
+      .button.primary,
+      .button.active {
         border-color: var(--pine);
         background: var(--pine-soft);
         color: var(--pine);
@@ -116,10 +126,12 @@
         opacity: 0.65;
       }
 
-      .history {
+      .tabs {
         margin: 18px 0;
-        display: flex;
-        gap: 8px;
+      }
+
+      .history {
+        margin: 0 0 18px;
         overflow-x: auto;
         padding-bottom: 2px;
       }
@@ -128,17 +140,10 @@
         white-space: nowrap;
       }
 
-      .history .active {
-        border-color: var(--pine);
-        background: var(--pine-soft);
-        color: var(--pine);
-      }
-
       .settings {
-        margin-top: 18px;
         padding: 18px;
         display: grid;
-        gap: 14px;
+        gap: 16px;
       }
 
       .settings-grid {
@@ -155,13 +160,68 @@
         font-weight: 700;
       }
 
-      input {
+      .checkbox-label,
+      .topic-toggle,
+      .cluster-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        min-height: 18px;
+        flex: 0 0 auto;
+      }
+
+      input:not([type="checkbox"]) {
         min-height: 38px;
         border: 1px solid var(--line);
         border-radius: 6px;
         background: var(--surface);
         color: var(--ink);
         padding: 0 10px;
+      }
+
+      .topic-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .topic-family {
+        overflow: hidden;
+      }
+
+      .topic-head {
+        padding: 12px 14px;
+        background: var(--paper);
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .topic-head strong,
+      .topic-head span {
+        min-width: 0;
+      }
+
+      .topic-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .cluster-list {
+        padding: 8px 14px 12px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .cluster-toggle {
+        min-height: 30px;
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 600;
       }
 
       .content {
@@ -227,6 +287,10 @@
         color: #3d423d;
         font-size: 13px;
         line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
 
       .empty {
@@ -266,16 +330,39 @@
         <section class="header">
           <div>
             <p class="kicker">Daily Brief</p>
-            <h1 id="title">每日简报</h1>
-            <p id="subtitle">从过去 24 小时的个性化推荐中，按兴趣主题整理一份可复核的阅读清单。</p>
+            <h1>每日简报</h1>
+            <p>从过去 24 小时的个性化推荐中，按兴趣主题整理一份可复核的阅读清单。</p>
           </div>
-          <button class="button primary" id="generate" type="button">立即生成</button>
+          <div class="actions">
+            <button class="button" id="open-settings" type="button">设置</button>
+            <button class="button primary" id="generate" type="button">立即生成</button>
+          </div>
+        </section>
+
+        <nav class="tabs" aria-label="每日简报视图">
+          <button class="button active" id="tab-brief" type="button">简报</button>
+          <button class="button" id="tab-settings" type="button">设置</button>
+        </nav>
+
+        <p class="error" id="error" hidden></p>
+
+        <section id="brief-panel">
+          <div class="history" id="history"></div>
+          <section class="empty" id="empty" hidden>
+            <h2>还没有简报</h2>
+            <p>点击“立即生成”，邸报会从当前推荐排序中挑选过去 24 小时的文章并按兴趣主题分组。</p>
+          </section>
+          <section class="empty" id="filtered-empty" hidden>
+            <h2>当前设置下没有可用文章</h2>
+            <p>可以放宽主题选择，或等新的推荐文章进入过去 24 小时窗口后再生成。</p>
+          </section>
+          <section class="content" id="content"></section>
         </section>
 
         <section class="settings" id="settings-panel" hidden>
           <div>
             <h2>简报设置</h2>
-            <p>保存后会更新每日计划任务；不会调用额外 AI，也不会重算 embedding。</p>
+            <p>保存后会更新每日计划任务；主题选择默认全选，取消勾选后不会进入之后生成的简报。</p>
           </div>
           <div class="settings-grid">
             <label>
@@ -291,28 +378,31 @@
               <input id="count" min="5" max="50" type="number" />
             </label>
           </div>
-          <label>
+          <label class="checkbox-label">
             <span>启用每日计划</span>
             <input id="enabled" type="checkbox" />
           </label>
+          <div>
+            <h3>纳入主题</h3>
+            <p>Family 关闭后，其下所有 Cluster 都会被排除；只关闭 Cluster 时，其他同 Family 文章仍可进入简报。</p>
+            <div class="topic-list" id="topic-list"></div>
+          </div>
           <button class="button primary" id="save" type="button">保存设置</button>
         </section>
-
-        <div class="history" id="history"></div>
-        <p class="error" id="error" hidden></p>
-        <section class="empty" id="empty" hidden>
-          <h2>还没有简报</h2>
-          <p>点击“立即生成”，邸报会从当前推荐排序中挑选过去 24 小时的文章并按兴趣主题分组。</p>
-        </section>
-        <section class="content" id="content"></section>
       </div>
     </main>
 
     <script>
       const pluginId = "app.dibao.daily-brief";
       const params = new URLSearchParams(window.location.search);
-      const isSettings = params.get("panel") === "settings";
-      const state = { briefs: [], selectedId: null, settings: null };
+      const state = {
+        activePanel: params.get("panel") === "settings" ? "settings" : "brief",
+        briefs: [],
+        selectedId: null,
+        settings: null,
+        targets: { families: [], clusters: [] }
+      };
+
       const api = async (path, options = {}) => {
         const response = await fetch(`/api/plugins/${pluginId}/api/${path}`, {
           credentials: "same-origin",
@@ -326,12 +416,24 @@
         return body.data;
       };
 
-      document.getElementById("settings-panel").hidden = !isSettings;
+      document.getElementById("open-settings").addEventListener("click", () => {
+        state.activePanel = "settings";
+        render();
+      });
+      document.getElementById("tab-brief").addEventListener("click", () => {
+        state.activePanel = "brief";
+        render();
+      });
+      document.getElementById("tab-settings").addEventListener("click", () => {
+        state.activePanel = "settings";
+        render();
+      });
       document.getElementById("generate").addEventListener("click", async () => {
         await runBusy("generate", async () => {
-          const result = await api("generate", { method: "POST", body: "{}" });
+          const result = await api("generate", { method: "POST", body: JSON.stringify({ force: true }) });
           state.briefs = result.briefs;
           state.selectedId = result.brief.id;
+          state.activePanel = "brief";
           render();
         });
       });
@@ -342,6 +444,7 @@
             body: JSON.stringify(readFormSettings())
           });
           state.settings = result.settings;
+          state.targets = result.targets || state.targets;
           state.briefs = result.briefs;
           render();
         });
@@ -353,6 +456,7 @@
         try {
           const result = await api("state");
           state.settings = result.settings;
+          state.targets = result.targets || state.targets;
           state.briefs = result.briefs;
           state.selectedId = result.latest?.id || state.briefs[0]?.id || null;
           render();
@@ -375,7 +479,12 @@
       }
 
       function render() {
+        document.getElementById("brief-panel").hidden = state.activePanel !== "brief";
+        document.getElementById("settings-panel").hidden = state.activePanel !== "settings";
+        document.getElementById("tab-brief").className = `button${state.activePanel === "brief" ? " active" : ""}`;
+        document.getElementById("tab-settings").className = `button${state.activePanel === "settings" ? " active" : ""}`;
         renderSettings();
+        renderTopics();
         renderHistory();
         renderBrief();
       }
@@ -386,6 +495,69 @@
         document.getElementById("timezone").value = state.settings.timezone;
         document.getElementById("count").value = String(state.settings.articleCount);
         document.getElementById("enabled").checked = state.settings.enabled;
+      }
+
+      function renderTopics() {
+        const list = document.getElementById("topic-list");
+        list.replaceChildren();
+        if (!state.settings) return;
+
+        const excludedFamilies = new Set(state.settings.excludedFamilyIds || []);
+        const excludedClusters = new Set(state.settings.excludedClusterIds || []);
+        const clustersByFamily = groupBy(state.targets.clusters || [], (cluster) => cluster.familyId);
+        const families = state.targets.families || [];
+        if (families.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "还没有可配置的兴趣主题。生成兴趣簇后，这里会显示可纳入简报的主题。";
+          list.append(empty);
+          return;
+        }
+
+        for (const family of families) {
+          const familyClusters = clustersByFamily.get(family.id) || [];
+          const section = document.createElement("section");
+          section.className = "topic-family";
+
+          const head = document.createElement("label");
+          head.className = "topic-toggle topic-head";
+          const labelText = document.createElement("span");
+          const strong = document.createElement("strong");
+          strong.textContent = family.label;
+          const meta = document.createElement("span");
+          meta.className = "topic-meta";
+          meta.textContent = `${family.clusterCount} 个 Cluster · ${family.supportArticleCount} 篇证据文章`;
+          labelText.append(strong, document.createElement("br"), meta);
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = !excludedFamilies.has(family.id);
+          checkbox.addEventListener("change", () => {
+            toggleExcluded(state.settings.excludedFamilyIds, family.id, !checkbox.checked);
+            renderTopics();
+          });
+          head.append(labelText, checkbox);
+          section.append(head);
+
+          const clusterList = document.createElement("div");
+          clusterList.className = "cluster-list";
+          for (const cluster of familyClusters) {
+            const clusterLabel = document.createElement("label");
+            clusterLabel.className = "cluster-toggle";
+            const clusterName = document.createElement("span");
+            clusterName.textContent = cluster.label;
+            const clusterCheckbox = document.createElement("input");
+            clusterCheckbox.type = "checkbox";
+            clusterCheckbox.checked = !excludedFamilies.has(family.id) && !excludedClusters.has(cluster.id);
+            clusterCheckbox.disabled = excludedFamilies.has(family.id);
+            clusterCheckbox.addEventListener("change", () => {
+              toggleExcluded(state.settings.excludedClusterIds, cluster.id, !clusterCheckbox.checked);
+              renderTopics();
+            });
+            clusterLabel.append(clusterName, clusterCheckbox);
+            clusterList.append(clusterLabel);
+          }
+          section.append(clusterList);
+          list.append(section);
+        }
       }
 
       function renderHistory() {
@@ -407,10 +579,12 @@
       function renderBrief() {
         const brief = state.briefs.find((item) => item.id === state.selectedId) || state.briefs[0];
         const empty = document.getElementById("empty");
+        const filteredEmpty = document.getElementById("filtered-empty");
         const content = document.getElementById("content");
         content.replaceChildren();
         empty.hidden = Boolean(brief);
-        if (!brief) return;
+        filteredEmpty.hidden = !brief || brief.articleCount !== 0;
+        if (!brief || brief.articleCount === 0) return;
 
         for (const group of brief.groups) {
           const section = document.createElement("section");
@@ -431,10 +605,11 @@
             meta.className = "meta";
             meta.textContent = `${article.feedTitle} · ${formatTime(article.publishedAt || article.discoveredAt)} · score ${formatScore(article.score)}`;
             row.append(button, meta);
-            if (article.summary) {
+            const displaySummary = article.displaySummary || cleanSummary(article.summary);
+            if (displaySummary) {
               const summary = document.createElement("p");
               summary.className = "summary";
-              summary.textContent = article.summary;
+              summary.textContent = displaySummary;
               row.append(summary);
             }
             section.append(row);
@@ -448,8 +623,31 @@
           enabled: document.getElementById("enabled").checked,
           scheduledLocalTime: document.getElementById("time").value || "08:00",
           timezone: document.getElementById("timezone").value || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-          articleCount: Number(document.getElementById("count").value)
+          articleCount: Number(document.getElementById("count").value),
+          excludedFamilyIds: state.settings?.excludedFamilyIds || [],
+          excludedClusterIds: state.settings?.excludedClusterIds || []
         };
+      }
+
+      function toggleExcluded(list, id, excluded) {
+        const next = new Set(list || []);
+        if (excluded) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+        list.splice(0, list.length, ...Array.from(next).sort());
+      }
+
+      function groupBy(items, keyFor) {
+        const map = new Map();
+        for (const item of items) {
+          const key = keyFor(item);
+          const group = map.get(key) || [];
+          group.push(item);
+          map.set(key, group);
+        }
+        return map;
       }
 
       function showError(message) {
@@ -464,6 +662,25 @@
 
       function formatScore(value) {
         return typeof value === "number" ? value.toFixed(3) : "-";
+      }
+
+      function cleanSummary(value) {
+        if (typeof value !== "string") return "";
+        const text = decodeHtmlEntities(
+          value
+            .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+            .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+            .replace(/<!--[\s\S]*?-->/g, " ")
+            .replace(/<\/(p|div|section|article|header|footer|h[1-6]|li|ul|ol|blockquote|br)>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+        ).replace(/\s+/g, " ").trim();
+        return text.length > 280 ? `${text.slice(0, 279).trimEnd()}…` : text;
+      }
+
+      function decodeHtmlEntities(value) {
+        const element = document.createElement("textarea");
+        element.innerHTML = value;
+        return element.value;
       }
     </script>
   </body>

@@ -523,6 +523,15 @@ export type PluginContributions = {
   primaryNav: Array<{ label: string; route: string; icon?: string; order?: number }>;
   primaryMobile: Array<{ label: string; route: string; icon?: string; order?: number }>;
   settingsTabs: Array<{ id: string; label: string; route: string; order?: number }>;
+  tabs: Array<{ id: string; label: string; slot: string; route: string; icon?: string; order?: number }>;
+  actions: Array<{
+    id: string;
+    label: string;
+    slot: string;
+    icon?: string;
+    command: string;
+    order?: number;
+  }>;
   setupSteps: Array<{
     id: string;
     title: string;
@@ -571,6 +580,8 @@ export type PluginTaskRun = {
   createdAt: number;
   updatedAt: number;
 };
+
+export type JobListItem = PluginTaskRun;
 
 export type EmbeddingProviderType =
   | "embedded_local"
@@ -1255,6 +1266,25 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (await request<PluginListItem[]>("/api/plugins/contributions")).data;
     },
 
+    async listJobs(input: {
+      status?: JobListItem["status"];
+      type?: string;
+      limit?: number;
+    } = {}): Promise<JobListItem[]> {
+      const params = new URLSearchParams();
+      if (input.status) {
+        params.set("status", input.status);
+      }
+      if (input.type) {
+        params.set("type", input.type);
+      }
+      if (input.limit) {
+        params.set("limit", String(input.limit));
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return (await request<JobListItem[]>(`/api/jobs${suffix}`)).data;
+    },
+
     async getDerivedDataUpgradeStatus(): Promise<DerivedDataUpgradeStatus> {
       return (await request<DerivedDataUpgradeStatus>("/api/system/upgrade/status")).data;
     },
@@ -1421,6 +1451,23 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
           `/api/plugins/${encodeURIComponent(pluginId)}/tasks/${encodeURIComponent(runId)}/cancel`,
           {
             method: "POST"
+          }
+        )
+      ).data;
+    },
+
+    async callPluginApi<T = unknown>(
+      pluginId: string,
+      path: string,
+      body: unknown = {}
+    ): Promise<T> {
+      const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+      return (
+        await request<T>(
+          `/api/plugins/${encodeURIComponent(pluginId)}/api/${normalizedPath}`,
+          {
+            method: "POST",
+            body: JSON.stringify(body)
           }
         )
       ).data;

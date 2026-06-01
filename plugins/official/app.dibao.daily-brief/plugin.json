@@ -64,6 +64,36 @@
         "icon": "newspaper"
       }
     ],
+    "actions": [
+      {
+        "id": "generate-daily-brief",
+        "title": "生成简报",
+        "slot": "article.list.toolbar.end",
+        "icon": "sparkles",
+        "command": "api:/generate"
+      },
+      {
+        "id": "generate-daily-brief-from-row",
+        "title": "生成简报",
+        "slot": "article.list.item.actions.end",
+        "icon": "sparkles",
+        "command": "api:/generate"
+      },
+      {
+        "id": "generate-daily-brief-from-reader",
+        "title": "生成简报",
+        "slot": "article.reader.bottomSheet.actions",
+        "icon": "sparkles",
+        "command": "api:/generate"
+      },
+      {
+        "id": "open-daily-brief",
+        "title": "打开每日简报",
+        "slot": "article.reader.toolbar.end",
+        "icon": "newspaper",
+        "command": "route:daily-brief"
+      }
+    ],
     "hooks": [
       "maintenance.tick"
     ],

@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ import {
   toVectorBlob,
   type DibaoDatabase
 } from "@dibao/db";
+import { signPluginPackage } from "@dibao/plugin-sdk";
 import { parseOpml } from "@dibao/rss";
 import { buildServer as buildRealServer, getHealth } from "./app.js";
 import type { FeedFetcher } from "./feed-refresh-service.js";
@@ -278,6 +280,85 @@ describe("server API vertical slice", () => {
         updateUrl: "https://github.com/example/remote/releases/latest/download/latest.json",
         status: "installed"
       });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("verifies signed plugin packages and rejects tampered content", async () => {
+    const db = createEmptyDatabase();
+    const pluginDataDir = createTempDir();
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const pluginPackage = {
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.signed",
+        name: "Signed Plugin",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        capabilities: ["settings:plugin"],
+        contributes: {
+          actions: [
+            {
+              id: "open",
+              title: "Open",
+              slot: "article.list.toolbar.end",
+              icon: "sparkles",
+              command: "route:signed"
+            }
+          ]
+        }
+      },
+      files: {
+        "web/index.html": "<p>Signed plugin</p>"
+      }
+    };
+    const signed = signPluginPackage({
+      pluginPackage,
+      privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString()
+    });
+    const app = buildServer({ db, logger: false, pluginDataDir, now: () => 10_000 });
+
+    try {
+      const installed = await injectJson(app, "POST", "/api/plugins/install", {
+        package: JSON.stringify(signed)
+      });
+      expect(installed.statusCode, installed.body).toBe(200);
+
+      const tampered = {
+        ...signed,
+        manifest: {
+          ...(signed.manifest as Record<string, unknown>),
+          name: "Tampered Plugin"
+        }
+      };
+      const rejected = await injectJson(app, "POST", "/api/plugins/install", {
+        package: JSON.stringify(tampered)
+      });
+      expect(rejected.statusCode, rejected.body).toBe(400);
+      expect(rejected.body).toContain("signature verification failed");
+
+      await app.inject({ method: "POST", url: "/api/plugins/com.example.signed/enable" });
+      const contributions = await app.inject({ method: "GET", url: "/api/plugins/contributions" });
+      expect(contributions.json().data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "com.example.signed",
+            contributions: expect.objectContaining({
+              actions: [
+                expect.objectContaining({
+                  id: "open",
+                  slot: "article.list.toolbar.end",
+                  command: "route:signed"
+                })
+              ]
+            })
+          })
+        ])
+      );
     } finally {
       await app.close();
       db.close();
@@ -1047,6 +1128,161 @@ describe("server API vertical slice", () => {
             })
           ]
         }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("updates Daily Brief settings, schedules, topic filters, and readable summaries", async () => {
+    const db = createFixtureDatabase();
+    const embeddings = createActiveEmbeddingDiagnosticsFixture(db, {
+      providerTestStatus: "success"
+    });
+    insertDailyBriefTopicFixture(db, embeddings.index.id);
+    new SqliteRankingRepository(db).upsertExplanation({
+      articleId: "article_recommended",
+      rankContext: "base",
+      embeddingIndexId: embeddings.index.id,
+      payloadJson: JSON.stringify({
+        components: {
+          primaryFamilyId: "family_ai",
+          primaryFamilyLabel: "AI Systems",
+          primaryClusterId: "cluster_ai",
+          primaryClusterLabel: "AI Agents"
+        }
+      }),
+      createdAt: 7000
+    });
+    new SqliteRankingRepository(db).upsertExplanation({
+      articleId: "article_recent",
+      rankContext: "base",
+      embeddingIndexId: embeddings.index.id,
+      payloadJson: JSON.stringify({
+        components: {
+          primaryFamilyId: "family_design",
+          primaryFamilyLabel: "Reader Design"
+        }
+      }),
+      createdAt: 7000
+    });
+    db.prepare("update articles set summary = ? where id = ?").run(
+      `<article><h1>Ignored</h1><p>Readable &amp; useful summary.</p><script>bad()</script>${"More text. ".repeat(60)}</article>`,
+      "article_recommended"
+    );
+    const app = buildServer({ db, logger: false, now: () => 10_000 });
+
+    try {
+      const enabled = await app.inject({
+        method: "POST",
+        url: "/api/plugins/app.dibao.daily-brief/enable"
+      });
+      expect(enabled.statusCode, enabled.body).toBe(200);
+
+      const saved = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/settings", {
+        enabled: true,
+        scheduledLocalTime: "07:30",
+        timezone: "Asia/Shanghai",
+        articleCount: 500,
+        excludedFamilyIds: ["family_unused", "family_unused"],
+        excludedClusterIds: ["cluster_unused"]
+      });
+      expect(saved.statusCode, saved.body).toBe(200);
+      expect(saved.json()).toMatchObject({
+        data: {
+          settings: {
+            enabled: true,
+            scheduledLocalTime: "07:30",
+            timezone: "Asia/Shanghai",
+            articleCount: 50,
+            excludedFamilyIds: ["family_unused"],
+            excludedClusterIds: ["cluster_unused"]
+          },
+          targets: {
+            families: expect.arrayContaining([
+              expect.objectContaining({ id: "family_ai", label: "AI Systems" }),
+              expect.objectContaining({ id: "family_design", label: "Reader Design" })
+            ]),
+            clusters: expect.arrayContaining([
+              expect.objectContaining({
+                id: "cluster_ai",
+                label: "AI Agents",
+                familyId: "family_ai"
+              })
+            ])
+          }
+        }
+      });
+
+      const health = await app.inject({
+        method: "GET",
+        url: "/api/plugins/app.dibao.daily-brief/health"
+      });
+      expect(health.statusCode, health.body).toBe(200);
+      expect(health.json()).toMatchObject({
+        data: {
+          schedules: [
+            expect.objectContaining({
+              taskId: "dailyBrief.generate",
+              enabled: true,
+              localTime: "07:30",
+              timezone: "Asia/Shanghai"
+            })
+          ]
+        }
+      });
+
+      const generated = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/generate", {
+        force: true
+      });
+      expect(generated.statusCode, generated.body).toBe(200);
+      const generatedBrief = generated.json().data.brief;
+      const htmlArticle = generatedBrief.groups
+        .flatMap((group: { articles: Array<{ articleId: string; displaySummary: string | null }> }) => group.articles)
+        .find((article: { articleId: string }) => article.articleId === "article_recommended");
+      expect(htmlArticle?.displaySummary).toContain("Readable & useful summary.");
+      expect(htmlArticle?.displaySummary).not.toContain("<article>");
+      expect(htmlArticle?.displaySummary).not.toContain("bad()");
+      expect(htmlArticle?.displaySummary.length).toBeLessThanOrEqual(280);
+
+      const excludedCluster = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/settings", {
+        enabled: true,
+        scheduledLocalTime: "07:30",
+        timezone: "Asia/Shanghai",
+        articleCount: 5,
+        excludedFamilyIds: [],
+        excludedClusterIds: ["cluster_ai"]
+      });
+      expect(excludedCluster.statusCode, excludedCluster.body).toBe(200);
+      const clusterFiltered = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/generate", {
+        force: true
+      });
+      const clusterArticleIds = clusterFiltered
+        .json()
+        .data.brief.groups.flatMap((group: { articles: Array<{ articleId: string }> }) =>
+          group.articles.map((article) => article.articleId)
+        );
+      expect(clusterArticleIds).not.toContain("article_recommended");
+      expect(clusterArticleIds).toContain("article_recent");
+
+      const excludedFamilies = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/settings", {
+        enabled: true,
+        scheduledLocalTime: "07:30",
+        timezone: "Asia/Shanghai",
+        articleCount: 5,
+        excludedFamilyIds: ["family_ai", "family_design"],
+        excludedClusterIds: []
+      });
+      expect(excludedFamilies.statusCode, excludedFamilies.body).toBe(200);
+      const empty = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/generate", {
+        force: true
+      });
+      expect(empty.statusCode, empty.body).toBe(200);
+      expect(empty.json().data.brief).toMatchObject({
+        articleCount: 0,
+        emptyReason: "no_articles_for_settings",
+        groups: []
       });
     } finally {
       await app.close();
@@ -7326,6 +7562,128 @@ function createActiveEmbeddingDiagnosticsFixture(
     provider: embeddings.findProviderById("provider_diagnostics"),
     index
   };
+}
+
+function insertDailyBriefTopicFixture(db: DibaoDatabase, embeddingIndexId: string): void {
+  const profiles = new SqliteProfileRepository(db);
+  profiles.upsertCluster({
+    id: "cluster_ai",
+    embeddingIndexId,
+    polarity: "positive",
+    label: "AI Agents",
+    centroidVectorBlob: toVectorBlob([1, 0, 0]),
+    weight: 8,
+    sampleCount: 4,
+    now: 6500
+  });
+  profiles.upsertCluster({
+    id: "cluster_design",
+    embeddingIndexId,
+    polarity: "positive",
+    label: "Reader Design",
+    centroidVectorBlob: toVectorBlob([0, 1, 0]),
+    weight: 6,
+    sampleCount: 3,
+    now: 6500
+  });
+  db.prepare(
+    `
+      insert into interest_cluster_labels (
+        cluster_id,
+        auto_label,
+        label_source,
+        updated_at
+      )
+      values (?, ?, 'keywords', ?)
+    `
+  ).run("cluster_ai", "AI Agents", 6500);
+  db.prepare(
+    `
+      insert into interest_cluster_labels (
+        cluster_id,
+        auto_label,
+        label_source,
+        updated_at
+      )
+      values (?, ?, 'keywords', ?)
+    `
+  ).run("cluster_design", "Reader Design", 6500);
+  db.prepare(
+    `
+      insert into interest_families (
+        id,
+        embedding_index_id,
+        polarity,
+        display_label,
+        centroid_vector_blob,
+        weight,
+        cluster_count,
+        support_article_count,
+        support_event_count,
+        source_count,
+        strong_signal_count,
+        top_source_share,
+        maturity,
+        dominance_ratio,
+        created_at,
+        updated_at
+      )
+      values (?, ?, 'positive', ?, ?, ?, ?, ?, 4, 2, 3, 0.5, 0.8, 0.25, 6500, 6500)
+    `
+  ).run("family_ai", embeddingIndexId, "AI Systems", toVectorBlob([1, 0, 0]), 8, 1, 4);
+  db.prepare(
+    `
+      insert into interest_families (
+        id,
+        embedding_index_id,
+        polarity,
+        display_label,
+        centroid_vector_blob,
+        weight,
+        cluster_count,
+        support_article_count,
+        support_event_count,
+        source_count,
+        strong_signal_count,
+        top_source_share,
+        maturity,
+        dominance_ratio,
+        created_at,
+        updated_at
+      )
+      values (?, ?, 'positive', ?, ?, ?, ?, ?, 3, 2, 2, 0.45, 0.75, 0.2, 6500, 6500)
+    `
+  ).run("family_design", embeddingIndexId, "Reader Design", toVectorBlob([0, 1, 0]), 6, 1, 3);
+  db.prepare(
+    `
+      insert into interest_cluster_family_members (
+        cluster_id,
+        family_id,
+        embedding_index_id,
+        polarity,
+        membership_confidence,
+        centroid_similarity,
+        created_at,
+        updated_at
+      )
+      values (?, ?, ?, 'positive', 0.95, 0.98, 6500, 6500)
+    `
+  ).run("cluster_ai", "family_ai", embeddingIndexId);
+  db.prepare(
+    `
+      insert into interest_cluster_family_members (
+        cluster_id,
+        family_id,
+        embedding_index_id,
+        polarity,
+        membership_confidence,
+        centroid_similarity,
+        created_at,
+        updated_at
+      )
+      values (?, ?, ?, 'positive', 0.91, 0.93, 6500, 6500)
+    `
+  ).run("cluster_design", "family_design", embeddingIndexId);
 }
 
 function insertApiClusterLabelFixture(db: DibaoDatabase, embeddingIndexId: string): void {

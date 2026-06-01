@@ -183,6 +183,8 @@ type V2Score = {
   preRerankScore: number;
   primaryFamilyId: string | null;
   primaryFamilyLabel: string | null;
+  primaryClusterId: string | null;
+  primaryClusterLabel: string | null;
   primaryFamilyMaturity: number;
   primaryFamilyDominanceRatio: number;
   matchedFamilyCount: number;
@@ -1100,6 +1102,8 @@ function interestMatchesFor(
   negativeSimilarity: number;
   primaryFamilyId: string | null;
   primaryFamilyLabel: string | null;
+  primaryClusterId: string | null;
+  primaryClusterLabel: string | null;
   primaryFamilyMaturity: number;
   primaryFamilyDominanceRatio: number;
   matchedFamilyCount: number;
@@ -1111,6 +1115,8 @@ function interestMatchesFor(
       negativeSimilarity: 0,
       primaryFamilyId: null,
       primaryFamilyLabel: null,
+      primaryClusterId: null,
+      primaryClusterLabel: null,
       primaryFamilyMaturity: 0,
       primaryFamilyDominanceRatio: 0,
       matchedFamilyCount: 0
@@ -1121,6 +1127,8 @@ function interestMatchesFor(
   const positiveByFamily = new Map<string, {
     value: number;
     similarity: number;
+    clusterId: string;
+    clusterLabel: string | null;
     familyLabel: string | null;
     familyMaturity: number;
     familyDominanceRatio: number;
@@ -1139,6 +1147,8 @@ function interestMatchesFor(
           positiveByFamily.set(cluster.familyId, {
             value: weightedMatch,
             similarity,
+            clusterId: cluster.cluster.id,
+            clusterLabel: cluster.cluster.label ?? cluster.familyLabel,
             familyLabel: cluster.familyLabel,
             familyMaturity: cluster.familyMaturity,
             familyDominanceRatio: cluster.familyDominanceRatio
@@ -1172,6 +1182,8 @@ function interestMatchesFor(
     negativeSimilarity,
     primaryFamilyId: primary?.familyId ?? null,
     primaryFamilyLabel: primary?.familyLabel ?? null,
+    primaryClusterId: primary?.clusterId ?? null,
+    primaryClusterLabel: primary?.clusterLabel ?? null,
     primaryFamilyMaturity: primary?.familyMaturity ?? 0,
     primaryFamilyDominanceRatio: primary?.familyDominanceRatio ?? 0,
     matchedFamilyCount: positive.length
@@ -1472,6 +1484,8 @@ function calculateV2Score(input: {
     preRerankScore: roundScore(preRerankScore),
     primaryFamilyId: matches.primaryFamilyId,
     primaryFamilyLabel: matches.primaryFamilyLabel,
+    primaryClusterId: matches.primaryClusterId,
+    primaryClusterLabel: matches.primaryClusterLabel,
     primaryFamilyMaturity: roundScore(matches.primaryFamilyMaturity),
     primaryFamilyDominanceRatio: roundScore(matches.primaryFamilyDominanceRatio),
     matchedFamilyCount: matches.matchedFamilyCount
@@ -1818,6 +1832,8 @@ function explanationPayloadFor(
       ftrl: score.ftrlScore,
       primaryFamilyId: score.primaryFamilyId,
       primaryFamilyLabel: score.primaryFamilyLabel,
+      primaryClusterId: score.primaryClusterId,
+      primaryClusterLabel: score.primaryClusterLabel,
       primaryFamilyMaturity: score.primaryFamilyMaturity,
       primaryFamilyDominanceRatio: score.primaryFamilyDominanceRatio,
       matchedFamilyCount: score.matchedFamilyCount

@@ -10,6 +10,7 @@
   "include": ["src", "src/**/*.json"],
   "references": [
     { "path": "../../packages/db" },
+    { "path": "../../packages/plugin-sdk" },
     { "path": "../../packages/ranking" },
     { "path": "../../packages/rss" },
     { "path": "../../packages/shared" }

@@ -1,10 +1,20 @@
 import type { FormEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ArticleDetail, ArticleListItem, ArticleSearchSort, ArticleSearchState, ArticleState, ArticleTimeWindow, ArticleView, FavoriteArticleSort, Feed, FeedDiagnosticItem, FeedFolder, RankExplanation, RankExplanationReason, ReaderCommandMarkScopeReadPreviewResponse, ReaderSettings, ReadLaterArticleSort, RecommendationStatus } from "../api.js";
+import type { ArticleDetail, ArticleListItem, ArticleSearchSort, ArticleSearchState, ArticleState, ArticleTimeWindow, ArticleView, FavoriteArticleSort, Feed, FeedDiagnosticItem, FeedFolder, PluginContributions, RankExplanation, RankExplanationReason, ReaderCommandMarkScopeReadPreviewResponse, ReaderSettings, ReadLaterArticleSort, RecommendationStatus } from "../api.js";
 import { useI18n, type Dictionary, type NavigationItemKey } from "../i18n.js";
 import styles from "../design-system/AppShell/AppShell.module.css";
 import { articleInteractionStatusForState } from "../articleListState.js";
 import { articleSortForView, canLoadRankExplanation, classNames, clusterDisplayName, confidenceBucket, countFeedsByFolder, explanationReasonText, formatCompactNumber, formatPercent, pageForNavigationItem, plainTextSummary, readerStyleFor, recommendationStatusMetrics, safeArticleUrl, sanitizeArticleHtml, shouldLetBrowserHandleLinkClick, shouldLoadRankExplanation, sortExplanationForView, supportsQuickFilters, supportsUnreadOnly, urlForAppPage, urlForArticle, urlForSearchPage, clampNumber, type ArticleActionIntent, type ArticleActionTarget, type AppPage, type FeedDiagnosticsByFeedId, type PendingArticleAction, type ReadProgressMetadata, type ReadProgressPostOptions, type SearchFormState, type SourceSelection } from "../app/shared.js";
+
+export type PluginActionButton = PluginContributions["actions"][number] & {
+  pluginId: string;
+  pluginName: string;
+};
+
+export type PluginActionContext = {
+  articleId?: string;
+  slot: string;
+};
 
 export function FeedPanel(props: {
   diagnosticsByFeedId: FeedDiagnosticsByFeedId;
@@ -138,6 +148,7 @@ export function ArticleListPanel(props: {
   loadMoreError: string | null;
   nextCursor: string | null;
   onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
+  onPluginAction?: (action: PluginActionButton, context: PluginActionContext) => void;
   onFavoriteSortChange: (sort: FavoriteArticleSort) => void;
   onReadLaterSortChange: (sort: ReadLaterArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
@@ -150,6 +161,9 @@ export function ArticleListPanel(props: {
   onTimeWindowChange: (timeWindow: ArticleTimeWindow) => void;
   onUnreadOnlyChange: (unreadOnly: boolean) => void;
   pendingAction?: PendingArticleAction | null;
+  pluginListToolbarEndActions?: PluginActionButton[];
+  pluginListToolbarStartActions?: PluginActionButton[];
+  pluginRowActions?: PluginActionButton[];
   recommendationStatus: RecommendationStatus | null;
   recommendationStatusError: string | null;
   readerCommandError: string | null;
@@ -195,6 +209,10 @@ export function ArticleListPanel(props: {
           <h2 id="articles-title">{t.articles.views[props.articleView]}</h2>
         </div>
         <div className={styles.panelHeaderActions}>
+          <PluginActionButtons
+            actions={props.pluginListToolbarStartActions ?? []}
+            onRun={(action) => props.onPluginAction?.(action, { slot: action.slot })}
+          />
           <button
             aria-label={t.feeds.openSourcesLabel}
             className={styles.mobileSourceButton}
@@ -256,6 +274,10 @@ export function ArticleListPanel(props: {
               />
             </div>
           ) : null}
+          <PluginActionButtons
+            actions={props.pluginListToolbarEndActions ?? []}
+            onRun={(action) => props.onPluginAction?.(action, { slot: action.slot })}
+          />
         </div>
       </div>
 
@@ -337,11 +359,15 @@ export function ArticleListPanel(props: {
                 onAction={(intent) => props.onArticleAction?.(article, intent)}
                 canExplain={shouldLoadRankExplanation(props.articleView)}
                 onExplain={() => props.onExplainArticle(article.id)}
+                onPluginAction={(action) =>
+                  props.onPluginAction?.(action, { articleId: article.id, slot: action.slot })
+                }
                 pendingAction={
                   props.pendingAction?.articleId === article.id
                     ? props.pendingAction.intent
                     : null
                 }
+                pluginActions={props.pluginRowActions ?? []}
               />
             </article>
           ))}
@@ -547,6 +573,7 @@ export function SearchResultsPanel(props: {
   loadMoreError: string | null;
   nextCursor: string | null;
   onArticleAction?: (article: ArticleActionTarget, intent: ArticleActionIntent) => void;
+  onPluginAction?: (action: PluginActionButton, context: PluginActionContext) => void;
   onChange: (form: SearchFormState) => void;
   onExplainArticle: (articleId: string) => void;
   onLoadMore: () => void;
@@ -554,6 +581,7 @@ export function SearchResultsPanel(props: {
   onSelectArticle: (articleId: string) => void;
   onSubmit: (form: SearchFormState) => void;
   pendingAction?: PendingArticleAction | null;
+  pluginRowActions?: PluginActionButton[];
   readerCommandError: string | null;
   resultUrlForm: SearchFormState;
   selectedArticleId: string | null;
@@ -780,11 +808,15 @@ export function SearchResultsPanel(props: {
                 canExplain={true}
                 onAction={(intent) => props.onArticleAction?.(article, intent)}
                 onExplain={() => props.onExplainArticle(article.id)}
+                onPluginAction={(action) =>
+                  props.onPluginAction?.(action, { articleId: article.id, slot: action.slot })
+                }
                 pendingAction={
                   props.pendingAction?.articleId === article.id
                     ? props.pendingAction.intent
                     : null
                 }
+                pluginActions={props.pluginRowActions ?? []}
               />
             </article>
           ))}
@@ -1052,6 +1084,7 @@ export function ArticleDetailPanel(props: {
   isDetailLoading: boolean;
   isExplanationLoading: boolean;
   onArticleAction: (article: ArticleDetail, intent: ArticleActionIntent) => void;
+  onPluginAction?: (action: PluginActionButton, context: PluginActionContext) => void;
   onBackToList: () => void;
   onCloseExplanation: () => void;
   onOpenExplanation: () => void;
@@ -1062,6 +1095,8 @@ export function ArticleDetailPanel(props: {
     options?: ReadProgressPostOptions
   ) => void;
   pendingAction: ArticleActionIntent | null;
+  pluginBottomActions?: PluginActionButton[];
+  pluginToolbarActions?: PluginActionButton[];
   readerSettings: ReaderSettings;
 }) {
   const { t, formatDate } = useI18n();
@@ -1131,8 +1166,12 @@ export function ArticleDetailPanel(props: {
               canExplain={canExplainDetail}
               onExplain={props.onOpenExplanation}
               onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
+              onPluginAction={(action) =>
+                props.onPluginAction?.(action, { articleId: props.article?.id, slot: action.slot })
+              }
               pendingAction={props.pendingAction}
               placement="top"
+              pluginActions={props.pluginToolbarActions ?? []}
             />
           </header>
 
@@ -1151,8 +1190,12 @@ export function ArticleDetailPanel(props: {
             article={props.article}
             hidden={!showReaderActions}
             onAction={(intent) => props.onArticleAction(props.article as ArticleDetail, intent)}
+            onPluginAction={(action) =>
+              props.onPluginAction?.(action, { articleId: props.article?.id, slot: action.slot })
+            }
             pendingAction={props.pendingAction}
             placement="bottom"
+            pluginActions={props.pluginBottomActions ?? []}
           />
           <ArticleExplanationEntry
             articleView={props.articleView}
@@ -1174,7 +1217,9 @@ function ArticleRowActions(props: {
   canExplain: boolean;
   onAction: (intent: ArticleActionIntent) => void;
   onExplain: () => void;
+  onPluginAction?: (action: PluginActionButton) => void;
   pendingAction: ArticleActionIntent | null;
+  pluginActions?: PluginActionButton[];
 }) {
   const { t } = useI18n();
   const { state } = props.article;
@@ -1232,6 +1277,7 @@ function ArticleRowActions(props: {
           <ActionIcon name="sparkle" />
         </button>
       ) : null}
+      <PluginActionButtons actions={props.pluginActions ?? []} onRun={props.onPluginAction} />
     </div>
   );
 }
@@ -1267,8 +1313,10 @@ export function ArticleActionControls(props: {
   hidden?: boolean;
   onAction: (intent: ArticleActionIntent) => void;
   onExplain?: () => void;
+  onPluginAction?: (action: PluginActionButton) => void;
   pendingAction: ArticleActionIntent | null;
   placement?: "top" | "bottom";
+  pluginActions?: PluginActionButton[];
 }) {
   const { t } = useI18n();
   const { state } = props.article;
@@ -1342,9 +1390,36 @@ export function ArticleActionControls(props: {
             <ActionIcon name="sparkle" />
           </button>
         ) : null}
+        <PluginActionButtons actions={props.pluginActions ?? []} onRun={props.onPluginAction} />
       </div>
       {props.actionError ? <p className={styles.actionError}>{props.actionError}</p> : null}
     </div>
+  );
+}
+
+function PluginActionButtons(props: {
+  actions: PluginActionButton[];
+  onRun?: (action: PluginActionButton) => void;
+}) {
+  if (props.actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      {props.actions.map((action) => (
+        <button
+          aria-label={action.label}
+          className={classNames(styles.actionButton, styles.actionExplain)}
+          key={`${action.pluginId}:${action.id}`}
+          onClick={() => props.onRun?.(action)}
+          title={`${action.pluginName}: ${action.label}`}
+          type="button"
+        >
+          <ActionIcon name={iconNameForPluginAction(action.icon)} />
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -1537,6 +1612,31 @@ type ActionIconName =
   | "sparkle"
   | "star"
   | "starFilled";
+
+function iconNameForPluginAction(icon: string | undefined): ActionIconName {
+  if (icon === "bookmark") {
+    return "bookmark";
+  }
+  if (icon === "dismiss" || icon === "x") {
+    return "dismiss";
+  }
+  if (icon === "gear" || icon === "settings") {
+    return "gear";
+  }
+  if (icon === "like" || icon === "thumbs-up") {
+    return "like";
+  }
+  if (icon === "search") {
+    return "search";
+  }
+  if (icon === "sparkle" || icon === "sparkles") {
+    return "sparkle";
+  }
+  if (icon === "star") {
+    return "star";
+  }
+  return "feed";
+}
 
 export function NavigationIcon(props: { item: NavigationItemKey }) {
   const iconByItem: Record<NavigationItemKey, ActionIconName> = {

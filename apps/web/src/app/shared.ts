@@ -1269,7 +1269,11 @@ export function isNavigationItemActive(item: NavigationItemKey, page: AppPage): 
     return item === "settings";
   }
 
-  return item === "settings";
+  if (page.type === "settings") {
+    return item === "settings";
+  }
+
+  return false;
 }
 
 export function isUtilityNavigationActive(page: AppPage): boolean {

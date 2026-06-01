@@ -29,6 +29,7 @@ import {
   type FeedFolder,
   type FullContentBackfillResponse,
   type FullContentPreviewResponse,
+  type JobListItem,
   type LatestReleaseStatus,
   type OpmlImportResponse,
   type PluginListItem,
@@ -75,7 +76,7 @@ import {
   storeTelemetryPreference
 } from "./telemetry.js";
 import { PwaStatusBanner, SetupWelcomePanel, AuthGatePanel, DerivedDataUpgradePanel, SetupSourcesPanel, SetupOptionalPluginsPanel } from "./setup/SetupPanels.js";
-import { FeedPanel, ArticleListPanel, SearchResultsPanel, ArticleDetailPanel, ArticleExplanationDialog, NavigationIcon, ActionIcon } from "./reader/ReaderPanels.js";
+import { FeedPanel, ArticleListPanel, SearchResultsPanel, ArticleDetailPanel, ArticleExplanationDialog, NavigationIcon, ActionIcon, type PluginActionButton, type PluginActionContext } from "./reader/ReaderPanels.js";
 import {
   actionErrorMessageFor,
   appendUniqueArticles,
@@ -2322,6 +2323,38 @@ export function App() {
     navigateToAppPage(page);
   }
 
+  async function handlePluginAction(action: PluginActionButton, context: PluginActionContext) {
+    setPluginError(null);
+    try {
+      if (action.command.startsWith("task:")) {
+        const taskId = action.command.slice("task:".length);
+        await dibaoApi.startPluginTask(action.pluginId, taskId);
+        return;
+      }
+      if (action.command.startsWith("route:")) {
+        navigateToAppPage({
+          type: "plugin",
+          pluginId: action.pluginId,
+          route: action.command.slice("route:".length)
+        });
+        return;
+      }
+      if (action.command.startsWith("api:")) {
+        await dibaoApi.callPluginApi(action.pluginId, action.command.slice("api:".length), {
+          actionId: action.id,
+          context
+        });
+        return;
+      }
+      await dibaoApi.callPluginApi(action.pluginId, `/${action.command}`, {
+        actionId: action.id,
+        context
+      });
+    } catch (error) {
+      setPluginError(userMessageForError(error, t.errors.api));
+    }
+  }
+
   const noticeText = notice ? noticeTextFor(notice, t) : null;
   const pwaStatusBanner = (
     <PwaStatusBanner
@@ -2340,13 +2373,49 @@ export function App() {
         activePlugin.contributions.routes[0] ??
         null
       : null;
-  const pluginNavItems = pluginContributions.flatMap((plugin) =>
+  const pluginDesktopNavItems = pluginContributions.flatMap((plugin) =>
     plugin.contributions.primaryNav.map((nav) => ({
       plugin,
       nav,
       page: { type: "plugin", pluginId: plugin.id, route: nav.route } satisfies AppPage
     }))
   );
+  const pluginMobilePrimaryNavItems = pluginContributions.flatMap((plugin) =>
+    plugin.contributions.primaryMobile.map((nav) => ({
+      plugin,
+      nav,
+      page: { type: "plugin", pluginId: plugin.id, route: nav.route } satisfies AppPage
+    }))
+  );
+  const pluginMobilePrimaryNavKeys = new Set(
+    pluginMobilePrimaryNavItems.map(({ plugin, nav }) => `${plugin.id}:${nav.route}`)
+  );
+  const pluginMobileOverflowNavItems = pluginDesktopNavItems.filter(
+    ({ plugin, nav }) => !pluginMobilePrimaryNavKeys.has(`${plugin.id}:${nav.route}`)
+  );
+  const isMobileUtilityNavigationActive =
+    isUtilityNavigationActive(appPage) ||
+    pluginMobileOverflowNavItems.some(({ page }) => sameAppPage(appPage, page));
+  const pluginActionsBySlot = new Map<string, PluginActionButton[]>();
+  for (const plugin of pluginContributions) {
+    for (const action of plugin.contributions.actions) {
+      const actions = pluginActionsBySlot.get(action.slot) ?? [];
+      actions.push({
+        ...action,
+        pluginId: plugin.id,
+        pluginName: plugin.name
+      });
+      pluginActionsBySlot.set(action.slot, actions);
+    }
+  }
+  for (const actions of pluginActionsBySlot.values()) {
+    actions.sort(
+      (left, right) =>
+        (left.order ?? 100) - (right.order ?? 100) ||
+        left.label.localeCompare(right.label)
+    );
+  }
+  const pluginActionsForSlot = (slot: string) => pluginActionsBySlot.get(slot) ?? [];
   const pageTitle =
     appPage.type === "feed-management"
       ? t.feedManagement.pageTitle
@@ -2545,12 +2614,31 @@ export function App() {
               </a>
             );
           })}
-          {pluginNavItems.map(({ plugin, nav, page }) => (
+          {pluginDesktopNavItems.map(({ plugin, nav, page }) => (
             <a
               aria-label={nav.label}
-              className={sameAppPage(appPage, page) ? styles.navItemActive : styles.navItem}
+              className={classNames(
+                sameAppPage(appPage, page) ? styles.navItemActive : styles.navItem,
+                styles.navDesktopOnly
+              )}
               href={urlForAppPage(page)}
               key={`${plugin.id}:${nav.route}`}
+              onClick={(event) => handlePluginNavigationClick(event, page)}
+              title={nav.label}
+            >
+              <ActionIcon name={iconNameForPlugin(nav.icon)} />
+              <span className={styles.navLabel}>{nav.label}</span>
+            </a>
+          ))}
+          {pluginMobilePrimaryNavItems.map(({ plugin, nav, page }) => (
+            <a
+              aria-label={nav.label}
+              className={classNames(
+                sameAppPage(appPage, page) ? styles.navItemActive : styles.navItem,
+                styles.navMobileOnly
+              )}
+              href={urlForAppPage(page)}
+              key={`${plugin.id}:${nav.route}:mobile`}
               onClick={(event) => handlePluginNavigationClick(event, page)}
               title={nav.label}
             >
@@ -2563,7 +2651,7 @@ export function App() {
             aria-expanded={isUtilityMenuOpen}
             aria-label={t.navigation.utilityMenuLabel}
             className={classNames(
-              isUtilityNavigationActive(appPage) ? styles.navItemActive : styles.navItem,
+              isMobileUtilityNavigationActive ? styles.navItemActive : styles.navItem,
               styles.navUtilityToggle
             )}
             onClick={() => setIsUtilityMenuOpen((isOpen) => !isOpen)}
@@ -2599,7 +2687,7 @@ export function App() {
                   </a>
                 );
               })}
-              {pluginNavItems.map(({ plugin, nav, page }) => (
+              {pluginMobileOverflowNavItems.map(({ plugin, nav, page }) => (
                 <a
                   className={styles.utilityMenuItem}
                   href={urlForAppPage(page)}
@@ -2663,6 +2751,9 @@ export function App() {
             onDeleteFolder={handleDeleteManagedFolder}
             onExportOpml={handleExportOpml}
             onImportOpml={handleImportOpml}
+            onPluginAction={(action, context) => {
+              void handlePluginAction(action, context);
+            }}
             onRefreshFeed={handleRefreshFeed}
             onRefreshAllFeeds={handleRefreshAllFeeds}
             onPreviewFullContent={handlePreviewFullContent}
@@ -2671,6 +2762,7 @@ export function App() {
             onUpdateFeed={handleUpdateManagedFeed}
             onUpdateFolder={handleUpdateManagedFolder}
             opmlSummary={opmlSummary}
+            pluginToolbarActions={pluginActionsForSlot("feed.management.toolbar.end")}
             refreshingFeedId={refreshingFeedId}
           />
         ) : appPage.type === "full-content-preview" ? (
@@ -2774,6 +2866,9 @@ export function App() {
               loadMoreError={loadMoreError}
               nextCursor={nextArticleCursor}
               onArticleAction={handleArticleAction}
+              onPluginAction={(action, context) => {
+                void handlePluginAction(action, context);
+              }}
               onChange={handleSearchFormChange}
               onExplainArticle={(articleId) => {
                 void handleOpenListExplanation(articleId);
@@ -2783,6 +2878,7 @@ export function App() {
               onSelectArticle={handleSelectArticle}
               onSubmit={handleSearchSubmit}
               pendingAction={pendingArticleAction}
+              pluginRowActions={pluginActionsForSlot("article.list.item.actions.end")}
               readerCommandError={readerCommandError}
               resultUrlForm={submittedSearchForm}
               selectedArticleId={selectedArticleId}
@@ -2806,6 +2902,9 @@ export function App() {
               isExplanationOpen={isExplanationOpen}
               isExplanationLoading={isExplanationLoading}
               onArticleAction={handleArticleAction}
+              onPluginAction={(action, context) => {
+                void handlePluginAction(action, context);
+              }}
               onBackToList={handleBackToArticleList}
               onCloseExplanation={handleCloseExplanation}
               onOpenExplanation={handleOpenExplanation}
@@ -2815,6 +2914,8 @@ export function App() {
                   ? pendingArticleAction.intent
                   : null
               }
+              pluginBottomActions={pluginActionsForSlot("article.reader.bottomSheet.actions")}
+              pluginToolbarActions={pluginActionsForSlot("article.reader.toolbar.end")}
               readerSettings={appSettings.reader}
             />
 
@@ -2876,6 +2977,9 @@ export function App() {
               onPreviewMarkScopeRead={previewCurrentArticleListScopeRead}
               onOpenSources={() => setIsSourceDrawerOpen(true)}
               onArticleAction={handleArticleAction}
+              onPluginAction={(action, context) => {
+                void handlePluginAction(action, context);
+              }}
               onSelectArticle={handleSelectArticle}
               onExplainArticle={(articleId) => {
                 void handleOpenListExplanation(articleId);
@@ -2887,6 +2991,9 @@ export function App() {
               favoriteSort={favoriteSort}
               readLaterSort={readLaterSort}
               pendingAction={pendingArticleAction}
+              pluginListToolbarEndActions={pluginActionsForSlot("article.list.toolbar.end")}
+              pluginListToolbarStartActions={pluginActionsForSlot("article.list.toolbar.start")}
+              pluginRowActions={pluginActionsForSlot("article.list.item.actions.end")}
               recommendationStatus={
                 currentArticleView === "recommended" ? recommendationStatus : null
               }
@@ -2920,6 +3027,9 @@ export function App() {
               isExplanationOpen={isExplanationOpen}
               isExplanationLoading={isExplanationLoading}
               onArticleAction={handleArticleAction}
+              onPluginAction={(action, context) => {
+                void handlePluginAction(action, context);
+              }}
               onBackToList={handleBackToArticleList}
               onCloseExplanation={handleCloseExplanation}
               onOpenExplanation={handleOpenExplanation}
@@ -2929,6 +3039,8 @@ export function App() {
                   ? pendingArticleAction.intent
                   : null
               }
+              pluginBottomActions={pluginActionsForSlot("article.reader.bottomSheet.actions")}
+              pluginToolbarActions={pluginActionsForSlot("article.reader.toolbar.end")}
               readerSettings={appSettings.reader}
             />
 
@@ -2954,19 +3066,60 @@ function PluginWorkspace(props: {
   const { t } = useI18n();
 
   useEffect(() => {
-    function handleMessage(event: MessageEvent) {
+    async function handleMessage(event: MessageEvent) {
       if (event.origin !== window.location.origin) {
         return;
       }
-      const data = event.data as { type?: unknown; articleId?: unknown };
+      const data = event.data as {
+        type?: unknown;
+        articleId?: unknown;
+        requestId?: unknown;
+        method?: unknown;
+        payload?: unknown;
+      };
       if (data.type === "dibao.openArticle" && typeof data.articleId === "string") {
         props.onOpenArticle(data.articleId);
+        return;
+      }
+      if (!props.plugin || data.type !== "dibao.bridge" || typeof data.requestId !== "string") {
+        return;
+      }
+      try {
+        const result = await handlePluginBridgeRequest(
+          props.plugin,
+          data.method,
+          data.payload,
+          props.onOpenArticle
+        );
+        (event.source as WindowProxy | null)?.postMessage(
+          {
+            type: "dibao.bridge.response",
+            schemaVersion: 1,
+            pluginId: props.plugin.id,
+            requestId: data.requestId,
+            ok: true,
+            result
+          },
+          event.origin
+        );
+      } catch (error) {
+        (event.source as WindowProxy | null)?.postMessage(
+          {
+            type: "dibao.bridge.response",
+            schemaVersion: 1,
+            pluginId: props.plugin.id,
+            requestId: data.requestId,
+            ok: false,
+            error: userMessageForError(error, t.errors.api)
+          },
+          event.origin
+        );
       }
     }
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [props.onOpenArticle]);
+  }, [props.plugin, props.onOpenArticle, t.errors.api]);
 
   if (!props.plugin) {
     return (
@@ -2997,6 +3150,63 @@ function PluginWorkspace(props: {
       />
     </section>
   );
+}
+
+async function handlePluginBridgeRequest(
+  plugin: PluginListItem,
+  method: unknown,
+  payload: unknown,
+  onOpenArticle: (articleId: string) => void
+): Promise<unknown> {
+  const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  switch (method) {
+    case "getSettings":
+      return await dibaoApi.getPluginSettings(plugin.id);
+    case "updatePluginSettings":
+      return await dibaoApi.updatePluginSettings(
+        plugin.id,
+        input.settings && typeof input.settings === "object" && !Array.isArray(input.settings)
+          ? input.settings as Record<string, unknown>
+          : input
+      );
+    case "startTask":
+      if (typeof input.taskId !== "string") {
+        throw new Error("taskId is required");
+      }
+      return await dibaoApi.startPluginTask(plugin.id, input.taskId);
+    case "listJobs":
+      return await dibaoApi.listJobs({
+        type: typeof input.type === "string" ? input.type : undefined,
+        status: isPluginJobStatus(input.status) ? input.status : undefined,
+        limit: typeof input.limit === "number" ? input.limit : undefined
+      });
+    case "readArticles":
+      return await dibaoApi.listArticles({
+        view: isArticleView(input.view) ? input.view : "recommended",
+        limit: typeof input.limit === "number" ? input.limit : undefined
+      });
+    case "openArticle":
+      if (typeof input.articleId !== "string") {
+        throw new Error("articleId is required");
+      }
+      onOpenArticle(input.articleId);
+      return { ok: true };
+    case "pluginApi":
+      if (typeof input.path !== "string") {
+        throw new Error("path is required");
+      }
+      return await dibaoApi.callPluginApi(plugin.id, input.path, input.body ?? {});
+    default:
+      throw new Error("Unsupported plugin bridge method");
+  }
+}
+
+function isArticleView(value: unknown): value is ArticleView {
+  return value === "latest" || value === "recommended" || value === "favorites" || value === "read_later";
+}
+
+function isPluginJobStatus(value: unknown): value is JobListItem["status"] {
+  return value === "queued" || value === "running" || value === "succeeded" || value === "failed" || value === "cancelled";
 }
 
 function iconNameForPlugin(icon: string | undefined): Parameters<typeof ActionIcon>[0]["name"] {

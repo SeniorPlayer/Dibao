@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { verifyPluginPackageSignature, type DibaoPluginSignature } from "@dibao/plugin-sdk";
 import type {
   DibaoDatabase,
   JobRepository,
@@ -120,6 +121,7 @@ type PluginPackage = {
   manifest?: unknown;
   files?: Record<string, string>;
   updateUrl?: string;
+  signature?: DibaoPluginSignature;
 };
 
 type PluginUpdateMetadata = {
@@ -173,7 +175,25 @@ export type RankedWinner = {
   calculatedAt: number | null;
   familyId: string;
   familyLabel: string;
+  clusterId: string | null;
+  clusterLabel: string | null;
   reason: string | null;
+};
+
+export type PluginTopicTargets = {
+  families: Array<{
+    id: string;
+    label: string;
+    polarity: "positive" | "negative";
+    clusterCount: number;
+    supportArticleCount: number;
+  }>;
+  clusters: Array<{
+    id: string;
+    label: string;
+    familyId: string;
+    polarity: "positive" | "negative";
+  }>;
 };
 
 export class PluginServiceError extends Error {
@@ -218,6 +238,15 @@ type PluginRuntimeContributions = {
   primaryNav: Array<{ label: string; route: string; icon?: string; order?: number }>;
   primaryMobile: Array<{ label: string; route: string; icon?: string; order?: number }>;
   settingsTabs: Array<{ id: string; label: string; route: string; order?: number }>;
+  tabs: Array<{ id: string; label: string; slot: string; route: string; icon?: string; order?: number }>;
+  actions: Array<{
+    id: string;
+    label: string;
+    slot: string;
+    icon?: string;
+    command: string;
+    order?: number;
+  }>;
   setupSteps: Array<{
     id: string;
     title: string;
@@ -439,6 +468,21 @@ export class PluginService {
       }
     }
     const parsed = parsePluginPackage(packageContent);
+    const signatureResult = verifyPluginPackageSignature({
+      pluginPackage: {
+        manifest: parsed.manifest,
+        files: parsed.files,
+        updateUrl: parsed.updateUrl,
+        signature: parsed.signature
+      }
+    });
+    if (!signatureResult.ok) {
+      throw new PluginServiceError(
+        400,
+        "VALIDATION_ERROR",
+        signatureResult.errors.join("; ")
+      );
+    }
     const manifest = parsePluginManifest(parsed.manifest);
     if (input.expectedId && manifest.id !== input.expectedId) {
       throw new PluginServiceError(400, "VALIDATION_ERROR", "Plugin package ID mismatch");
@@ -804,6 +848,10 @@ export class PluginService {
         listRankedWinners: (input: { windowMs: number; limit: number }) => {
           requireCapability("ranking:read");
           return this.listRankedWinners(input);
+        },
+        listDailyBriefTargets: () => {
+          requireCapability("ranking:read");
+          return this.listDailyBriefTargets();
         }
       },
       articles: {
@@ -833,7 +881,7 @@ export class PluginService {
             a.discovered_at as discoveredAt,
             coalesce(rs.score, base_rs.score) as score,
             coalesce(rs.calculated_at, base_rs.calculated_at) as calculatedAt,
-            ex.payload_json as payloadJson
+            coalesce(ex.payload_json, base_ex.payload_json) as payloadJson
           from articles a
           join feeds f on f.id = a.feed_id
           left join article_states s on s.article_id = a.id
@@ -846,6 +894,9 @@ export class PluginService {
           left join article_rank_explanations ex
             on ex.article_id = a.id
             and ex.rank_context = ?
+          left join article_rank_explanations base_ex
+            on base_ex.article_id = a.id
+            and base_ex.rank_context = ?
           where a.deleted_at is null
             and a.status != 'deleted'
             and f.deleted_at is null
@@ -862,13 +913,15 @@ export class PluginService {
           limit ?
         `
       )
-      .all(rankContext, "base", rankContext, since, limit) as Array<RankedWinner & { payloadJson: string | null }>;
+      .all(rankContext, "base", rankContext, "base", since, limit) as Array<RankedWinner & { payloadJson: string | null }>;
 
     return rows.map((row) => {
       const payload = parseJsonObject(row.payloadJson);
       const components = parseJsonObject(payload?.components);
       const familyId = stringOrNull(components?.primaryFamilyId) ?? `source:${row.feedId}`;
       const familyLabel = stringOrNull(components?.primaryFamilyLabel) ?? row.feedTitle;
+      const clusterId = stringOrNull(components?.primaryClusterId);
+      const clusterLabel = stringOrNull(components?.primaryClusterLabel);
       return {
         articleId: row.articleId,
         feedId: row.feedId,
@@ -882,9 +935,80 @@ export class PluginService {
         calculatedAt: row.calculatedAt,
         familyId,
         familyLabel,
+        clusterId,
+        clusterLabel,
         reason: familyId.startsWith("source:") ? "source" : "interest-family"
       };
     });
+  }
+
+  private listDailyBriefTargets(): PluginTopicTargets {
+    const activeIndex = this.options.db
+      .prepare(
+        `
+          select id
+          from embedding_indexes
+          where status = 'active'
+          order by updated_at desc, id
+          limit 1
+        `
+      )
+      .get() as { id: string } | undefined;
+    if (!activeIndex) {
+      return { families: [], clusters: [] };
+    }
+
+    const familyRows = this.options.db
+      .prepare(
+        `
+          select
+            id,
+            display_label as label,
+            polarity,
+            cluster_count as clusterCount,
+            support_article_count as supportArticleCount
+          from interest_families
+          where embedding_index_id = ?
+            and polarity = 'positive'
+          order by weight desc, support_article_count desc, display_label collate nocase
+        `
+      )
+      .all(activeIndex.id) as PluginTopicTargets["families"];
+
+    const clusters = this.options.db
+      .prepare(
+        `
+          select
+            c.id,
+            coalesce(nullif(l.manual_label, ''), nullif(l.auto_label, ''), nullif(c.label, ''), c.id) as label,
+            coalesce(m.family_id, c.id) as familyId,
+            c.polarity
+          from interest_clusters c
+          left join interest_cluster_labels l on l.cluster_id = c.id
+          left join interest_cluster_family_members m on m.cluster_id = c.id
+          where c.embedding_index_id = ?
+            and c.polarity = 'positive'
+          order by c.weight desc, c.updated_at desc, c.id
+        `
+      )
+      .all(activeIndex.id) as PluginTopicTargets["clusters"];
+
+    const families = [...familyRows];
+    const familyIds = new Set(families.map((family) => family.id));
+    for (const cluster of clusters) {
+      if (!familyIds.has(cluster.familyId)) {
+        families.push({
+          id: cluster.familyId,
+          label: cluster.label,
+          polarity: cluster.polarity,
+          clusterCount: 1,
+          supportArticleCount: 0
+        });
+        familyIds.add(cluster.familyId);
+      }
+    }
+
+    return { families, clusters };
   }
 
   private openableArticleSummary(articleId: string): RankedWinner | null {
@@ -1388,6 +1512,26 @@ function runtimeContributions(contributes: PluginManifest["contributes"]): Plugi
     routes,
     primaryNav,
     primaryMobile,
+    tabs: (normalized.tabs ?? [])
+      .map((tab) => ({
+        id: tab.id,
+        label: tab.title,
+        slot: tab.slot,
+        route: tab.route ?? tab.id,
+        icon: tab.icon,
+        order: tab.order
+      }))
+      .sort(sortContributionByOrder),
+    actions: (normalized.actions ?? [])
+      .map((action) => ({
+        id: action.id,
+        label: action.title,
+        slot: action.slot,
+        icon: action.icon,
+        command: action.command,
+        order: action.order
+      }))
+      .sort(sortContributionByOrder),
     settingsTabs: (normalized.settingsTabs ?? [])
       .map((tab) => ({
         id: tab.id,

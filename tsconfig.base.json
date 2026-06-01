@@ -15,6 +15,7 @@
     "paths": {
       "@dibao/shared": ["packages/shared/src/index.ts"],
       "@dibao/db": ["packages/db/src/index.ts"],
+      "@dibao/plugin-sdk": ["packages/plugin-sdk/src/index.ts"],
       "@dibao/ranking": ["packages/ranking/src/index.ts"],
       "@dibao/rss": ["packages/rss/src/index.ts"]
     },
