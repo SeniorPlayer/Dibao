@@ -6,7 +6,8 @@ if (!token) {
 
 const projectOwner = process.env.ROADMAP_PROJECT_OWNER || "Pls-1q43";
 const projectNumber = Number(process.env.ROADMAP_PROJECT_NUMBER || "1");
-const repoFullName = process.env.ROADMAP_REPOSITORY || process.env.GITHUB_REPOSITORY || "Pls-1q43/dibao";
+const repoFullName = process.env.ROADMAP_REPOSITORY || process.env.GITHUB_REPOSITORY || "Pls-1q43/Dibao";
+const normalizedRepoFullName = normalizeNameWithOwner(repoFullName);
 const featureLabel = process.env.FEATURE_REQUEST_LABEL || "enhancement";
 const votesFieldName = process.env.VOTES_FIELD || "Votes";
 const statusFieldName = process.env.STATUS_FIELD || "Status";
@@ -224,6 +225,10 @@ function getStatusOption(statusField, name) {
   return statusField?.options?.find((option) => option.name === name);
 }
 
+function normalizeNameWithOwner(nameWithOwner) {
+  return nameWithOwner.toLowerCase();
+}
+
 function hasFeatureLabel(issue) {
   return issue.labels.nodes.some((label) => label.name.toLowerCase() === featureLabel.toLowerCase());
 }
@@ -319,7 +324,11 @@ async function main() {
   const items = await listProjectItems(project.id);
   const itemByIssueId = new Map(
     items
-      .filter((item) => item.content?.__typename === "Issue" && item.content.repository.nameWithOwner === repoFullName)
+      .filter(
+        (item) =>
+          item.content?.__typename === "Issue" &&
+          normalizeNameWithOwner(item.content.repository.nameWithOwner) === normalizedRepoFullName,
+      )
       .map((item) => [item.content.id, item.id]),
   );
 

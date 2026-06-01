@@ -27,7 +27,7 @@ jobs:
     env:
       ROADMAP_PROJECT_OWNER: Pls-1q43
       ROADMAP_PROJECT_NUMBER: "1"
-      ROADMAP_REPOSITORY: Pls-1q43/dibao
+      ROADMAP_REPOSITORY: Pls-1q43/Dibao
       FEATURE_REQUEST_LABEL: enhancement
       VOTES_FIELD: Votes
       STATUS_FIELD: Status
