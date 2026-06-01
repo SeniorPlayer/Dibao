@@ -847,6 +847,7 @@ describe("web i18n", () => {
           onRunMaintenanceTask={() => Promise.resolve()}
           onUpdateClusterLabelLexicon={() => Promise.resolve()}
           onUpdateClusterLabel={() => Promise.resolve()}
+          onUpdateFamilyLabel={() => Promise.resolve()}
           runningMaintenanceTask={null}
           status={{
             mode: "personalized",
@@ -921,6 +922,7 @@ describe("web i18n", () => {
           }}
           updatingClusterLexicon={false}
           updatingClusterLabelId={null}
+          updatingFamilyLabelId={null}
           updatingMergeCandidateId={null}
         />
       </DibaoI18nProvider>

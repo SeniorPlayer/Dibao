@@ -248,6 +248,7 @@ export function App() {
   const [runningMaintenanceTask, setRunningMaintenanceTask] =
     useState<RecommendationMaintenanceTask | null>(null);
   const [updatingClusterLabelId, setUpdatingClusterLabelId] = useState<string | null>(null);
+  const [updatingFamilyLabelId, setUpdatingFamilyLabelId] = useState<string | null>(null);
   const [updatingClusterLexicon, setUpdatingClusterLexicon] = useState(false);
   const [updatingMergeCandidateId, setUpdatingMergeCandidateId] = useState<string | null>(null);
   const [isRecommendationStatusLoading, setIsRecommendationStatusLoading] = useState(false);
@@ -1867,6 +1868,29 @@ export function App() {
     }
   }
 
+  async function handleUpdateRecommendationFamilyLabel(
+    familyId: string,
+    manualLabel: string | null
+  ) {
+    setUpdatingFamilyLabelId(familyId);
+    setRecommendationStatusError(null);
+    setAllClustersError(null);
+
+    try {
+      await dibaoApi.updateRecommendationFamilyLabel(familyId, manualLabel);
+      await loadRecommendationStatus();
+      if (appPageRef.current.type === "algorithm-clusters") {
+        await loadAllRecommendationClusters();
+      }
+    } catch (error) {
+      const message = userMessageForError(error, t.errors.api);
+      setRecommendationStatusError(message);
+      setAllClustersError(message);
+    } finally {
+      setUpdatingFamilyLabelId(null);
+    }
+  }
+
   async function handleUpdateClusterLabelLexicon(
     overrides: Partial<ClusterLabelLexiconOverrides>
   ) {
@@ -2823,6 +2847,7 @@ export function App() {
             onRunMaintenanceTask={handleRunRecommendationMaintenanceTask}
             onUpdateClusterLabelLexicon={handleUpdateClusterLabelLexicon}
             onUpdateClusterLabel={handleUpdateRecommendationClusterLabel}
+            onUpdateFamilyLabel={handleUpdateRecommendationFamilyLabel}
             onMergeCandidate={handleMergeClusterCandidate}
             onIgnoreCandidate={handleIgnoreClusterCandidate}
             clusterLabelLexicon={clusterLabelLexicon}
@@ -2831,6 +2856,7 @@ export function App() {
             status={recommendationStatus}
             updatingClusterLexicon={updatingClusterLexicon}
             updatingClusterLabelId={updatingClusterLabelId}
+            updatingFamilyLabelId={updatingFamilyLabelId}
             updatingMergeCandidateId={updatingMergeCandidateId}
           />
           </Suspense>
@@ -2842,8 +2868,10 @@ export function App() {
             isLoading={isAllClustersLoading}
             onBack={() => navigateToAppPage({ type: "algorithm-transparency" })}
             onUpdateClusterLabel={handleUpdateRecommendationClusterLabel}
+            onUpdateFamilyLabel={handleUpdateRecommendationFamilyLabel}
             total={allRecommendationClusterTotal}
             updatingClusterLabelId={updatingClusterLabelId}
+            updatingFamilyLabelId={updatingFamilyLabelId}
           />
           </Suspense>
         ) : appPage.type === "search" ? (

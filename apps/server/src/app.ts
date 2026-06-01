@@ -127,6 +127,7 @@ import {
 } from "./interest-cluster-merge-service.js";
 import {
   InterestFamilyService,
+  InterestFamilyServiceError,
   INTEREST_FAMILY_REBUILD_JOB_TYPE,
   type RecommendationClusterFamily
 } from "./interest-family-service.js";
@@ -358,7 +359,15 @@ type RecommendationMergeCandidateParams = {
   id: string;
 };
 
+type RecommendationFamilyParams = {
+  id: string;
+};
+
 type RecommendationClusterLabelBody = {
+  manualLabel?: unknown;
+};
+
+type RecommendationFamilyLabelBody = {
   manualLabel?: unknown;
 };
 
@@ -1532,6 +1541,28 @@ export function buildServer(options: BuildServerOptions = {}) {
         };
       } catch (error) {
         return sendInterestClusterLabelError(reply, error);
+      }
+    }
+  );
+
+  app.patch<{ Params: RecommendationFamilyParams; Body: RecommendationFamilyLabelBody }>(
+    "/api/recommendation/families/:id/label",
+    async (request, reply) => {
+      try {
+        const result = interestFamilyService.setManualLabel(
+          request.params.id,
+          request.body?.manualLabel
+        );
+        return {
+          data: {
+            ok: true,
+            familyId: result.familyId,
+            displayLabel: result.displayLabel,
+            manualLabel: result.manualLabel
+          }
+        };
+      } catch (error) {
+        return sendInterestFamilyError(reply, error);
       }
     }
   );
@@ -5430,6 +5461,14 @@ function sendRecommendationMaintenanceError(reply: FastifyReply, error: unknown)
 
 function sendInterestClusterLabelError(reply: FastifyReply, error: unknown) {
   if (error instanceof InterestClusterLabelServiceError) {
+    return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
+  }
+
+  throw error;
+}
+
+function sendInterestFamilyError(reply: FastifyReply, error: unknown) {
+  if (error instanceof InterestFamilyServiceError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

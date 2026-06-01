@@ -785,6 +785,7 @@ export type RecommendationFamilySummaryItem = {
   id: string;
   polarity: "positive" | "negative";
   displayLabel: string;
+  manualLabel?: string | null;
   weight: number;
   clusterCount: number;
   supportArticleCount: number;
@@ -979,6 +980,7 @@ export type RecommendationClusterItem = {
     id: string;
     polarity: "positive" | "negative";
     displayLabel: string;
+    manualLabel?: string | null;
     weight: number;
     clusterCount: number;
     supportArticleCount: number;
@@ -1021,6 +1023,13 @@ export type UpdateRecommendationClusterLabelResponse = {
   clusterId: string;
   displayLabel: string;
   labelSource: RecommendationClusterItem["labelSource"];
+};
+
+export type UpdateRecommendationFamilyLabelResponse = {
+  ok: true;
+  familyId: string;
+  displayLabel: string;
+  manualLabel: string | null;
 };
 
 export type AuthOkResponse = {
@@ -1579,6 +1588,21 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       return (
         await request<UpdateRecommendationClusterLabelResponse>(
           `/api/recommendation/clusters/${encodeURIComponent(clusterId)}/label`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ manualLabel })
+          }
+        )
+      ).data;
+    },
+
+    async updateRecommendationFamilyLabel(
+      familyId: string,
+      manualLabel: string | null
+    ): Promise<UpdateRecommendationFamilyLabelResponse> {
+      return (
+        await request<UpdateRecommendationFamilyLabelResponse>(
+          `/api/recommendation/families/${encodeURIComponent(familyId)}/label`,
           {
             method: "PATCH",
             body: JSON.stringify({ manualLabel })

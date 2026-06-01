@@ -1233,6 +1233,30 @@ describe("server API vertical slice", () => {
         }
       });
 
+      const renamedFamily = await injectJson(app, "PATCH", "/api/recommendation/families/family_ai/label", {
+        manualLabel: "AI 产品与开发"
+      });
+      expect(renamedFamily.statusCode, renamedFamily.body).toBe(200);
+      expect(renamedFamily.json()).toMatchObject({
+        data: {
+          ok: true,
+          familyId: "family_ai",
+          displayLabel: "AI 产品与开发",
+          manualLabel: "AI 产品与开发"
+        }
+      });
+
+      const renamedState = await app.inject({
+        method: "GET",
+        url: "/api/plugins/app.dibao.daily-brief/api/state"
+      });
+      expect(renamedState.statusCode, renamedState.body).toBe(200);
+      expect(renamedState.json().data.targets.families).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "family_ai", label: "AI 产品与开发" })
+        ])
+      );
+
       const emptyState = await app.inject({
         method: "GET",
         url: "/api/plugins/app.dibao.daily-brief/api/state"
@@ -1249,6 +1273,11 @@ describe("server API vertical slice", () => {
       expect(generated.statusCode, generated.body).toBe(200);
       expect(generated.json().data.generated).toBe(true);
       const generatedBrief = generated.json().data.brief;
+      expect(generatedBrief.groups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "family_ai", label: "AI 产品与开发" })
+        ])
+      );
       const htmlArticle = generatedBrief.groups
         .flatMap(
           (group: {

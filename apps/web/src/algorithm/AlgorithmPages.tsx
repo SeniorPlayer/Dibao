@@ -19,10 +19,12 @@ export function AlgorithmTransparencyPage(props: {
     overrides: Partial<ClusterLabelLexiconOverrides>
   ) => Promise<void>;
   onUpdateClusterLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
+  onUpdateFamilyLabel: (familyId: string, manualLabel: string | null) => Promise<void>;
   runningMaintenanceTask: RecommendationMaintenanceTask | null;
   status: RecommendationStatus | null;
   updatingClusterLexicon: boolean;
   updatingClusterLabelId: string | null;
+  updatingFamilyLabelId: string | null;
   updatingMergeCandidateId: string | null;
 }) {
   const { t, formatDate } = useI18n();
@@ -199,7 +201,11 @@ export function AlgorithmTransparencyPage(props: {
           ) : null}
         </section>
 
-        <FamilySummaryPanel families={props.status?.clusters.families ?? null} />
+        <FamilySummaryPanel
+          families={props.status?.clusters.families ?? null}
+          onUpdateFamilyLabel={props.onUpdateFamilyLabel}
+          updatingFamilyLabelId={props.updatingFamilyLabelId}
+        />
 
         <section className={classNames(styles.settingsSection, "algorithm-card")}>
           <div>
@@ -558,6 +564,8 @@ function ClusterLabelLexiconPanel(props: {
 
 function FamilySummaryPanel(props: {
   families: RecommendationStatus["clusters"]["families"] | null;
+  onUpdateFamilyLabel: (familyId: string, manualLabel: string | null) => Promise<void>;
+  updatingFamilyLabelId: string | null;
 }) {
   const { t } = useI18n();
   const families = props.families?.topFamilies ?? [];
@@ -579,7 +587,12 @@ function FamilySummaryPanel(props: {
       {families.length > 0 ? (
         <div className={styles.algorithmFamilyList}>
           {families.slice(0, 6).map((family) => (
-            <FamilySummaryRow family={family} key={family.id} />
+            <FamilySummaryRow
+              family={family}
+              key={family.id}
+              onUpdateFamilyLabel={props.onUpdateFamilyLabel}
+              updating={props.updatingFamilyLabelId === family.id}
+            />
           ))}
         </div>
       ) : (
@@ -589,8 +602,34 @@ function FamilySummaryPanel(props: {
   );
 }
 
-function FamilySummaryRow(props: { family: RecommendationFamilySummaryItem }) {
+function FamilySummaryRow(props: {
+  family: RecommendationFamilySummaryItem;
+  onUpdateFamilyLabel: (familyId: string, manualLabel: string | null) => Promise<void>;
+  updating: boolean;
+}) {
   const { t } = useI18n();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(
+    props.family.manualLabel ?? props.family.displayLabel
+  );
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftLabel(props.family.manualLabel ?? props.family.displayLabel);
+    }
+  }, [isEditing, props.family.displayLabel, props.family.manualLabel]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await props.onUpdateFamilyLabel(props.family.id, draftLabel.trim() || null);
+    setIsEditing(false);
+  }
+
+  async function handleClearManualLabel() {
+    await props.onUpdateFamilyLabel(props.family.id, null);
+    setIsEditing(false);
+  }
+
   return (
     <div className={styles.algorithmFamilyRow}>
       <div>
@@ -608,6 +647,53 @@ function FamilySummaryRow(props: { family: RecommendationFamilySummaryItem }) {
       <span className={styles.algorithmFamilyPill}>
         {t.algorithmTransparency.families.risk[props.family.diagnostics.concentrationRisk]}
       </span>
+      {isEditing ? (
+        <form className={styles.clusterLabelForm} onSubmit={handleSubmit}>
+          <label>
+            {t.algorithmTransparency.families.renameLabel}
+            <input
+              maxLength={48}
+              onChange={(event) => setDraftLabel(event.target.value)}
+              placeholder={t.algorithmTransparency.families.renamePlaceholder}
+              value={draftLabel}
+            />
+          </label>
+          <div className={styles.clusterLabelActions}>
+            <button className={styles.primaryButton} disabled={props.updating} type="submit">
+              {t.algorithmTransparency.families.saveLabel}
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={props.updating}
+              onClick={() => setIsEditing(false)}
+              type="button"
+            >
+              {t.algorithmTransparency.families.cancelRename}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className={styles.clusterLabelActions}>
+          <button
+            className={styles.secondaryButton}
+            disabled={props.updating}
+            onClick={() => setIsEditing(true)}
+            type="button"
+          >
+            {t.algorithmTransparency.families.rename}
+          </button>
+          {props.family.manualLabel ? (
+            <button
+              className={styles.secondaryButton}
+              disabled={props.updating}
+              onClick={() => void handleClearManualLabel()}
+              type="button"
+            >
+              {t.algorithmTransparency.families.clearManualLabel}
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -643,8 +729,10 @@ export function AlgorithmClustersPage(props: {
   isLoading: boolean;
   onBack: () => void;
   onUpdateClusterLabel: (clusterId: string, manualLabel: string | null) => Promise<void>;
+  onUpdateFamilyLabel: (familyId: string, manualLabel: string | null) => Promise<void>;
   total: number;
   updatingClusterLabelId: string | null;
+  updatingFamilyLabelId: string | null;
 }) {
   const { t } = useI18n();
   const familyGroups = groupClustersByFamily(props.clusters, {
@@ -685,8 +773,17 @@ export function AlgorithmClustersPage(props: {
                   open={groupIndex < 3}
                 >
                   <summary>
-                    {group.label} · {t.algorithmTransparency.families.clusterCount(group.clusters.length)}
+                    <span>
+                      {group.label} · {t.algorithmTransparency.families.clusterCount(group.clusters.length)}
+                    </span>
                   </summary>
+                  {!group.id.startsWith("ungrouped:") ? (
+                    <FamilyGroupRename
+                      family={group.clusters[0]?.family ?? null}
+                      onUpdateFamilyLabel={props.onUpdateFamilyLabel}
+                      updating={props.updatingFamilyLabelId === group.id}
+                    />
+                  ) : null}
                   <div className={styles.algorithmClusterGrid}>
                     {group.clusters.map((cluster) => (
                       <ClusterCard
@@ -708,6 +805,93 @@ export function AlgorithmClustersPage(props: {
         </section>
       </div>
     </section>
+  );
+}
+
+function FamilyGroupRename(props: {
+  family: NonNullable<RecommendationClusterItem["family"]> | null;
+  onUpdateFamilyLabel: (familyId: string, manualLabel: string | null) => Promise<void>;
+  updating: boolean;
+}) {
+  const { t } = useI18n();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(
+    props.family?.manualLabel ?? props.family?.displayLabel ?? ""
+  );
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftLabel(props.family?.manualLabel ?? props.family?.displayLabel ?? "");
+    }
+  }, [isEditing, props.family?.displayLabel, props.family?.manualLabel]);
+
+  if (!props.family) {
+    return null;
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!props.family) {
+      return;
+    }
+    await props.onUpdateFamilyLabel(props.family.id, draftLabel.trim() || null);
+    setIsEditing(false);
+  }
+
+  async function handleClearManualLabel() {
+    if (!props.family) {
+      return;
+    }
+    await props.onUpdateFamilyLabel(props.family.id, null);
+    setIsEditing(false);
+  }
+
+  return isEditing ? (
+    <form className={styles.clusterLabelForm} onSubmit={handleSubmit}>
+      <label>
+        {t.algorithmTransparency.families.renameLabel}
+        <input
+          maxLength={48}
+          onChange={(event) => setDraftLabel(event.target.value)}
+          placeholder={t.algorithmTransparency.families.renamePlaceholder}
+          value={draftLabel}
+        />
+      </label>
+      <div className={styles.clusterLabelActions}>
+        <button className={styles.primaryButton} disabled={props.updating} type="submit">
+          {t.algorithmTransparency.families.saveLabel}
+        </button>
+        <button
+          className={styles.secondaryButton}
+          disabled={props.updating}
+          onClick={() => setIsEditing(false)}
+          type="button"
+        >
+          {t.algorithmTransparency.families.cancelRename}
+        </button>
+      </div>
+    </form>
+  ) : (
+    <div className={styles.clusterLabelActions}>
+      <button
+        className={styles.secondaryButton}
+        disabled={props.updating}
+        onClick={() => setIsEditing(true)}
+        type="button"
+      >
+        {t.algorithmTransparency.families.rename}
+      </button>
+      {props.family.manualLabel ? (
+        <button
+          className={styles.secondaryButton}
+          disabled={props.updating}
+          onClick={() => void handleClearManualLabel()}
+          type="button"
+        >
+          {t.algorithmTransparency.families.clearManualLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

@@ -639,6 +639,7 @@ export type InterestFamilyRow = {
   embeddingIndexId: string;
   polarity: InterestClusterPolarity;
   displayLabel: string;
+  manualLabel: string | null;
   centroidVectorBlob: Buffer;
   weight: number;
   clusterCount: number;

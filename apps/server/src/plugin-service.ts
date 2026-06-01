@@ -915,13 +915,20 @@ export class PluginService {
       )
       .all(rankContext, "base", rankContext, "base", since, limit) as Array<RankedWinner & { payloadJson: string | null }>;
 
-    return rows.map((row) => {
+    const parsedRows = rows.map((row) => {
       const payload = parseJsonObject(row.payloadJson);
       const components = parseJsonObject(payload?.components);
       const familyId = stringOrNull(components?.primaryFamilyId) ?? `source:${row.feedId}`;
       const familyLabel = stringOrNull(components?.primaryFamilyLabel) ?? row.feedTitle;
       const clusterId = stringOrNull(components?.primaryClusterId);
       const clusterLabel = stringOrNull(components?.primaryClusterLabel);
+      return { row, familyId, familyLabel, clusterId, clusterLabel };
+    });
+    const familyLabels = this.familyLabelsById(
+      Array.from(new Set(parsedRows.map((item) => item.familyId).filter((id) => !id.startsWith("source:"))))
+    );
+
+    return parsedRows.map(({ row, familyId, familyLabel, clusterId, clusterLabel }) => {
       return {
         articleId: row.articleId,
         feedId: row.feedId,
@@ -934,12 +941,31 @@ export class PluginService {
         score: row.score,
         calculatedAt: row.calculatedAt,
         familyId,
-        familyLabel,
+        familyLabel: familyLabels.get(familyId) ?? familyLabel,
         clusterId,
         clusterLabel,
         reason: familyId.startsWith("source:") ? "source" : "interest-family"
       };
     });
+  }
+
+  private familyLabelsById(familyIds: string[]): Map<string, string> {
+    if (familyIds.length === 0) {
+      return new Map();
+    }
+    const rows = this.options.db
+      .prepare(
+        `
+          select
+            f.id,
+            coalesce(nullif(fl.manual_label, ''), f.display_label) as label
+          from interest_families f
+          left join interest_family_labels fl on fl.family_id = f.id
+          where f.id in (${familyIds.map(() => "?").join(", ")})
+        `
+      )
+      .all(...familyIds) as Array<{ id: string; label: string }>;
+    return new Map(rows.map((row) => [row.id, row.label]));
   }
 
   private listTopicTargets(): PluginTopicTargets {
@@ -962,15 +988,16 @@ export class PluginService {
       .prepare(
         `
           select
-            id,
-            display_label as label,
-            polarity,
-            cluster_count as clusterCount,
-            support_article_count as supportArticleCount
-          from interest_families
-          where embedding_index_id = ?
-            and polarity = 'positive'
-          order by weight desc, support_article_count desc, display_label collate nocase
+            f.id,
+            coalesce(nullif(fl.manual_label, ''), f.display_label) as label,
+            f.polarity,
+            f.cluster_count as clusterCount,
+            f.support_article_count as supportArticleCount
+          from interest_families f
+          left join interest_family_labels fl on fl.family_id = f.id
+          where f.embedding_index_id = ?
+            and f.polarity = 'positive'
+          order by f.weight desc, f.support_article_count desc, label collate nocase
         `
       )
       .all(activeIndex.id) as PluginTopicTargets["families"];

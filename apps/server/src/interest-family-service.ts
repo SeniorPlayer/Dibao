@@ -68,6 +68,7 @@ export type RecommendationFamilySummaryItem = {
   id: string;
   polarity: InterestClusterPolarity;
   displayLabel: string;
+  manualLabel: string | null;
   weight: number;
   clusterCount: number;
   supportArticleCount: number;
@@ -99,6 +100,7 @@ export type RecommendationClusterFamily = {
   id: string;
   polarity: InterestClusterPolarity;
   displayLabel: string;
+  manualLabel: string | null;
   weight: number;
   clusterCount: number;
   supportArticleCount: number;
@@ -119,6 +121,18 @@ export type InterestFamilyServiceOptions = {
   };
   getClusterCalibration?: (embeddingIndexId: string) => InterestClusterCalibration;
 };
+
+export class InterestFamilyServiceError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    public readonly code: string,
+    message: string,
+    public readonly details?: unknown
+  ) {
+    super(message);
+    this.name = "InterestFamilyServiceError";
+  }
+}
 
 export class InterestFamilyService {
   private readonly now: () => number;
@@ -302,6 +316,55 @@ export class InterestFamilyService {
     return familySummaryFromRows(rows, limit);
   }
 
+  setManualLabel(familyId: string, manualLabel: unknown): {
+    familyId: string;
+    displayLabel: string;
+    manualLabel: string | null;
+  } {
+    const family = this.findFamilyById(familyId);
+    if (!family) {
+      throw new InterestFamilyServiceError(
+        404,
+        "NOT_FOUND",
+        "Interest family not found"
+      );
+    }
+
+    const parsed = parseManualFamilyLabel(manualLabel);
+    if (!parsed.ok) {
+      throw new InterestFamilyServiceError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.message,
+        parsed.details
+      );
+    }
+
+    const now = this.now();
+    this.options.db
+      .prepare(
+        `
+          insert into interest_family_labels (
+            family_id,
+            manual_label,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?)
+          on conflict(family_id) do update set
+            manual_label = excluded.manual_label,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(family.id, parsed.manualLabel, now, now);
+
+    return {
+      familyId: family.id,
+      displayLabel: parsed.manualLabel ?? family.displayLabel,
+      manualLabel: parsed.manualLabel
+    };
+  }
+
   familyMapForClusters(clusterIds: string[]): Map<string, RecommendationClusterFamily> {
     if (clusterIds.length === 0) {
       return new Map();
@@ -316,7 +379,8 @@ export class InterestFamilyService {
             m.centroid_similarity as centroidSimilarity,
             f.id,
             f.polarity,
-            f.display_label as displayLabel,
+            coalesce(nullif(fl.manual_label, ''), f.display_label) as displayLabel,
+            fl.manual_label as manualLabel,
             f.weight,
             f.cluster_count as clusterCount,
             f.support_article_count as supportArticleCount,
@@ -326,6 +390,7 @@ export class InterestFamilyService {
             f.dominance_ratio as dominanceRatio
           from interest_cluster_family_members m
           join interest_families f on f.id = m.family_id
+          left join interest_family_labels fl on fl.family_id = f.id
           where m.cluster_id in (${clusterIds.map(() => "?").join(", ")})
         `
       )
@@ -338,6 +403,7 @@ export class InterestFamilyService {
           id: row.id,
           polarity: row.polarity,
           displayLabel: row.displayLabel,
+          manualLabel: row.manualLabel,
           weight: row.weight,
           clusterCount: row.clusterCount,
           supportArticleCount: row.supportArticleCount,
@@ -422,28 +488,64 @@ export class InterestFamilyService {
             id,
             embedding_index_id as embeddingIndexId,
             polarity,
-            display_label as displayLabel,
+            coalesce(nullif(fl.manual_label, ''), f.display_label) as displayLabel,
+            fl.manual_label as manualLabel,
             centroid_vector_blob as centroidVectorBlob,
-            weight,
-            cluster_count as clusterCount,
-            support_article_count as supportArticleCount,
-            support_event_count as supportEventCount,
-            source_count as sourceCount,
-            strong_signal_count as strongSignalCount,
-            top_source_share as topSourceShare,
-            maturity,
-            dominance_ratio as dominanceRatio,
-            label_terms_json as labelTermsJson,
-            representative_cluster_ids_json as representativeClusterIdsJson,
-            diagnostics_json as diagnosticsJson,
-            created_at as createdAt,
-            updated_at as updatedAt
-          from interest_families
-          where embedding_index_id = ?
-          order by weight desc, updated_at desc, id
+            f.weight,
+            f.cluster_count as clusterCount,
+            f.support_article_count as supportArticleCount,
+            f.support_event_count as supportEventCount,
+            f.source_count as sourceCount,
+            f.strong_signal_count as strongSignalCount,
+            f.top_source_share as topSourceShare,
+            f.maturity,
+            f.dominance_ratio as dominanceRatio,
+            f.label_terms_json as labelTermsJson,
+            f.representative_cluster_ids_json as representativeClusterIdsJson,
+            f.diagnostics_json as diagnosticsJson,
+            f.created_at as createdAt,
+            f.updated_at as updatedAt
+          from interest_families f
+          left join interest_family_labels fl on fl.family_id = f.id
+          where f.embedding_index_id = ?
+          order by f.weight desc, f.updated_at desc, f.id
         `
       )
       .all(embeddingIndexId) as InterestFamilyRow[];
+  }
+
+  private findFamilyById(familyId: string): InterestFamilyRow | null {
+    const row = this.options.db
+      .prepare(
+        `
+          select
+            f.id,
+            f.embedding_index_id as embeddingIndexId,
+            f.polarity,
+            coalesce(nullif(fl.manual_label, ''), f.display_label) as displayLabel,
+            fl.manual_label as manualLabel,
+            f.centroid_vector_blob as centroidVectorBlob,
+            f.weight,
+            f.cluster_count as clusterCount,
+            f.support_article_count as supportArticleCount,
+            f.support_event_count as supportEventCount,
+            f.source_count as sourceCount,
+            f.strong_signal_count as strongSignalCount,
+            f.top_source_share as topSourceShare,
+            f.maturity,
+            f.dominance_ratio as dominanceRatio,
+            f.label_terms_json as labelTermsJson,
+            f.representative_cluster_ids_json as representativeClusterIdsJson,
+            f.diagnostics_json as diagnosticsJson,
+            f.created_at as createdAt,
+            f.updated_at as updatedAt
+          from interest_families f
+          left join interest_family_labels fl on fl.family_id = f.id
+          where f.id = ?
+        `
+      )
+      .get(familyId) as InterestFamilyRow | undefined;
+    return row ?? null;
   }
 
   private evidenceSummaries(embeddingIndexId: string): Map<string, ClusterEvidenceSummary> {
@@ -675,6 +777,7 @@ function familyRowForDraft(input: {
       embeddingIndexId: input.embeddingIndexId,
       polarity: input.family.polarity,
       displayLabel: familyDisplayLabel(input.family, input.labels, labelTerms),
+      manualLabel: null,
       centroidVectorBlob: toVectorBlob(input.family.centroid),
       weight: roundMetric(weight),
       clusterCount: input.family.clusters.length,
@@ -748,6 +851,7 @@ function mapFamilySummaryItem(row: InterestFamilyRow): RecommendationFamilySumma
     id: row.id,
     polarity: row.polarity,
     displayLabel: row.displayLabel,
+    manualLabel: row.manualLabel ?? null,
     weight: row.weight,
     clusterCount: row.clusterCount,
     supportArticleCount: row.supportArticleCount,
@@ -762,6 +866,33 @@ function mapFamilySummaryItem(row: InterestFamilyRow): RecommendationFamilySumma
     diagnostics: parseFamilyDiagnostics(row.diagnosticsJson),
     updatedAt: row.updatedAt
   };
+}
+
+function parseManualFamilyLabel(value: unknown):
+  | { ok: true; manualLabel: string | null }
+  | { ok: false; message: string; details: { field: string } } {
+  if (value === null || value === undefined) {
+    return { ok: true, manualLabel: null };
+  }
+  if (typeof value !== "string") {
+    return {
+      ok: false,
+      message: "manualLabel must be a string or null",
+      details: { field: "manualLabel" }
+    };
+  }
+  const manualLabel = value.trim();
+  if (manualLabel.length === 0) {
+    return { ok: true, manualLabel: null };
+  }
+  if (manualLabel.length > 48) {
+    return {
+      ok: false,
+      message: "manualLabel must be at most 48 characters",
+      details: { field: "manualLabel" }
+    };
+  }
+  return { ok: true, manualLabel };
 }
 
 function emptyFamilySummary(): RecommendationFamilySummary {

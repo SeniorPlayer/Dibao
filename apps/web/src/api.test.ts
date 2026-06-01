@@ -1229,6 +1229,52 @@ describe("web API client", () => {
     ]);
   });
 
+  it("updates manual recommendation family labels", async () => {
+    const calls: Array<{ path: string; body: unknown; method: string | undefined }> = [];
+    const api = createDibaoApi(async (input, init) => {
+      calls.push({
+        path: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: init?.method
+      });
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            ok: true,
+            familyId: "family/one",
+            displayLabel: "AI 新闻",
+            manualLabel: "AI 新闻"
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await expect(
+      api.updateRecommendationFamilyLabel("family/one", "AI 新闻")
+    ).resolves.toMatchObject({
+      ok: true,
+      familyId: "family/one",
+      displayLabel: "AI 新闻",
+      manualLabel: "AI 新闻"
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/recommendation/families/family%2Fone/label",
+        method: "PATCH",
+        body: {
+          manualLabel: "AI 新闻"
+        }
+      }
+    ]);
+  });
+
   it("posts article actions using the contract-shaped body", async () => {
     const calls: Array<{ path: string; body: unknown; method: string | undefined }> = [];
     const api = createDibaoApi(async (input, init) => {
