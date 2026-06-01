@@ -6,6 +6,7 @@ import {
   type EmbeddingTestResult,
   type EmbeddingVector
 } from "./types.js";
+import { providerHttpError, providerNetworkError } from "./provider-http-errors.js";
 
 export const GEMINI_TEST_TEXT = "Dibao embedding provider test";
 export const GEMINI_TIMEOUT_MS = 30_000;
@@ -110,14 +111,12 @@ export class GeminiEmbeddingAdapter implements EmbeddingProviderAdapter {
       const payload = parseJson(text);
 
       if (!response.ok) {
-        throw new EmbeddingProviderError(
-          "Gemini request failed",
-          response.status === 429 || response.status >= 500,
-          {
-            status: response.status,
-            body: payload ?? text.slice(0, 500)
-          }
-        );
+        throw providerHttpError({
+          providerLabel: "Gemini",
+          status: response.status,
+          payload,
+          text
+        });
       }
 
       return payload;
@@ -126,15 +125,7 @@ export class GeminiEmbeddingAdapter implements EmbeddingProviderAdapter {
         throw error;
       }
 
-      throw new EmbeddingProviderError(
-        error instanceof Error && error.name === "AbortError"
-          ? "Gemini request timed out"
-          : "Gemini request failed",
-        true,
-        {
-          cause: error instanceof Error ? error.message : String(error)
-        }
-      );
+      throw providerNetworkError({ providerLabel: "Gemini", error });
     } finally {
       clearTimeout(timeout);
     }
@@ -159,7 +150,10 @@ function parseGeminiEmbeddingResponse(
   items: EmbeddingInput[]
 ): EmbeddingVector[] {
   if (!isGeminiEmbeddingResponse(payload) || !Array.isArray(payload.embeddings)) {
-    throw new EmbeddingProviderError("Gemini response must include embeddings array", false);
+    throw new EmbeddingProviderError(
+      "Gemini provider returned a malformed response: missing embeddings array",
+      false
+    );
   }
 
   if (payload.embeddings.length !== items.length) {
@@ -175,9 +169,13 @@ function parseGeminiEmbeddingResponse(
 
   return payload.embeddings.map((item, index) => {
     if (!Array.isArray(item.values) || !item.values.every(isFiniteNumber)) {
-      throw new EmbeddingProviderError("Gemini embedding must be a number array", false, {
-        index
-      });
+      throw new EmbeddingProviderError(
+        "Gemini provider returned a malformed response: embedding must be a number array",
+        false,
+        {
+          index
+        }
+      );
     }
 
     return {

@@ -60,7 +60,7 @@ describe("server API vertical slice", () => {
           database: "ok",
           fts: "ok",
           vectorStore: "ok",
-          version: "0.1.1"
+          version: "0.1.2"
         }
       });
     } finally {
@@ -1563,6 +1563,171 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("classifies embedding provider test failures with actionable public errors", async () => {
+    const cases: Array<{
+      name: string;
+      fetcher: typeof fetch;
+      expectedMessage: string;
+      expectedCategory?: string;
+      expectedStatus?: number;
+    }> = [
+      {
+        name: "authentication",
+        fetcher: embeddingErrorFetcher(401, {
+          error: {
+            message: "invalid api_key sk-test-secret",
+            code: "invalid_api_key"
+          }
+        }),
+        expectedMessage: "authentication failed",
+        expectedCategory: "authentication",
+        expectedStatus: 401
+      },
+      {
+        name: "permission",
+        fetcher: embeddingErrorFetcher(403, {
+          error: {
+            message: "permission denied"
+          }
+        }),
+        expectedMessage: "authentication failed",
+        expectedCategory: "authentication",
+        expectedStatus: 403
+      },
+      {
+        name: "missing model",
+        fetcher: embeddingErrorFetcher(404, {
+          error: {
+            message: "model fixture-embedding was not found"
+          }
+        }),
+        expectedMessage: "endpoint or model was not found",
+        expectedCategory: "not_found",
+        expectedStatus: 404
+      },
+      {
+        name: "rate limit",
+        fetcher: embeddingErrorFetcher(429, {
+          error: {
+            message: "rate limit exceeded"
+          }
+        }),
+        expectedMessage: "rate limit was reached",
+        expectedCategory: "rate_limit",
+        expectedStatus: 429
+      },
+      {
+        name: "unavailable",
+        fetcher: embeddingErrorFetcher(503, {
+          error: {
+            message: "upstream is overloaded"
+          }
+        }),
+        expectedMessage: "provider is unavailable",
+        expectedCategory: "provider_unavailable",
+        expectedStatus: 503
+      },
+      {
+        name: "network",
+        fetcher: async () => {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
+        },
+        expectedMessage: "could not be reached",
+        expectedCategory: "network"
+      },
+      {
+        name: "malformed response",
+        fetcher: async () =>
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }),
+        expectedMessage: "malformed response"
+      }
+    ];
+
+    for (const scenario of cases) {
+      const db = createEmptyDatabase();
+      const app = buildServer({
+        db,
+        logger: false,
+        embeddingFetcher: scenario.fetcher
+      });
+
+      try {
+        const created = await postJson(app, "/api/embedding/providers", {
+          type: "openai_compatible",
+          name: `OpenAI Compatible ${scenario.name}`,
+          baseUrl: "https://api.example.com/v1",
+          model: "fixture-embedding",
+          dimension: 3,
+          enabled: true,
+          apiKey: "secret"
+        });
+        const providerId = (created.json() as { data: { id: string } }).data.id;
+
+        const failed = await app.inject({
+          method: "POST",
+          url: `/api/embedding/providers/${providerId}/test`
+        });
+        expect(failed.statusCode, `${scenario.name}: ${failed.body}`).toBe(502);
+        expect(failed.json()).toMatchObject({
+          error: {
+            code: "PROVIDER_ERROR",
+            message: expect.stringContaining(scenario.expectedMessage)
+          }
+        });
+        if (scenario.expectedCategory) {
+          expect(failed.json()).toMatchObject({
+            error: {
+              details: {
+                category: scenario.expectedCategory
+              }
+            }
+          });
+        }
+        if (scenario.expectedStatus) {
+          expect(failed.json()).toMatchObject({
+            error: {
+              details: {
+                status: scenario.expectedStatus
+              }
+            }
+          });
+        }
+        expect(failed.body).not.toContain("sk-test-secret");
+        expect(failed.body).not.toContain("Bearer secret");
+
+        const providers = await app.inject({
+          method: "GET",
+          url: "/api/embedding/providers"
+        });
+        expect(providers.json()).toMatchObject({
+          data: [
+            {
+              id: providerId,
+              lastTestStatus: "failed",
+              lastTestError: expect.stringContaining(scenario.expectedMessage)
+            }
+          ]
+        });
+        expect(providers.body).not.toContain("sk-test-secret");
+
+        const indexes = await app.inject({
+          method: "GET",
+          url: "/api/embedding/indexes"
+        });
+        expect(indexes.body).not.toContain("lastTestError");
+        expect(indexes.body).not.toContain("providerMessage");
+      } finally {
+        await app.close();
+        db.close();
+      }
+    }
+  });
+
   it("prevents deleting embedding providers that already have indexes", async () => {
     const db = createEmptyDatabase();
     const app = buildServer({ db, logger: false, now: () => 1000 });
@@ -2814,7 +2979,7 @@ describe("server API vertical slice", () => {
       expect(first.statusCode, first.body).toBe(200);
       expect(first.json()).toMatchObject({
         data: {
-          currentVersion: "0.1.1",
+          currentVersion: "0.1.2",
           latestVersion: "v0.2.0",
           releaseUrl: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
           updateAvailable: true,
@@ -7503,6 +7668,16 @@ function embeddingFetcherFixture(
       }
     );
   };
+}
+
+function embeddingErrorFetcher(status: number, payload: unknown): typeof fetch {
+  return async () =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
 }
 
 function ollamaEmbeddingFetcherFixture(

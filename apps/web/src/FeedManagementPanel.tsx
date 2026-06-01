@@ -27,6 +27,7 @@ type PendingManagementAction =
 
 type FeedDiagnosticsByFeedId = Record<string, FeedDiagnosticItem["diagnostic"]>;
 type FeedDiagnosticFilter = "all" | "unhealthy" | "disabled" | "neverFetched";
+type FeedManagementTab = "feeds" | "folders";
 
 type FeedDraft = {
   title: string;
@@ -67,6 +68,8 @@ export type FeedManagementWorkspaceProps = {
   onUpdateFeed: (feedId: string, input: UpdateFeedInput) => Promise<void>;
   onUpdateFeedUrl: (value: string) => void;
   onUpdateFolder: (folderId: string, input: UpdateFeedFolderInput) => Promise<void>;
+  onViewFeedArticles: (feed: Feed) => void;
+  onViewFolderArticles: (folder: FeedFolder) => void;
   opmlSummary: OpmlImportResponse | null;
   refreshingFeedId: string | null;
 };
@@ -97,6 +100,7 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingManagementAction | null>(null);
   const [diagnosticFilter, setDiagnosticFilter] = useState<FeedDiagnosticFilter>("all");
+  const [activeTab, setActiveTab] = useState<FeedManagementTab>("feeds");
   const [error, setError] = useState<string | null>(null);
   const [backfillResult, setBackfillResult] = useState<FullContentBackfillResponse | null>(null);
   const visibleFeeds = useMemo(
@@ -260,46 +264,80 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
 
   return (
     <div className={styles.managementWorkspace}>
-      <section className={styles.managementTopSection} aria-labelledby="feed-operations-title">
+      <div className={styles.managementTabs} role="tablist" aria-label={t.feedManagement.tabs.label}>
+        <button
+          aria-controls="feed-management-panel"
+          aria-selected={activeTab === "feeds"}
+          className={activeTab === "feeds" ? styles.managementTabActive : styles.managementTab}
+          id="feed-management-tab"
+          onClick={() => setActiveTab("feeds")}
+          role="tab"
+          type="button"
+        >
+          {t.feedManagement.tabs.feeds}
+        </button>
+        <button
+          aria-controls="folder-management-panel"
+          aria-selected={activeTab === "folders"}
+          className={activeTab === "folders" ? styles.managementTabActive : styles.managementTab}
+          id="folder-management-tab"
+          onClick={() => setActiveTab("folders")}
+          role="tab"
+          type="button"
+        >
+          {t.feedManagement.tabs.folders}
+        </button>
+      </div>
+
+      {activeTab === "feeds" ? (
+        <section
+          aria-labelledby="feed-management-title"
+          aria-describedby="feed-management-tab"
+          className={`${styles.managementSection} ${styles.feedManagementSection}`}
+          id="feed-management-panel"
+          role="tabpanel"
+        >
         <div className={styles.managementHeader}>
           <div>
-            <p className={styles.kicker}>{t.feedManagement.operations.kicker}</p>
-            <h2 id="feed-operations-title">{t.feedManagement.operations.title}</h2>
+            <p className={styles.kicker}>{t.feedManagement.feeds.kicker}</p>
+            <h2 id="feed-management-title">{t.feedManagement.feeds.title}</h2>
           </div>
-        </div>
-
-        <div className={styles.opmlActions}>
-          <input
-            accept=".opml,.xml,text/xml,application/xml"
-            className={styles.fileInput}
-            onChange={props.onImportOpml}
-            ref={fileInputRef}
-            type="file"
-          />
-          <button
-            className={styles.secondaryButton}
-            disabled={props.isImportingOpml}
-            onClick={() => fileInputRef.current?.click()}
-            type="button"
-          >
-            {props.isImportingOpml ? t.opml.importing : t.opml.import}
-          </button>
-          <button
-            className={styles.secondaryButton}
-            disabled={props.isExportingOpml}
-            onClick={props.onExportOpml}
-            type="button"
-          >
-            {props.isExportingOpml ? t.opml.exporting : t.opml.export}
-          </button>
-          <button
-            className={styles.secondaryButton}
-            disabled={props.isRefreshingAllFeeds || !props.feeds.some((feed) => feed.enabled)}
-            onClick={props.onRefreshAllFeeds}
-            type="button"
-          >
-            {props.isRefreshingAllFeeds ? t.feeds.refreshingAll : t.feeds.refreshAll}
-          </button>
+          <div className={styles.managementHeaderActions}>
+            <span className={styles.count}>{props.feeds.length}</span>
+            <input
+              accept=".opml,.xml,text/xml,application/xml"
+              className={styles.fileInput}
+              onChange={props.onImportOpml}
+              ref={fileInputRef}
+              type="file"
+            />
+            <div className={styles.opmlActions}>
+              <button
+                className={styles.secondaryButton}
+                disabled={props.isImportingOpml}
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                {props.isImportingOpml ? t.opml.importing : t.opml.import}
+              </button>
+              <button
+                className={styles.secondaryButton}
+                disabled={props.isExportingOpml}
+                onClick={props.onExportOpml}
+                type="button"
+              >
+                {props.isExportingOpml ? t.opml.exporting : t.opml.export}
+              </button>
+              <button
+                className={styles.secondaryButton}
+                disabled={props.isRefreshingAllFeeds || !props.feeds.some((feed) => feed.enabled)}
+                onClick={props.onRefreshAllFeeds}
+                type="button"
+              >
+                {props.isRefreshingAllFeeds ? t.feeds.refreshingAll : t.feeds.refreshAll}
+              </button>
+            </div>
+          </div>
         </div>
 
         {props.opmlSummary ? (
@@ -323,125 +361,6 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
             ) : null}
           </div>
         ) : null}
-      </section>
-
-      <section className={styles.managementSection} aria-labelledby="folder-management-title">
-        <div className={styles.managementHeader}>
-          <div>
-            <p className={styles.kicker}>{t.feedManagement.folders.kicker}</p>
-            <h2 id="folder-management-title">{t.feedManagement.folders.title}</h2>
-          </div>
-          <span className={styles.count}>{props.feedFolders.length}</span>
-        </div>
-
-        <form className={styles.managementForm} onSubmit={handleCreateFolder}>
-          <label htmlFor="new-folder-title">{t.feedManagement.folders.newLabel}</label>
-          <div className={styles.managementInlineForm}>
-            <input
-              id="new-folder-title"
-              onChange={(event) => setNewFolderTitle(event.target.value)}
-              placeholder={t.feedManagement.folders.newPlaceholder}
-              value={newFolderTitle}
-            />
-            <button
-              className={styles.primaryButton}
-              disabled={pendingAction === "createFolder"}
-              type="submit"
-            >
-              {pendingAction === "createFolder"
-                ? t.feedManagement.actions.saving
-                : t.feedManagement.folders.create}
-            </button>
-          </div>
-        </form>
-
-        <div className={styles.managementList}>
-          {props.isLoading ? <SkeletonRows count={4} /> : null}
-          {!props.isLoading && props.feedFolders.length === 0 ? (
-            <ManagementEmptyState
-              title={t.feedManagement.folders.emptyTitle}
-              body={t.feedManagement.folders.emptyBody}
-            />
-          ) : null}
-          {!props.isLoading &&
-            props.feedFolders.map((folder) => (
-              <div className={styles.managementFolderRow} key={folder.id}>
-                {editingFolderId === folder.id ? (
-                  <input
-                    aria-label={t.feedManagement.folders.renameLabel(folder.title)}
-                    onChange={(event) => setFolderDraftTitle(event.target.value)}
-                    value={folderDraftTitle}
-                  />
-                ) : (
-                  <div>
-                    <strong>{folder.title}</strong>
-                    <small>
-                      {t.folders.feedCount(feedCountByFolder.get(folder.id) ?? 0)}
-                    </small>
-                  </div>
-                )}
-                <div className={styles.managementActions}>
-                  {editingFolderId === folder.id ? (
-                    <>
-                      <button
-                        className={styles.primaryButton}
-                        disabled={pendingAction === "updateFolder"}
-                        onClick={() => void handleUpdateFolder(folder)}
-                        type="button"
-                      >
-                        {pendingAction === "updateFolder"
-                          ? t.feedManagement.actions.saving
-                          : t.feedManagement.actions.save}
-                      </button>
-                      <button
-                        className={styles.secondaryButton}
-                        onClick={() => setEditingFolderId(null)}
-                        type="button"
-                      >
-                        {t.feedManagement.actions.cancel}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className={styles.secondaryButton}
-                      onClick={() => startEditingFolder(folder)}
-                      type="button"
-                    >
-                      {t.feedManagement.actions.rename}
-                    </button>
-                  )}
-                  <button
-                    className={styles.dangerButton}
-                    disabled={pendingAction === "deleteFolder"}
-                    onClick={() => void handleDeleteFolder(folder)}
-                    type="button"
-                  >
-                    {confirmDeleteFolderId === folder.id
-                      ? t.feedManagement.folders.confirmDelete
-                      : t.feedManagement.actions.delete}
-                  </button>
-                </div>
-                {confirmDeleteFolderId === folder.id ? (
-                  <p className={styles.managementHint}>
-                    {t.feedManagement.folders.deleteHint}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-        </div>
-      </section>
-
-      <section
-        className={`${styles.managementSection} ${styles.feedManagementSection}`}
-        aria-labelledby="feed-management-title"
-      >
-        <div className={styles.managementHeader}>
-          <div>
-            <p className={styles.kicker}>{t.feedManagement.feeds.kicker}</p>
-            <h2 id="feed-management-title">{t.feedManagement.feeds.title}</h2>
-          </div>
-          <span className={styles.count}>{props.feeds.length}</span>
-        </div>
 
         <form className={styles.managementForm} onSubmit={props.onAddFeed}>
           <label htmlFor="managed-new-feed-url">{t.feeds.inputLabel}</label>
@@ -748,6 +667,13 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
 
                   <div className={styles.managementActions}>
                     <button
+                      className={styles.secondaryButton}
+                      onClick={() => props.onViewFeedArticles(selectedFeed)}
+                      type="button"
+                    >
+                      {t.feedManagement.actions.viewArticles}
+                    </button>
+                    <button
                       className={styles.primaryButton}
                       disabled={pendingAction === "updateFeed"}
                       type="submit"
@@ -851,7 +777,132 @@ export function FeedManagementWorkspace(props: FeedManagementWorkspaceProps) {
             )}
           </section>
         </div>
-      </section>
+        </section>
+      ) : (
+        <section
+          aria-labelledby="folder-management-title"
+          aria-describedby="folder-management-tab"
+          className={`${styles.managementSection} ${styles.folderManagementSection}`}
+          id="folder-management-panel"
+          role="tabpanel"
+        >
+          <div className={styles.managementHeader}>
+            <div>
+              <p className={styles.kicker}>{t.feedManagement.folders.kicker}</p>
+              <h2 id="folder-management-title">{t.feedManagement.folders.title}</h2>
+            </div>
+            <span className={styles.count}>{props.feedFolders.length}</span>
+          </div>
+
+          <div className={styles.folderManagementLayout}>
+            <form className={styles.managementForm} onSubmit={handleCreateFolder}>
+              <label htmlFor="new-folder-title">{t.feedManagement.folders.newLabel}</label>
+              <div className={styles.managementInlineForm}>
+                <input
+                  id="new-folder-title"
+                  onChange={(event) => setNewFolderTitle(event.target.value)}
+                  placeholder={t.feedManagement.folders.newPlaceholder}
+                  value={newFolderTitle}
+                />
+                <button
+                  className={styles.primaryButton}
+                  disabled={pendingAction === "createFolder"}
+                  type="submit"
+                >
+                  {pendingAction === "createFolder"
+                    ? t.feedManagement.actions.saving
+                    : t.feedManagement.folders.create}
+                </button>
+              </div>
+              <p className={styles.managementHint}>{t.feedManagement.folders.managementHint}</p>
+            </form>
+
+            {error ? <p className={styles.errorText}>{error}</p> : null}
+
+            <div className={styles.managementList}>
+              {props.isLoading ? <SkeletonRows count={4} /> : null}
+              {!props.isLoading && props.feedFolders.length === 0 ? (
+                <ManagementEmptyState
+                  title={t.feedManagement.folders.emptyTitle}
+                  body={t.feedManagement.folders.emptyBody}
+                />
+              ) : null}
+              {!props.isLoading &&
+                props.feedFolders.map((folder) => (
+                  <div className={styles.managementFolderRow} key={folder.id}>
+                    {editingFolderId === folder.id ? (
+                      <input
+                        aria-label={t.feedManagement.folders.renameLabel(folder.title)}
+                        onChange={(event) => setFolderDraftTitle(event.target.value)}
+                        value={folderDraftTitle}
+                      />
+                    ) : (
+                      <div>
+                        <strong>{folder.title}</strong>
+                        <small>
+                          {t.folders.feedCount(feedCountByFolder.get(folder.id) ?? 0)}
+                        </small>
+                      </div>
+                    )}
+                    <div className={styles.managementActions}>
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() => props.onViewFolderArticles(folder)}
+                        type="button"
+                      >
+                        {t.feedManagement.actions.viewArticles}
+                      </button>
+                      {editingFolderId === folder.id ? (
+                        <>
+                          <button
+                            className={styles.primaryButton}
+                            disabled={pendingAction === "updateFolder"}
+                            onClick={() => void handleUpdateFolder(folder)}
+                            type="button"
+                          >
+                            {pendingAction === "updateFolder"
+                              ? t.feedManagement.actions.saving
+                              : t.feedManagement.actions.save}
+                          </button>
+                          <button
+                            className={styles.secondaryButton}
+                            onClick={() => setEditingFolderId(null)}
+                            type="button"
+                          >
+                            {t.feedManagement.actions.cancel}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className={styles.secondaryButton}
+                          onClick={() => startEditingFolder(folder)}
+                          type="button"
+                        >
+                          {t.feedManagement.actions.rename}
+                        </button>
+                      )}
+                      <button
+                        className={styles.dangerButton}
+                        disabled={pendingAction === "deleteFolder"}
+                        onClick={() => void handleDeleteFolder(folder)}
+                        type="button"
+                      >
+                        {confirmDeleteFolderId === folder.id
+                          ? t.feedManagement.folders.confirmDelete
+                          : t.feedManagement.actions.delete}
+                      </button>
+                    </div>
+                    {confirmDeleteFolderId === folder.id ? (
+                      <p className={styles.managementHint}>
+                        {t.feedManagement.folders.deleteHint}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

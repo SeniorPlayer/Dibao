@@ -1,5 +1,12 @@
-import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent, RefObject } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ChangeEvent,
+  CSSProperties,
+  FormEvent,
+  MouseEvent,
+  RefObject,
+  SyntheticEvent
+} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dibaoVersion } from "@dibao/shared";
 import {
   defaultAppSettings,
@@ -508,6 +515,23 @@ export function App() {
       resetArticleListForPendingQuery();
     }
     setSourceSelection(source);
+    setIsSourceDrawerOpen(false);
+  }
+
+  function handleViewSourceArticles(source: SourceSelection) {
+    resetArticleListForPendingQuery();
+    window.history.pushState(
+      { dibaoPage: "reader", dibaoSource: source.type },
+      "",
+      urlForAppPage(
+        { type: "reader", view: "latest" },
+        { sourceSelection: source, timeWindow: "all", unreadOnly: false }
+      )
+    );
+    setSourceSelection(source);
+    setUnreadOnly(false);
+    setTimeWindow("all");
+    setAppPage({ type: "reader", view: "latest" });
     setIsSourceDrawerOpen(false);
   }
 
@@ -2252,6 +2276,7 @@ export function App() {
         : urlForArticle(currentArticleView, articleId, {
             favoriteSort,
             readLaterSort,
+            sourceSelection,
             timeWindow,
             unreadOnly
           });
@@ -2266,6 +2291,7 @@ export function App() {
     window.history.pushState({ dibaoPage: page.type }, "", urlForAppPage(page, {
       favoriteSort,
       readLaterSort,
+      sourceSelection,
       timeWindow,
       unreadOnly
     }));
@@ -2646,6 +2672,10 @@ export function App() {
             onUpdateFeedUrl={setFeedUrl}
             onUpdateFeed={handleUpdateManagedFeed}
             onUpdateFolder={handleUpdateManagedFolder}
+            onViewFeedArticles={(feed) => handleViewSourceArticles({ type: "feed", feedId: feed.id })}
+            onViewFolderArticles={(folder) =>
+              handleViewSourceArticles({ type: "folder", folderId: folder.id })
+            }
             opmlSummary={opmlSummary}
             refreshingFeedId={refreshingFeedId}
           />
@@ -2856,6 +2886,7 @@ export function App() {
               selectedArticleId={selectedArticleId}
               selectedFeed={selectedFeed}
               selectedFolder={selectedFolder}
+              sourceSelection={sourceSelection}
               showRecommendationStatus={currentArticleView === "recommended"}
               showQuickFilters={supportsQuickFilters(currentArticleView)}
               isRecommendationStatusLoading={isRecommendationStatusLoading}
@@ -6236,6 +6267,7 @@ export function ArticleListPanel(props: {
   selectedArticleId: string | null;
   selectedFeed: Feed | null;
   selectedFolder: FeedFolder | null;
+  sourceSelection: SourceSelection;
   showRecommendationStatus: boolean;
   showQuickFilters: boolean;
   timeWindow: ArticleTimeWindow;
@@ -6390,6 +6422,7 @@ export function ArticleListPanel(props: {
                 href={urlForArticle(props.articleView, article.id, {
                   favoriteSort: props.favoriteSort,
                   readLaterSort: props.readLaterSort,
+                  sourceSelection: props.sourceSelection,
                   timeWindow: props.timeWindow,
                   unreadOnly: props.unreadOnly
                 })}
@@ -7121,6 +7154,37 @@ function articleItemClassName(article: ArticleListItem, selectedArticleId: strin
   return status === "read" || status === "ignored" ? styles.articleItemRead : styles.articleItem;
 }
 
+const ArticleHtmlBody = memo(function ArticleHtmlBody(props: {
+  safeHtml: string | null;
+  fallback: string;
+}) {
+  if (props.safeHtml) {
+    return (
+      <div
+        className={styles.readerBody}
+        dangerouslySetInnerHTML={{ __html: props.safeHtml }}
+        onErrorCapture={handleReaderMediaError}
+      />
+    );
+  }
+
+  return (
+    <div className={styles.readerBody}>
+      <p>{props.fallback}</p>
+    </div>
+  );
+});
+
+function handleReaderMediaError(event: SyntheticEvent<HTMLDivElement>): void {
+  if (!(event.target instanceof HTMLImageElement)) {
+    return;
+  }
+
+  event.target.dataset.dibaoLoadState = "failed";
+  event.target.removeAttribute("src");
+  event.target.removeAttribute("srcset");
+}
+
 function ArticleDetailPanel(props: {
   actionError: string | null;
   article: ArticleDetail | null;
@@ -7216,16 +7280,10 @@ function ArticleDetailPanel(props: {
             />
           </header>
 
-          {safeHtml ? (
-            <div
-              className={styles.readerBody}
-              dangerouslySetInnerHTML={{ __html: safeHtml }}
-            />
-          ) : (
-            <div className={styles.readerBody}>
-              <p>{props.article.contentText ?? props.article.summary ?? t.reader.noContent}</p>
-            </div>
-          )}
+          <ArticleHtmlBody
+            fallback={props.article.contentText ?? props.article.summary ?? t.reader.noContent}
+            safeHtml={safeHtml}
+          />
           <ArticleActionControls
             actionError={null}
             article={props.article}
@@ -8642,6 +8700,7 @@ function sortExplanationForView(view: ArticleView, t: Dictionary): string {
 type UrlState = {
   favoriteSort?: FavoriteArticleSort;
   readLaterSort?: ReadLaterArticleSort;
+  sourceSelection?: SourceSelection;
   timeWindow?: ArticleTimeWindow;
   unreadOnly?: boolean;
 };
@@ -8674,7 +8733,7 @@ function routeFromLocation(defaultView: ArticleView): AppRoute {
 function readerFiltersForView(view: ArticleView): PersistedReaderFilters {
   const stored = readPersistedReaderFilters(view);
   return {
-    sourceSelection: stored.sourceSelection,
+    sourceSelection: urlSourceSelectionParam() ?? stored.sourceSelection,
     unreadOnly: urlBooleanParam("unread") || stored.unreadOnly,
     timeWindow: urlTimeWindowParam() ?? stored.timeWindow
   };
@@ -8798,6 +8857,12 @@ function paramsForSearchForm(form: SearchFormState): URLSearchParams {
 function paramsForReaderView(view: ArticleView, state: UrlState): URLSearchParams {
   const params = new URLSearchParams();
   params.set("view", view);
+  if (supportsQuickFilters(view) && state.sourceSelection?.type === "feed") {
+    params.set("feedId", state.sourceSelection.feedId);
+  }
+  if (supportsQuickFilters(view) && state.sourceSelection?.type === "folder") {
+    params.set("folderId", state.sourceSelection.folderId);
+  }
   if (view === "favorites" && state.favoriteSort && state.favoriteSort !== defaultFavoriteArticleSort) {
     params.set("sort", state.favoriteSort);
   }
@@ -8902,6 +8967,22 @@ function urlBooleanParam(name: string): boolean {
   }
   const value = new URLSearchParams(window.location.search).get(name);
   return value === "1" || value === "true";
+}
+
+function urlSourceSelectionParam(): SourceSelection | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const feedId = params.get("feedId");
+  if (feedId && feedId.trim()) {
+    return { type: "feed", feedId };
+  }
+  const folderId = params.get("folderId");
+  if (folderId && folderId.trim()) {
+    return { type: "folder", folderId };
+  }
+  return null;
 }
 
 function urlTimeWindowParam(): ArticleTimeWindow | null {

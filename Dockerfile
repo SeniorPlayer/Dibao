@@ -25,7 +25,7 @@ FROM node:22-bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.licenses="BUSL-1.1" \
   com.dibao.license.change-license="Apache-2.0" \
-  com.dibao.license.change-date="2030-05-30"
+  com.dibao.license.change-date="2030-06-01"
 
 ENV NODE_ENV=production \
   DIBAO_HOST=0.0.0.0 \

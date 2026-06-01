@@ -4,12 +4,12 @@ Copyright (c) 2026 Pls and Dibao contributors.
 
 ## Dibao BUSL Parameters
 
-- Licensed Work: Dibao 0.1.1
+- Licensed Work: Dibao 0.1.2
 - Licensor: Pls / Dibao project maintainer
 - License: Business Source License 1.1
 - SPDX-License-Identifier: BUSL-1.1
-- Release Date: 2026-05-30
-- Change Date: 2030-05-30
+- Release Date: 2026-06-01
+- Change Date: 2030-06-01
 - Change License: Apache License 2.0
 - Change License SPDX identifier: Apache-2.0
 
