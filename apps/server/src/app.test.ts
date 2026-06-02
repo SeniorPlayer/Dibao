@@ -1336,6 +1336,7 @@ describe("server API vertical slice", () => {
             baseUrl: "http://127.0.0.1:11434",
             model: "nomic-embed-text",
             dimension: 3,
+            textMaxChars: 4000,
             enabled: true,
             qualityTier: "basic",
             hasApiKey: false

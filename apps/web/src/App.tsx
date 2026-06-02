@@ -3676,6 +3676,11 @@ export function SetupProviderPanel(props: {
           step={500}
           value={providerDraft.textMaxChars}
         />
+        {providerDraft.type === "ollama" ? (
+          <p className={styles.managementHint}>
+            {t.settings.sections.provider.ollamaTextMaxCharsHint}
+          </p>
+        ) : null}
 
         <NumberSettingField
           id="setup-provider-qpm"
@@ -4785,6 +4790,11 @@ export function SettingsWorkspace(props: {
               step={500}
               value={providerDraft.textMaxChars}
             />
+            {providerDraft.type === "ollama" ? (
+              <p className={styles.managementHint}>
+                {t.settings.sections.provider.ollamaTextMaxCharsHint}
+              </p>
+            ) : null}
 
             <NumberSettingField
               id="settings-provider-qpm"
@@ -8339,7 +8349,7 @@ function defaultEmbeddingProviderDraft(type: SupportedEmbeddingProviderType) {
       baseUrl: "http://127.0.0.1:11434",
       model: "nomic-embed-text",
       dimension: 768,
-      textMaxChars: 8000
+      textMaxChars: 4000
     };
   }
 

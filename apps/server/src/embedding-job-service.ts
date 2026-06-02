@@ -7,7 +7,13 @@ import type {
   JobRow,
   VectorStore
 } from "@dibao/db";
-import { EmbeddingProviderError } from "./embedding/types.js";
+import {
+  EmbeddingProviderError,
+  type EmbeddingInput,
+  type EmbeddingProviderAdapter,
+  type EmbeddingProviderConfig,
+  type EmbeddingVector
+} from "./embedding/types.js";
 import type { EmbeddingProviderService } from "./embedding-provider-service.js";
 import { DeferredJobRun, PermanentJobFailure } from "./job-runner.js";
 import type { ProfileService } from "./profile-service.js";
@@ -160,14 +166,17 @@ export class EmbeddingJobService {
     try {
       for (const chunk of chunks(candidates, embeddingBatchSizeFor(provider.type))) {
         this.assertProviderRequestAllowed(provider);
-        const items = chunk.map((candidate) => ({
+        let items = chunk.map((candidate) => ({
           id: candidate.articleId,
           text: textForEmbedding(candidate, provider.textMaxChars)
         }));
-        const vectors = await active.adapter.embedBatch({
+        const embeddingResult = await embedBatchWithOllamaContextRetry({
+          adapter: active.adapter,
           provider: active.provider,
           items
         });
+        items = embeddingResult.items;
+        const vectors = embeddingResult.vectors;
         this.options.recordUsage?.({
           providerId: provider.id,
           embeddingIndexId: index.id,
@@ -497,6 +506,77 @@ function embeddingBatchSizeFor(type: string): number {
   return type === "ollama"
     ? OLLAMA_EMBEDDING_BATCH_SIZE
     : OPENAI_COMPATIBLE_EMBEDDING_BATCH_SIZE;
+}
+
+async function embedBatchWithOllamaContextRetry(input: {
+  adapter: EmbeddingProviderAdapter;
+  provider: EmbeddingProviderConfig;
+  items: EmbeddingInput[];
+}): Promise<{ items: EmbeddingInput[]; vectors: EmbeddingVector[] }> {
+  try {
+    return {
+      items: input.items,
+      vectors: await input.adapter.embedBatch({
+        provider: input.provider,
+        items: input.items
+      })
+    };
+  } catch (error) {
+    if (!shouldRetryOllamaContextLength(input.provider, input.items, error)) {
+      throw error;
+    }
+
+    const retryTextMaxChars = retryTextMaxCharsFor(input.items);
+    if (retryTextMaxChars === null) {
+      throw error;
+    }
+
+    const retryItems = input.items.map((item) => ({
+      ...item,
+      text: item.text.slice(0, retryTextMaxChars)
+    }));
+
+    return {
+      items: retryItems,
+      vectors: await input.adapter.embedBatch({
+        provider: input.provider,
+        items: retryItems
+      })
+    };
+  }
+}
+
+function shouldRetryOllamaContextLength(
+  provider: EmbeddingProviderConfig,
+  items: EmbeddingInput[],
+  error: unknown
+): boolean {
+  return (
+    provider.type === "ollama" &&
+    items.length > 0 &&
+    error instanceof EmbeddingProviderError &&
+    !error.retryable &&
+    embeddingProviderErrorText(error).includes("input length exceeds") &&
+    embeddingProviderErrorText(error).includes("context length")
+  );
+}
+
+function retryTextMaxCharsFor(items: EmbeddingInput[]): number | null {
+  const maxLength = Math.max(...items.map((item) => item.text.length));
+  if (maxLength <= 1_000) {
+    return null;
+  }
+  return Math.max(1_000, Math.floor(maxLength * 0.5));
+}
+
+function embeddingProviderErrorText(error: EmbeddingProviderError): string {
+  let details = "";
+  try {
+    details = error.details === undefined ? "" : JSON.stringify(error.details);
+  } catch {
+    details = String(error.details);
+  }
+  return `${error.message} ${details}`.toLowerCase();
 }
 
 function startOfLocalDay(timestamp: number): number {

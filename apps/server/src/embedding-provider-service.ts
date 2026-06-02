@@ -415,6 +415,9 @@ type CreateProviderInput = {
 
 type UpdateProviderInput = Partial<CreateProviderInput>;
 
+const DEFAULT_EMBEDDING_TEXT_MAX_CHARS = 8_000;
+const DEFAULT_OLLAMA_EMBEDDING_TEXT_MAX_CHARS = 4_000;
+
 function parseCreateProviderBody(body: unknown): CreateProviderInput {
   const input = readObject(body);
   rejectUnknownKeys(input, [
@@ -442,7 +445,7 @@ function parseCreateProviderBody(body: unknown): CreateProviderInput {
     dimension: parseDimension(input.dimension),
     textMaxChars:
       input.textMaxChars === undefined
-        ? 8_000
+        ? defaultTextMaxCharsForProvider(type)
         : parseTextMaxChars(input.textMaxChars),
     requestsPerMinute:
       input.requestsPerMinute === undefined
@@ -457,6 +460,12 @@ function parseCreateProviderBody(body: unknown): CreateProviderInput {
     qualityTier:
       input.qualityTier === undefined ? "basic" : parseQualityTier(input.qualityTier)
   };
+}
+
+function defaultTextMaxCharsForProvider(type: EmbeddingProviderRow["type"]): number {
+  return type === "ollama"
+    ? DEFAULT_OLLAMA_EMBEDDING_TEXT_MAX_CHARS
+    : DEFAULT_EMBEDDING_TEXT_MAX_CHARS;
 }
 
 function parseUpdateProviderBody(

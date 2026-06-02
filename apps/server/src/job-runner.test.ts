@@ -829,6 +829,69 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("retries Ollama context length failures with a shorter text slice", async () => {
+    const fixture = createEmbeddingPipelineFixture({ providerType: "ollama" });
+    const { articles, adapter, db, embeddingJobs, jobs } = fixture;
+    const seenTexts: string[] = [];
+
+    try {
+      insertEmbeddingArticleFixture(
+        db,
+        articles,
+        "article_ollama_context_retry",
+        "Ollama context retry article"
+      );
+      articles.upsertContent({
+        articleId: "article_ollama_context_retry",
+        contentHtml: null,
+        contentText: "中".repeat(6000),
+        extractionStatus: "success",
+        extractedAt: 1000,
+        now: 1000
+      });
+      const [job] = embeddingJobs.enqueueArticlesForActiveIndex([
+        "article_ollama_context_retry"
+      ]);
+      adapter.embedBatch = async ({ items }) => {
+        seenTexts.push(...items.map((input) => input.text));
+        if (seenTexts.length === 1) {
+          throw new EmbeddingProviderError(
+            "Ollama provider rejected the embedding request",
+            false,
+            {
+              category: "bad_request",
+              providerMessage: "the input length exceeds the context length",
+              status: 400
+            }
+          );
+        }
+        return items.map((input) => ({
+          id: input.id,
+          vector: [0.1, 0.2, 0.3]
+        }));
+      };
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [EMBEDDING_GENERATE_JOB_TYPE]: (queuedJob) =>
+            embeddingJobs.handleEmbeddingGenerateJob(queuedJob)
+        },
+        now: () => 2000
+      });
+
+      await expect(runner.runDueOnce()).resolves.toMatchObject({ id: job.id });
+      expect(seenTexts).toHaveLength(2);
+      expect(seenTexts[0]).toHaveLength(4000);
+      expect(seenTexts[1]).toHaveLength(2000);
+      expect(jobs.findById(job.id)).toMatchObject({ status: "succeeded" });
+      expect(countRows(db, "article_embeddings", "article_ollama_context_retry")).toBe(
+        1
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("defers embedding jobs when provider QPM is exhausted", async () => {
     const fixture = createEmbeddingPipelineFixture();
     const { articles, adapter, db, embeddings, jobs, providerService, vectorStore } = fixture;
@@ -1409,7 +1472,9 @@ function createEmptyDatabase(): DibaoDatabase {
   return openDatabase(tempDatabasePath(), { migrate: true });
 }
 
-function createEmbeddingPipelineFixture() {
+function createEmbeddingPipelineFixture(
+  options: { providerType?: "openai_compatible" | "ollama" } = {}
+) {
   const db = createEmptyDatabase();
   const feeds = new SqliteFeedRepository(db);
   const articles = new SqliteArticleRepository(db);
@@ -1417,6 +1482,12 @@ function createEmbeddingPipelineFixture() {
   const jobs = new SqliteJobRepository(db);
   const vectorStore = new SqliteVecVectorStore(db);
   const adapter = embeddingAdapterFixture();
+  const providerType = options.providerType ?? "openai_compatible";
+  const providerId = providerType === "ollama" ? "provider_ollama" : "provider_openai";
+  const indexId = providerType === "ollama" ? "index_ollama" : "index_openai";
+  const providerName = providerType === "ollama" ? "Ollama" : "OpenAI Compatible";
+  const providerBaseUrl =
+    providerType === "ollama" ? "http://127.0.0.1:11434" : "https://api.example.com/v1";
 
   feeds.upsert({
     id: "feed_embedding",
@@ -1426,10 +1497,10 @@ function createEmbeddingPipelineFixture() {
     now: 1000
   });
   embeddings.upsertProvider({
-    id: "provider_openai",
-    type: "openai_compatible",
-    name: "OpenAI Compatible",
-    baseUrl: "https://api.example.com/v1",
+    id: providerId,
+    type: providerType,
+    name: providerName,
+    baseUrl: providerBaseUrl,
     model: "fixture-embedding",
     dimension: 3,
     enabled: true,
@@ -1437,10 +1508,11 @@ function createEmbeddingPipelineFixture() {
     now: 1000
   });
   embeddings.createIndex({
-    id: "index_openai",
-    providerId: "provider_openai",
+    id: indexId,
+    providerId,
     model: "fixture-embedding",
     dimension: 3,
+    textMaxChars: providerType === "ollama" ? 4000 : undefined,
     now: 1000
   });
 
@@ -1448,7 +1520,7 @@ function createEmbeddingPipelineFixture() {
     embeddings,
     vectorStore,
     adapters: {
-      openai_compatible: adapter
+      [providerType]: adapter
     },
     now: () => 1000
   });

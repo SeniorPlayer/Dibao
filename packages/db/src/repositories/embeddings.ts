@@ -20,6 +20,7 @@ const EMBEDDING_ELIGIBLE_TEXT_PREDICATE = `
   )
 `;
 const DEFAULT_EMBEDDING_TEXT_MAX_CHARS = 8_000;
+const DEFAULT_OLLAMA_EMBEDDING_TEXT_MAX_CHARS = 4_000;
 
 export interface EmbeddingRepository {
   deleteProvider(id: string): boolean;
@@ -137,7 +138,7 @@ export class SqliteEmbeddingRepository implements EmbeddingRepository {
           input.baseUrl ?? null,
           input.model,
           input.dimension,
-          input.textMaxChars ?? DEFAULT_EMBEDDING_TEXT_MAX_CHARS,
+          input.textMaxChars ?? defaultTextMaxCharsForProvider(input.type),
           input.requestsPerMinute ?? null,
           input.requestsPerDay ?? null,
           input.apiKeyEncrypted ?? null,
@@ -568,6 +569,12 @@ function baseProviderSelect(): string {
       updated_at as updatedAt
     from embedding_providers
   `;
+}
+
+function defaultTextMaxCharsForProvider(type: EmbeddingProviderInput["type"]): number {
+  return type === "ollama"
+    ? DEFAULT_OLLAMA_EMBEDDING_TEXT_MAX_CHARS
+    : DEFAULT_EMBEDDING_TEXT_MAX_CHARS;
 }
 
 function mapProvider(row: EmbeddingProviderDbRow): EmbeddingProviderRow {
