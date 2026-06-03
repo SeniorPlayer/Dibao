@@ -6297,7 +6297,7 @@ export function ArticleListPanel(props: {
   unreadCount: number;
   unreadOnly: boolean;
 }) {
-  const { t, formatDate } = useI18n();
+  const { t, formatDate, formatArticleDate } = useI18n();
   const scrollContainerRef = useRef<HTMLElement>(null);
   const listScrollKey = props.listScrollKey ?? `dibao:list-scroll:${props.articleView}`;
   const sourceTitle =
@@ -6473,7 +6473,7 @@ export function ArticleListPanel(props: {
               >
                 <span className={styles.meta}>
                   {t.articles.itemMeta(
-                    formatDate(article.publishedAt ?? article.discoveredAt),
+                    formatArticleDate(article.publishedAt ?? article.discoveredAt),
                     article.feedTitle
                   )}
                 </span>
@@ -6709,7 +6709,7 @@ export function SearchResultsPanel(props: {
   selectedArticleId: string | null;
   unreadCount: number;
 }) {
-  const { t, formatDate } = useI18n();
+  const { t, formatDate, formatArticleDate } = useI18n();
   const [isAdvancedSearchOpen, setIsAdvancedSearchOpen] = useState(false);
 
   function update(patch: Partial<SearchFormState>) {
@@ -6916,7 +6916,7 @@ export function SearchResultsPanel(props: {
               >
                 <span className={styles.meta}>
                   {t.articles.itemMeta(
-                    formatDate(article.publishedAt ?? article.discoveredAt),
+                    formatArticleDate(article.publishedAt ?? article.discoveredAt),
                     article.feedTitle
                   )}
                 </span>
@@ -7222,7 +7222,7 @@ function handleReaderMediaError(event: SyntheticEvent<HTMLDivElement>): void {
   event.target.removeAttribute("srcset");
 }
 
-function ArticleDetailPanel(props: {
+export function ArticleDetailPanel(props: {
   actionError: string | null;
   article: ArticleDetail | null;
   articleView: ArticleView;
@@ -7245,7 +7245,7 @@ function ArticleDetailPanel(props: {
   pendingAction: ArticleActionIntent | null;
   readerSettings: ReaderSettings;
 }) {
-  const { t, formatDate } = useI18n();
+  const { t, formatArticleDate } = useI18n();
   const readerPanelRef = useRef<HTMLElement>(null);
   const safeHtml = useMemo(
     () =>
@@ -7299,7 +7299,9 @@ function ArticleDetailPanel(props: {
             <p>
               {t.reader.meta(
                 props.article.feedTitle,
-                props.article.publishedAt ? formatDate(props.article.publishedAt) : undefined,
+                props.article.publishedAt
+                  ? formatArticleDate(props.article.publishedAt)
+                  : undefined,
                 props.article.author
               )}
             </p>

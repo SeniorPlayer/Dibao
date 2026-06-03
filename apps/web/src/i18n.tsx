@@ -3923,6 +3923,7 @@ export type I18nValue = {
   setLocale: (locale: Locale) => void;
   t: Dictionary;
   formatDate: (value: string | Date) => string;
+  formatArticleDate: (value: string | Date) => string;
 };
 
 export type DibaoI18nProviderProps = {
@@ -3992,6 +3993,7 @@ export function createI18n(
   setLocale: (locale: Locale) => void = () => undefined
 ): I18nValue {
   const formatter = createDateFormatter(locale, options);
+  const articleFormatter = createArticleDateFormatter(locale, options);
 
   return {
     locale,
@@ -3999,6 +4001,9 @@ export function createI18n(
     t: dictionaries[locale],
     formatDate(value) {
       return formatter.format(new Date(value));
+    },
+    formatArticleDate(value) {
+      return articleFormatter.format(new Date(value));
     }
   };
 }
@@ -4008,6 +4013,20 @@ export function createDateFormatter(
   options: { timeZone?: string } = {}
 ): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(locale, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(options.timeZone ? { timeZone: options.timeZone } : {})
+  });
+}
+
+export function createArticleDateFormatter(
+  locale: Locale = defaultLocale,
+  options: { timeZone?: string } = {}
+): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
