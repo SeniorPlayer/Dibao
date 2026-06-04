@@ -60,7 +60,7 @@ describe("server API vertical slice", () => {
           database: "ok",
           fts: "ok",
           vectorStore: "ok",
-          version: "0.1.2"
+          version: "0.1.3"
         }
       });
     } finally {
@@ -3037,7 +3037,7 @@ describe("server API vertical slice", () => {
       expect(first.statusCode, first.body).toBe(200);
       expect(first.json()).toMatchObject({
         data: {
-          currentVersion: "0.1.2",
+          currentVersion: "0.1.3",
           latestVersion: "v0.2.0",
           releaseUrl: "https://github.com/Pls-1q43/Dibao/releases/tag/v0.2.0",
           updateAvailable: true,
