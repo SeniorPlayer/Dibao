@@ -851,7 +851,11 @@ export function App() {
     setRecommendationStatusError(null);
 
     try {
-      const status = await dibaoApi.getRecommendationTransparency();
+      const status = await dibaoApi.getRecommendationTransparency({
+        includeClusterItems: true,
+        clusterItemLimit: 10,
+        clusterDetailLevel: "summary"
+      });
       setRecommendationStatus(status);
     } catch (error) {
       setRecommendationStatus(null);
@@ -898,7 +902,9 @@ export function App() {
     setAllClustersError(null);
 
     try {
-      const result = await dibaoApi.listRecommendationClusters("all");
+      const result = await dibaoApi.listRecommendationClusters("all", {
+        clusterDetailLevel: "summary"
+      });
       setAllRecommendationClusters(result.items);
       setAllRecommendationClusterTotal(result.total);
     } catch (error) {

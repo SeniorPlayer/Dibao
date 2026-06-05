@@ -362,10 +362,13 @@ type RecommendationMaintenanceParams = {
 
 type RecommendationClusterQuery = {
   limit?: string;
+  clusterDetailLevel?: string;
 };
 
 type RecommendationStatusQuery = {
   includeClusterItems?: string;
+  clusterItemLimit?: string;
+  clusterDetailLevel?: string;
 };
 
 type RecommendationMergeCandidateQuery = {
@@ -392,6 +395,8 @@ type RecommendationClusterLabelBody = {
 type RecommendationFamilyLabelBody = {
   manualLabel?: unknown;
 };
+
+type RecommendationClusterDetailLevel = "summary" | "diagnostic";
 
 type CursorPayload = {
   offset: number;
@@ -1553,6 +1558,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     async (request, reply) => {
       const startedAt = performance.now();
       const includeClusterItems = parseBooleanParam(request.query.includeClusterItems);
+      const clusterItemLimit = parseOptionalPositiveInteger(request.query.clusterItemLimit);
+      const clusterDetailLevel = parseClusterDetailLevel(request.query.clusterDetailLevel);
       if (includeClusterItems === null) {
         return sendApiError(
           reply,
@@ -1560,6 +1567,24 @@ export function buildServer(options: BuildServerOptions = {}) {
           "VALIDATION_ERROR",
           "includeClusterItems must be true or false",
           { field: "includeClusterItems" }
+        );
+      }
+      if (request.query.clusterItemLimit !== undefined && clusterItemLimit === undefined) {
+        return sendApiError(
+          reply,
+          400,
+          "VALIDATION_ERROR",
+          "clusterItemLimit must be a positive integer",
+          { field: "clusterItemLimit" }
+        );
+      }
+      if (clusterDetailLevel === null) {
+        return sendApiError(
+          reply,
+          400,
+          "VALIDATION_ERROR",
+          "clusterDetailLevel must be summary or diagnostic",
+          { field: "clusterDetailLevel" }
         );
       }
 
@@ -1574,13 +1599,17 @@ export function buildServer(options: BuildServerOptions = {}) {
         settings: settingsService.getSettings().ranking,
         maintenanceSettings: settingsService.getSettings().recommendationMaintenance,
         maintenanceScheduleStates: recommendationMaintenanceService.listScheduleStates(),
-        includeClusterItems: includeClusterItems ?? false
+        includeClusterItems: includeClusterItems ?? true,
+        clusterItemLimit: clusterItemLimit ?? 10,
+        clusterDetailLevel: clusterDetailLevel ?? "summary"
       });
       app.log.info(
         {
           route: "/api/recommendation/transparency",
           durationMs: roundDuration(performance.now() - startedAt),
-          includeClusterItems: includeClusterItems ?? false,
+          includeClusterItems: includeClusterItems ?? true,
+          clusterItemLimit: clusterItemLimit ?? 10,
+          clusterDetailLevel: clusterDetailLevel ?? "summary",
           clusterCount: data.clusters.positive + data.clusters.negative,
           itemCount: data.clusters.items.length,
           familyCount: data.clusters.families?.topFamilies.length ?? 0
@@ -1593,8 +1622,19 @@ export function buildServer(options: BuildServerOptions = {}) {
 
   app.get<{ Querystring: RecommendationClusterQuery }>(
     "/api/recommendation/clusters",
-    async (request) => {
+    async (request, reply) => {
       const startedAt = performance.now();
+      const clusterDetailLevel = parseClusterDetailLevel(request.query.clusterDetailLevel);
+      if (clusterDetailLevel === null) {
+        return sendApiError(
+          reply,
+          400,
+          "VALIDATION_ERROR",
+          "clusterDetailLevel must be summary or diagnostic",
+          { field: "clusterDetailLevel" }
+        );
+      }
+      const limit = request.query.limit === "all" ? null : parsePositiveInteger(request.query.limit, 12);
       const data = getRecommendationClusters({
         db,
         embeddings,
@@ -1604,12 +1644,15 @@ export function buildServer(options: BuildServerOptions = {}) {
         clusterLabels: clusterLabelService,
         interestFamilies: interestFamilyService,
         settings: settingsService.getSettings().ranking,
-        limit: request.query.limit === "all" ? null : parsePositiveInteger(request.query.limit, 12)
+        limit,
+        clusterDetailLevel: clusterDetailLevel ?? "summary"
       });
       app.log.info(
         {
           route: "/api/recommendation/clusters",
           durationMs: roundDuration(performance.now() - startedAt),
+          limit: limit ?? "all",
+          clusterDetailLevel: clusterDetailLevel ?? "summary",
           total: data.total,
           itemCount: data.items.length,
           familyCount: data.families?.topFamilies.length ?? 0
@@ -2742,8 +2785,12 @@ function getRecommendationStatus(options: {
   interestFamilies: InterestFamilyService;
   settings: ReturnType<SettingsService["getSettings"]>["ranking"];
   includeClusterItems?: boolean;
+  clusterItemLimit?: number;
+  clusterDetailLevel?: RecommendationClusterDetailLevel;
 }) {
   const includeClusterItems = options.includeClusterItems ?? true;
+  const clusterItemLimit = Math.max(1, Math.min(5000, options.clusterItemLimit ?? 12));
+  const clusterDetailLevel = options.clusterDetailLevel ?? "diagnostic";
   const activeProvider = options.embeddings.findActiveProvider();
   const activeIndex = activeProvider
     ? includeClusterItems
@@ -2761,31 +2808,43 @@ function getRecommendationStatus(options: {
     ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
   });
   const clusterEvidence = activeIndex && includeClusterItems
-    ? options.profiles.listClusterEvidence({ embeddingIndexId: activeIndex.id, limit: 2000 })
+    ? clusterDetailLevel === "diagnostic"
+      ? options.profiles.listClusterEvidence({ embeddingIndexId: activeIndex.id, limit: 2000 })
+      : []
     : [];
   const clusterMergeDiagnostics = activeIndex && includeClusterItems
-    ? mergeDiagnosticsByCluster(options.db, activeIndex.id, options.clusterLabels)
+    ? clusterDetailLevel === "diagnostic"
+      ? mergeDiagnosticsByCluster(options.db, activeIndex.id, options.clusterLabels)
+      : new Map<string, ClusterMergeDiagnostics>()
     : new Map<string, ClusterMergeDiagnostics>();
   const clustersForStatus = includeClusterItems
     ? options.profiles
         .listClusters({
           ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
         })
-        .slice(0, 12)
+        .slice(0, clusterItemLimit)
     : [];
   const clusterFamilyMap = includeClusterItems
     ? options.interestFamilies.familyMapForClusters(clustersForStatus.map((cluster) => cluster.id))
     : new Map<string, RecommendationClusterFamily>();
-  const clusterItems = clustersForStatus.map((cluster, index) =>
-    mapRecommendationCluster(
-      cluster,
-      index + 1,
-      clusterEvidence,
-      options.clusterLabels,
-      clusterMergeDiagnostics.get(cluster.id) ?? emptyClusterMergeDiagnostics(),
-      clusterFamilyMap.get(cluster.id) ?? null
-    )
-  );
+  const clusterItems = clustersForStatus.map((cluster, index) => {
+    const displayIndex = index + 1;
+    return clusterDetailLevel === "diagnostic"
+      ? mapRecommendationCluster(
+          cluster,
+          displayIndex,
+          clusterEvidence,
+          options.clusterLabels,
+          clusterMergeDiagnostics.get(cluster.id) ?? emptyClusterMergeDiagnostics(),
+          clusterFamilyMap.get(cluster.id) ?? null
+        )
+      : mapRecommendationClusterSummary(
+          cluster,
+          displayIndex,
+          options.clusterLabels,
+          clusterFamilyMap.get(cluster.id) ?? null
+        );
+  });
   const familySummary = options.interestFamilies.listFamilySummary(activeIndex?.id ?? null, 8);
   const rankedArticles = options.rankings.countRankedArticles({ activeRankContext });
   const lastProfileUpdate = options.profiles.getLastProfileUpdate({
@@ -2863,19 +2922,23 @@ function labeledExplanationCluster(
 }
 
 function getRecommendationClusters(
-  options: Parameters<typeof getRecommendationStatus>[0] & { limit: number | null }
+  options: Parameters<typeof getRecommendationStatus>[0] & {
+    limit: number | null;
+    clusterDetailLevel?: RecommendationClusterDetailLevel;
+  }
 ) {
+  const clusterDetailLevel = options.clusterDetailLevel ?? "summary";
   const activeProvider = options.embeddings.findActiveProvider();
   const indexes = options.embeddings.listIndexes();
   const activeIndex = activeProvider ? activeDiagnosticIndexFor(activeProvider.id, indexes) : null;
-  const clusterEvidence = activeIndex
+  const clusterEvidence = activeIndex && clusterDetailLevel === "diagnostic"
     ? options.profiles.listClusterEvidence({ embeddingIndexId: activeIndex.id, limit: 5000 })
     : [];
   const clusters = options.profiles.listClusters({
     ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
   });
   const limitedClusters = options.limit === null ? clusters : clusters.slice(0, options.limit);
-  const clusterMergeDiagnostics = activeIndex
+  const clusterMergeDiagnostics = activeIndex && clusterDetailLevel === "diagnostic"
     ? mergeDiagnosticsByCluster(options.db, activeIndex.id, options.clusterLabels)
     : new Map<string, ClusterMergeDiagnostics>();
   const clusterFamilyMap = options.interestFamilies.familyMapForClusters(
@@ -2886,16 +2949,24 @@ function getRecommendationClusters(
     activeIndex: activeIndex ? mapRecommendationIndex(activeIndex) : null,
     total: clusters.length,
     families: options.interestFamilies.listFamilySummary(activeIndex?.id ?? null, 24),
-    items: limitedClusters.map((cluster, index) =>
-      mapRecommendationCluster(
-        cluster,
-        index + 1,
-        clusterEvidence,
-        options.clusterLabels,
-        clusterMergeDiagnostics.get(cluster.id) ?? emptyClusterMergeDiagnostics(),
-        clusterFamilyMap.get(cluster.id) ?? null
-      )
-    )
+    items: limitedClusters.map((cluster, index) => {
+      const displayIndex = index + 1;
+      return clusterDetailLevel === "diagnostic"
+        ? mapRecommendationCluster(
+            cluster,
+            displayIndex,
+            clusterEvidence,
+            options.clusterLabels,
+            clusterMergeDiagnostics.get(cluster.id) ?? emptyClusterMergeDiagnostics(),
+            clusterFamilyMap.get(cluster.id) ?? null
+          )
+        : mapRecommendationClusterSummary(
+            cluster,
+            displayIndex,
+            options.clusterLabels,
+            clusterFamilyMap.get(cluster.id) ?? null
+          );
+    })
   };
 }
 
@@ -3019,6 +3090,8 @@ function getRecommendationTransparency(options: {
   interestFamilies: InterestFamilyService;
   settings: ReturnType<SettingsService["getSettings"]>["ranking"];
   includeClusterItems?: boolean;
+  clusterItemLimit?: number;
+  clusterDetailLevel?: RecommendationClusterDetailLevel;
   maintenanceSettings?: ReturnType<SettingsService["getSettings"]>["recommendationMaintenance"];
   maintenanceScheduleStates?: Array<{
     taskKey: string;
@@ -3323,6 +3396,45 @@ function mapRecommendationCluster(
     weight: cluster.weight,
     sampleCount: cluster.sampleCount,
     diagnostics,
+    lastMatchedAt: timestampToIso(cluster.lastMatchedAt),
+    updatedAt: timestampToIso(cluster.updatedAt)
+  };
+}
+
+function mapRecommendationClusterSummary(
+  cluster: InterestClusterRow,
+  displayIndex: number,
+  clusterLabels: InterestClusterLabelService,
+  family: RecommendationClusterFamily | null = null
+) {
+  const label = clusterLabels.displayLabelForCluster(
+    {
+      id: cluster.id,
+      label: cluster.label,
+      polarity: cluster.polarity,
+      displayIndex
+    },
+    displayIndex
+  );
+  return {
+    id: cluster.id,
+    polarity: cluster.polarity,
+    label: label.displayLabel,
+    displayLabel: label.displayLabel,
+    labelSource: label.labelSource,
+    autoLabel: label.autoLabel,
+    manualLabel: label.manualLabel,
+    confidence: label.confidence,
+    evidenceCount: label.representativeArticles.length,
+    topTerms: label.topTerms,
+    representativeArticles: label.representativeArticles,
+    feedTitles: label.feedTitles,
+    labelDiagnostics: label.labelDiagnostics,
+    family,
+    lastGeneratedAt: timestampToIso(label.generatedAt),
+    displayIndex,
+    weight: cluster.weight,
+    sampleCount: cluster.sampleCount,
     lastMatchedAt: timestampToIso(cluster.lastMatchedAt),
     updatedAt: timestampToIso(cluster.updatedAt)
   };
@@ -5379,6 +5491,16 @@ function parseBooleanParam(value: string | undefined): boolean | undefined | nul
     return false;
   }
 
+  return null;
+}
+
+function parseClusterDetailLevel(value: string | undefined): RecommendationClusterDetailLevel | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "summary" || value === "diagnostic") {
+    return value;
+  }
   return null;
 }
 

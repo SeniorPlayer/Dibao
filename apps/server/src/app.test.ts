@@ -3390,7 +3390,12 @@ describe("server API vertical slice", () => {
       expect(transparency.json()).toMatchObject({
         data: {
           clusters: {
-            items: []
+            items: [
+              expect.objectContaining({
+                id: "cluster_overfit_probe",
+                displayLabel: expect.any(String)
+              })
+            ]
           },
           transparency: {
             algorithmModules: expect.arrayContaining([
@@ -3406,11 +3411,19 @@ describe("server API vertical slice", () => {
           }
         }
       });
-      expect(transparency.body).not.toContain("cluster_overfit_probe");
+      expect(transparency.body).not.toContain("vectorBlob");
+      expect(transparency.json().data.clusters.items[0].diagnostics).toBeUndefined();
+
+      const emptyTransparency = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency?includeClusterItems=false"
+      });
+      expect(emptyTransparency.statusCode, emptyTransparency.body).toBe(200);
+      expect(emptyTransparency.json().data.clusters.items).toEqual([]);
 
       const transparencyWithItems = await app.inject({
         method: "GET",
-        url: "/api/recommendation/transparency?includeClusterItems=true"
+        url: "/api/recommendation/transparency?includeClusterItems=true&clusterDetailLevel=diagnostic"
       });
       expect(transparencyWithItems.statusCode, transparencyWithItems.body).toBe(200);
       expect(transparencyWithItems.json()).toMatchObject({
@@ -3424,6 +3437,86 @@ describe("server API vertical slice", () => {
           }
         }
       });
+      expect(transparencyWithItems.json().data.clusters.items[0].diagnostics).toBeDefined();
+
+      const invalidDetailLevel = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency?clusterDetailLevel=full"
+      });
+      expect(invalidDetailLevel.statusCode, invalidDetailLevel.body).toBe(400);
+      expect(invalidDetailLevel.json()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          details: {
+            field: "clusterDetailLevel"
+          }
+        }
+      });
+
+      const invalidClusterLimit = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency?clusterItemLimit=0"
+      });
+      expect(invalidClusterLimit.statusCode, invalidClusterLimit.body).toBe(400);
+      expect(invalidClusterLimit.json()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          details: {
+            field: "clusterItemLimit"
+          }
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("limits default transparency cluster summaries to ten items", async () => {
+    const db = createFixtureDatabase();
+    const { index } = createActiveEmbeddingDiagnosticsFixture(db, {
+      providerTestStatus: "success"
+    });
+    const profiles = new SqliteProfileRepository(db);
+    for (let offset = 0; offset < 12; offset += 1) {
+      const id = `cluster_summary_${offset}`;
+      profiles.upsertCluster({
+        id,
+        embeddingIndexId: index.id,
+        polarity: offset % 2 === 0 ? "positive" : "negative",
+        label: `Summary ${offset}`,
+        centroidVectorBlob: toVectorBlob([1, offset / 100, 0]),
+        weight: 20 - offset,
+        sampleCount: 2,
+        now: 7000 + offset
+      });
+      db.prepare(
+        `
+          insert into interest_cluster_labels (
+            cluster_id,
+            auto_label,
+            label_source,
+            updated_at
+          )
+          values (?, ?, 'keywords', ?)
+        `
+      ).run(id, `Summary ${offset}`, 7000 + offset);
+    }
+    const app = buildServer({ db, logger: false, backgroundJobs: false });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/transparency"
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data.clusters.items).toHaveLength(10);
+      expect(response.json().data.clusters.items[0]).toMatchObject({
+        id: "cluster_summary_0",
+        displayLabel: "Summary 0"
+      });
+      expect(response.json().data.clusters.items[0].diagnostics).toBeUndefined();
+      expect(response.body).not.toContain("vectorBlob");
     } finally {
       await app.close();
       db.close();
@@ -4719,6 +4812,48 @@ describe("server API vertical slice", () => {
                 topTerms: expect.arrayContaining([expect.stringMatching(/AI|Agent|CLI/i)])
               }
             ]
+          }
+        }
+      });
+
+      const summaryClusters = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/clusters?limit=all&clusterDetailLevel=summary"
+      });
+      expect(summaryClusters.statusCode, summaryClusters.body).toBe(200);
+      expect(summaryClusters.json()).toMatchObject({
+        data: {
+          total: 1,
+          items: [
+            expect.objectContaining({
+              id: "cluster_label_api",
+              displayLabel: "AI 编程代理",
+              family: null
+            })
+          ]
+        }
+      });
+      expect(summaryClusters.json().data.items[0].diagnostics).toBeUndefined();
+      expect(summaryClusters.json().data.items[0].mergeDiagnostics).toBeUndefined();
+
+      const diagnosticClusters = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/clusters?limit=all&clusterDetailLevel=diagnostic"
+      });
+      expect(diagnosticClusters.statusCode, diagnosticClusters.body).toBe(200);
+      expect(diagnosticClusters.json().data.items[0].diagnostics).toBeDefined();
+      expect(diagnosticClusters.json().data.items[0].mergeDiagnostics).toBeDefined();
+
+      const invalidClusterDetailLevel = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/clusters?limit=all&clusterDetailLevel=full"
+      });
+      expect(invalidClusterDetailLevel.statusCode, invalidClusterDetailLevel.body).toBe(400);
+      expect(invalidClusterDetailLevel.json()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          details: {
+            field: "clusterDetailLevel"
           }
         }
       });

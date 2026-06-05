@@ -1655,10 +1655,18 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
 
     async getRecommendationTransparency(input?: {
       includeClusterItems?: boolean;
+      clusterItemLimit?: number;
+      clusterDetailLevel?: "summary" | "diagnostic";
     }): Promise<RecommendationTransparency> {
       const params = new URLSearchParams();
       if (input?.includeClusterItems !== undefined) {
         params.set("includeClusterItems", String(input.includeClusterItems));
+      }
+      if (input?.clusterItemLimit !== undefined) {
+        params.set("clusterItemLimit", String(input.clusterItemLimit));
+      }
+      if (input?.clusterDetailLevel !== undefined) {
+        params.set("clusterDetailLevel", input.clusterDetailLevel);
       }
       const query = params.toString();
       return (
@@ -1669,11 +1677,17 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
     },
 
     async listRecommendationClusters(
-      limit: "all" | number = "all"
+      limit: "all" | number = "all",
+      input: {
+        clusterDetailLevel?: "summary" | "diagnostic";
+      } = {}
     ): Promise<RecommendationClusterListResponse> {
       const params = new URLSearchParams({
         limit: String(limit)
       });
+      if (input.clusterDetailLevel !== undefined) {
+        params.set("clusterDetailLevel", input.clusterDetailLevel);
+      }
       return (
         await request<RecommendationClusterListResponse>(
           `/api/recommendation/clusters?${params.toString()}`

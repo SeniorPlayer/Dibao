@@ -1305,11 +1305,43 @@ describe("web API client", () => {
     });
 
     await api.getRecommendationTransparency();
-    await api.getRecommendationTransparency({ includeClusterItems: true });
+    await api.getRecommendationTransparency({
+      includeClusterItems: true,
+      clusterItemLimit: 10,
+      clusterDetailLevel: "summary"
+    });
 
     expect(calls).toEqual([
       "/api/recommendation/transparency",
-      "/api/recommendation/transparency?includeClusterItems=true"
+      "/api/recommendation/transparency?includeClusterItems=true&clusterItemLimit=10&clusterDetailLevel=summary"
+    ]);
+  });
+
+  it("loads recommendation clusters with optional detail level", async () => {
+    const calls: string[] = [];
+    const api = createDibaoApi(async (input) => {
+      calls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          data: {
+            activeIndex: null,
+            total: 0,
+            items: []
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    await api.listRecommendationClusters("all", { clusterDetailLevel: "summary" });
+
+    expect(calls).toEqual([
+      "/api/recommendation/clusters?limit=all&clusterDetailLevel=summary"
     ]);
   });
 

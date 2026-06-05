@@ -228,9 +228,9 @@ export function AlgorithmTransparencyPage(props: {
                 />
               ))}
             </div>
-          ) : (
-            <p>{clusterTotal > 0 ? t.algorithmTransparency.clusters.generated : t.algorithmTransparency.clusters.empty}</p>
-          )}
+          ) : clusterTotal === 0 ? (
+            <p>{t.algorithmTransparency.clusters.empty}</p>
+          ) : null}
           {clusterTotal > 0 ? (
             <a
               className={styles.textLink}
@@ -702,29 +702,54 @@ function FamilySummaryRow(props: {
   );
 }
 
-function groupClustersByFamily(
+function groupClustersByPolarityAndFamily(
   clusters: RecommendationClusterItem[],
-  fallbackLabels: { positive: string; negative: string }
+  labels: {
+    positive: string;
+    negative: string;
+    ungrouped: string;
+  }
 ): Array<{
-  id: string;
+  polarity: "positive" | "negative";
   label: string;
-  clusters: RecommendationClusterItem[];
+  groups: Array<{
+    id: string;
+    label: string;
+    family: NonNullable<RecommendationClusterItem["family"]> | null;
+    clusters: RecommendationClusterItem[];
+  }>;
 }> {
   const groups = new Map<string, { id: string; label: string; clusters: RecommendationClusterItem[] }>();
   clusters.forEach((cluster, index) => {
     const id = cluster.family?.id ?? `ungrouped:${cluster.polarity}`;
-    const label =
-      cluster.family?.displayLabel ??
-      (cluster.polarity === "positive" ? fallbackLabels.positive : fallbackLabels.negative);
+    const label = cluster.family?.displayLabel ?? labels.ungrouped;
     const group = groups.get(id) ?? { id, label, clusters: [] };
     group.clusters.push({ ...cluster, displayIndex: cluster.displayIndex ?? index + 1 });
     groups.set(id, group);
   });
-  return Array.from(groups.values()).sort(
-    (left, right) =>
-      right.clusters.length - left.clusters.length ||
-      left.label.localeCompare(right.label)
-  );
+  const grouped = Array.from(groups.values()).map((group) => ({
+    ...group,
+    family: group.id.startsWith("ungrouped:") ? null : group.clusters[0]?.family ?? null
+  }));
+  const byPolarity = {
+    positive: grouped
+      .filter((group) => group.clusters.some((cluster) => cluster.polarity === "positive"))
+      .sort(sortFamilyGroups),
+    negative: grouped
+      .filter((group) => group.clusters.some((cluster) => cluster.polarity === "negative"))
+      .sort(sortFamilyGroups)
+  };
+  return [
+    { polarity: "positive", label: labels.positive, groups: byPolarity.positive },
+    { polarity: "negative", label: labels.negative, groups: byPolarity.negative }
+  ];
+}
+
+function sortFamilyGroups(
+  left: { label: string; clusters: RecommendationClusterItem[] },
+  right: { label: string; clusters: RecommendationClusterItem[] }
+) {
+  return right.clusters.length - left.clusters.length || left.label.localeCompare(right.label);
 }
 
 export function AlgorithmClustersPage(props: {
@@ -739,9 +764,10 @@ export function AlgorithmClustersPage(props: {
   updatingFamilyLabelId: string | null;
 }) {
   const { t } = useI18n();
-  const familyGroups = groupClustersByFamily(props.clusters, {
-    positive: t.algorithmTransparency.families.positiveFallback,
-    negative: t.algorithmTransparency.families.negativeFallback
+  const polarityGroups = groupClustersByPolarityAndFamily(props.clusters, {
+    positive: t.algorithmTransparency.clusters.positiveGroupTitle,
+    negative: t.algorithmTransparency.clusters.negativeGroupTitle,
+    ungrouped: t.algorithmTransparency.families.ungroupedFallback
   });
 
   return (
@@ -768,38 +794,44 @@ export function AlgorithmClustersPage(props: {
             <p className={styles.settingsNotice}>{t.recommendationStatus.loading}</p>
           ) : null}
           {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
-          {!props.isLoading && !props.error && familyGroups.length > 0 ? (
+          {!props.isLoading && !props.error && props.clusters.length > 0 ? (
             <div className={styles.algorithmFamilyList}>
-              {familyGroups.map((group, groupIndex) => (
-                <details
-                  className={styles.algorithmFamilyGroup}
-                  key={group.id}
-                  open={groupIndex < 3}
-                >
-                  <summary>
-                    <span>
-                      {group.label} · {t.algorithmTransparency.families.clusterCount(group.clusters.length)}
-                    </span>
-                  </summary>
-                  {!group.id.startsWith("ungrouped:") ? (
-                    <FamilyGroupRename
-                      family={group.clusters[0]?.family ?? null}
-                      onUpdateFamilyLabel={props.onUpdateFamilyLabel}
-                      updating={props.updatingFamilyLabelId === group.id}
-                    />
-                  ) : null}
-                  <div className={styles.algorithmClusterGrid}>
-                    {group.clusters.map((cluster) => (
-                      <ClusterCard
-                        cluster={cluster}
-                        index={cluster.displayIndex ?? props.clusters.indexOf(cluster) + 1}
-                        key={cluster.id}
-                        onUpdateLabel={props.onUpdateClusterLabel}
-                        updating={props.updatingClusterLabelId === cluster.id}
-                      />
-                    ))}
-                  </div>
-                </details>
+              {polarityGroups.map((polarityGroup) => (
+                <section className={styles.algorithmPolarityGroup} key={polarityGroup.polarity}>
+                  <h4>
+                    {polarityGroup.label} ·{" "}
+                    {t.algorithmTransparency.families.clusterCount(
+                      polarityGroup.groups.reduce((sum, group) => sum + group.clusters.length, 0)
+                    )}
+                  </h4>
+                  {polarityGroup.groups.map((group) => (
+                    <section className={styles.algorithmFamilyGroup} key={group.id}>
+                      <div className={styles.algorithmFamilyGroupHeader}>
+                        <strong>
+                          {group.label} · {t.algorithmTransparency.families.clusterCount(group.clusters.length)}
+                        </strong>
+                        {group.family ? (
+                          <FamilyGroupRename
+                            family={group.family}
+                            onUpdateFamilyLabel={props.onUpdateFamilyLabel}
+                            updating={props.updatingFamilyLabelId === group.id}
+                          />
+                        ) : null}
+                      </div>
+                      <div className={styles.algorithmClusterGrid}>
+                        {group.clusters.map((cluster) => (
+                          <ClusterCard
+                            cluster={cluster}
+                            index={cluster.displayIndex ?? props.clusters.indexOf(cluster) + 1}
+                            key={cluster.id}
+                            onUpdateLabel={props.onUpdateClusterLabel}
+                            updating={props.updatingClusterLabelId === cluster.id}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </section>
               ))}
             </div>
           ) : null}
@@ -876,7 +908,7 @@ function FamilyGroupRename(props: {
       </div>
     </form>
   ) : (
-    <div className={styles.clusterLabelActions}>
+    <div className={styles.algorithmFamilyActions}>
       <button
         className={styles.secondaryButton}
         disabled={props.updating}

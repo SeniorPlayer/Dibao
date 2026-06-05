@@ -1072,7 +1072,7 @@
 
 .algorithmFamilyList {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-4);
 }
 
 .algorithmFamilyRow {
@@ -1116,6 +1116,46 @@
   padding-top: var(--space-3);
 }
 
+.algorithmPolarityGroup {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.algorithmPolarityGroup h4 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--text-base);
+  line-height: 1.35;
+}
+
+.algorithmFamilyGroupHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.algorithmFamilyGroupHeader strong {
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.algorithmFamilyActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.algorithmFamilyActions .secondaryButton {
+  min-height: 34px;
+  min-width: 112px;
+  padding: 6px var(--space-3);
+  white-space: normal;
+}
+
 .algorithmFamilyGroup summary {
   cursor: pointer;
   color: var(--color-ink);
@@ -1157,6 +1197,16 @@
   color: var(--color-muted);
   font-size: var(--text-xs);
   line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .algorithmFamilyGroupHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .algorithmFamilyActions {
+    justify-content: flex-start;
+  }
 }
 
 .clusterEvidenceList {
