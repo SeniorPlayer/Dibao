@@ -2792,13 +2792,14 @@ function getRecommendationStatus(options: {
   const clusterItemLimit = Math.max(1, Math.min(5000, options.clusterItemLimit ?? 12));
   const clusterDetailLevel = options.clusterDetailLevel ?? "diagnostic";
   const activeProvider = options.embeddings.findActiveProvider();
+  const needsDiagnosticIndex = includeClusterItems && clusterDetailLevel === "diagnostic";
   const activeIndex = activeProvider
-    ? includeClusterItems
+    ? needsDiagnosticIndex
       ? activeDiagnosticIndexFor(activeProvider.id, options.embeddings.listIndexes())
       : options.embeddings.findActiveIndexForProvider(activeProvider.id)
     : null;
   const activeRankContext = options.rankingService.getActiveRankContext();
-  const coverage = includeClusterItems
+  const coverage = needsDiagnosticIndex
     ? coverageFor(activeIndex as EmbeddingIndexListRow | null)
     : lightweightCoverageFor(options.db, activeIndex);
   const behaviorCounts = Object.fromEntries(
@@ -2929,8 +2930,9 @@ function getRecommendationClusters(
 ) {
   const clusterDetailLevel = options.clusterDetailLevel ?? "summary";
   const activeProvider = options.embeddings.findActiveProvider();
-  const indexes = options.embeddings.listIndexes();
-  const activeIndex = activeProvider ? activeDiagnosticIndexFor(activeProvider.id, indexes) : null;
+  const activeIndex = activeProvider
+    ? options.embeddings.findActiveIndexForProvider(activeProvider.id)
+    : null;
   const clusterEvidence = activeIndex && clusterDetailLevel === "diagnostic"
     ? options.profiles.listClusterEvidence({ embeddingIndexId: activeIndex.id, limit: 5000 })
     : [];
