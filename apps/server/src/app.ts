@@ -2713,7 +2713,7 @@ function requestMeta(request: FastifyRequest) {
 
 export function getHealth(db: DibaoDatabase): HealthResponse {
   const database = checkHealth(() => {
-    checkDatabaseIntegrity(db);
+    checkDatabaseConnection(db);
   });
   const fts = checkHealth(() => {
     db.prepare("select count(*) as count from article_fts").get();
@@ -2731,13 +2731,8 @@ export function getHealth(db: DibaoDatabase): HealthResponse {
   };
 }
 
-function checkDatabaseIntegrity(db: DibaoDatabase): void {
+function checkDatabaseConnection(db: DibaoDatabase): void {
   db.prepare("select 1 as ok").get();
-
-  const quickCheck = db.pragma("quick_check(1)", { simple: true });
-  if (quickCheck !== "ok") {
-    throw new Error("SQLite quick_check failed");
-  }
 }
 
 function checkHealth(fn: () => void): HealthStatus {

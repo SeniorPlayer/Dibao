@@ -73,17 +73,19 @@ describe("server API vertical slice", () => {
     }
   });
 
-  it("reports database errors when SQLite integrity checks fail", () => {
+  it("reports database errors when the lightweight connection check fails", () => {
     const db = {
       prepare: (sql: string) => ({
         get: () => {
+          if (sql === "select 1 as ok") {
+            throw new Error("database unavailable");
+          }
           if (sql.includes("vec_version")) {
             return { version: "0.1.1" };
           }
           return { ok: 1 };
         }
-      }),
-      pragma: () => "*** in database main *** malformed database image"
+      })
     } as unknown as DibaoDatabase;
 
     expect(getHealth(db)).toEqual({
