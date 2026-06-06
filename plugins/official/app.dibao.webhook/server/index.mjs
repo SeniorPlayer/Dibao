@@ -13,8 +13,24 @@ const EVENTS = [
   "plugin.taskFailed",
   "dailyBrief.generated"
 ];
+const ARTICLE_ACTIONS = [
+  "impression",
+  "open",
+  "mark_read",
+  "mark_unread",
+  "favorite",
+  "unfavorite",
+  "like",
+  "unlike",
+  "read_later",
+  "remove_read_later",
+  "hide",
+  "not_interested",
+  "read_progress"
+];
 const OPERATORS = new Set(["equals", "contains", "exists"]);
 const METHODS = new Set(["GET", "POST"]);
+const EVENT_CATALOG = buildEventCatalog();
 
 export default {
   activate(ctx) {
@@ -167,12 +183,15 @@ function writeRules(ctx, rules) {
 }
 
 function state(ctx) {
+  const available = typeof ctx.events.catalog === "function" ? ctx.events.catalog() : EVENTS;
   return {
     pluginId: PLUGIN_ID,
     rules: readRules(ctx),
     secrets: ctx.secrets.list(),
     deliveries: ctx.deliveries.list({ limit: 50 }),
-    events: typeof ctx.events.catalog === "function" ? ctx.events.catalog().filter((event) => EVENTS.includes(event)) : EVENTS,
+    events: EVENTS
+      .filter((eventName) => available.includes(eventName))
+      .map((eventName) => EVENT_CATALOG[eventName] ?? eventMetadata(eventName, eventName, "稳定插件事件。", [], [])),
     generatedAt: ctx.now()
   };
 }
@@ -342,16 +361,215 @@ function deliveryIdempotencyKey(rule, context, options) {
 
 function sampleEvent(eventName) {
   const now = Date.now();
+  if (eventName === "article.actionRecorded") {
+    return { articleId: "article_recent", feedId: "feed_design", action: "favorite", emittedAt: now };
+  }
+  if (eventName === "article.created") {
+    return { articleId: "article_recent", feedId: "feed_design", createdAt: now };
+  }
+  if (eventName === "article.updated") {
+    return { articleId: "article_recent", feedId: "feed_design", updatedAt: now };
+  }
   if (eventName.startsWith("article.")) {
     return { articleId: "article_recommended", feedId: "feed_design", emittedAt: now };
   }
   if (eventName === "feed.refreshCompleted") {
-    return { feedId: "feed_design", articleIds: [], articlesSeen: 0, refreshedAt: now };
+    return { feedId: "feed_design", articleIds: ["article_recent"], articlesSeen: 12, refreshedAt: now };
   }
-  if (eventName.startsWith("plugin.")) {
+  if (eventName === "ranking.afterRanked") {
+    return { articleIds: ["article_recent"], candidateCount: 120, rankedCount: 30, finishedAt: now };
+  }
+  if (eventName === "settings.afterUpdated") {
+    return { scope: "reader", keys: ["density"], updatedAt: now };
+  }
+  if (eventName === "plugin.taskSucceeded") {
     return { pluginId: "app.dibao.example", taskId: "task.example", finishedAt: now };
   }
+  if (eventName === "plugin.taskFailed") {
+    return { pluginId: "app.dibao.example", taskId: "task.example", error: "timeout", finishedAt: now };
+  }
+  if (eventName === "dailyBrief.generated") {
+    return { briefId: "brief_today", articleIds: ["article_recent"], generatedAt: now };
+  }
   return { emittedAt: now };
+}
+
+function buildEventCatalog() {
+  const articleFields = [
+    field("event.articleId", "文章 ID", "article_recent"),
+    field("event.feedId", "订阅源 ID", "feed_design"),
+    field("article.title", "文章标题", "Dense reader interfaces"),
+    field("article.url", "文章原文链接", "https://example.com/article"),
+    field("article.feed.title", "订阅源标题", "Design Systems Weekly"),
+    field("article.summary", "文章摘要", "Reader density without visual clutter.")
+  ];
+  const articleVariables = [
+    variable("event.articleId", "触发事件里的文章 ID", "article_recent"),
+    variable("event.feedId", "触发事件里的订阅源 ID", "feed_design"),
+    variable("article.title", "文章标题", "Dense reader interfaces"),
+    variable("article.url", "文章原文链接", "https://example.com/article"),
+    variable("article.feed.title", "订阅源标题", "Design Systems Weekly"),
+    variable("article.summary", "文章摘要", "Reader density without visual clutter."),
+    variable("article.contentText", "文章正文纯文本。需要勾选发送全文。", "Reader density without visual clutter."),
+    variable("article.contentHtml", "文章 HTML 正文。需要勾选发送全文。", "<p>Reader density...</p>")
+  ];
+  return Object.fromEntries([
+    eventMetadata(
+      "article.created",
+      "文章创建",
+      "有新文章进入邸报时触发，适合把新内容同步到外部系统。",
+      [...articleFields, field("event.createdAt", "创建时间戳", "1717000000000")],
+      [...articleVariables, variable("event.createdAt", "文章创建时间戳", "1717000000000")]
+    ),
+    eventMetadata(
+      "article.updated",
+      "文章更新",
+      "文章元数据或正文更新时触发。",
+      [...articleFields, field("event.updatedAt", "更新时间戳", "1717000000000")],
+      [...articleVariables, variable("event.updatedAt", "文章更新时间戳", "1717000000000")]
+    ),
+    eventMetadata(
+      "article.actionRecorded",
+      "文章行为",
+      "用户对文章产生阅读、收藏、点赞、隐藏等行为时触发。",
+      [
+        ...articleFields,
+        field("event.action", "行为类型", "favorite", ARTICLE_ACTIONS),
+        field("event.progress", "阅读进度，部分行为才有", "0.6")
+      ],
+      [
+        ...articleVariables,
+        variable("event.action", "行为类型，例如 favorite、open、hide。", "favorite", ARTICLE_ACTIONS),
+        variable("event.progress", "阅读进度，read_progress 行为可能提供。", "0.6")
+      ]
+    ),
+    eventMetadata(
+      "feed.refreshCompleted",
+      "订阅源刷新完成",
+      "一个订阅源刷新完成后触发，可用于通知外部系统本次刷新结果。",
+      [
+        field("event.feedId", "订阅源 ID", "feed_design"),
+        field("event.articlesSeen", "本次看到的文章数", "12"),
+        field("event.articleIds", "本次刷新涉及的文章 ID 列表", "article_recent"),
+        field("event.refreshedAt", "刷新完成时间戳", "1717000000000")
+      ],
+      [
+        variable("event.feedId", "订阅源 ID", "feed_design"),
+        variable("feed.id", "订阅源 ID。如果事件绑定文章，也可能来自文章快照。", "feed_design"),
+        variable("event.articlesSeen", "本次看到的文章数", "12"),
+        variable("event.articleIds", "本次刷新涉及的文章 ID 列表", "[\"article_recent\"]"),
+        variable("event.refreshedAt", "刷新完成时间戳", "1717000000000")
+      ]
+    ),
+    eventMetadata(
+      "ranking.afterRanked",
+      "推荐排序完成",
+      "推荐排序完成后触发，适合把排序运行状态发送给外部自动化。",
+      [
+        field("event.candidateCount", "候选文章数", "120"),
+        field("event.rankedCount", "排序后文章数", "30"),
+        field("event.articleIds", "排序文章 ID 列表", "article_recent")
+      ],
+      [
+        variable("event.candidateCount", "候选文章数", "120"),
+        variable("event.rankedCount", "排序后文章数", "30"),
+        variable("event.articleIds", "排序文章 ID 列表", "[\"article_recent\"]"),
+        variable("event.finishedAt", "排序完成时间戳", "1717000000000")
+      ]
+    ),
+    eventMetadata(
+      "settings.afterUpdated",
+      "设置更新",
+      "核心设置被更新后触发。",
+      [
+        field("event.scope", "设置范围", "reader"),
+        field("event.keys", "更新的设置键", "density"),
+        field("event.updatedAt", "更新时间戳", "1717000000000")
+      ],
+      [
+        variable("event.scope", "设置范围", "reader"),
+        variable("event.keys", "更新的设置键列表", "[\"density\"]"),
+        variable("event.updatedAt", "更新时间戳", "1717000000000")
+      ]
+    ),
+    eventMetadata(
+      "plugin.taskSucceeded",
+      "插件任务成功",
+      "插件后台任务成功结束时触发。",
+      [
+        field("event.pluginId", "插件 ID", "app.dibao.example"),
+        field("event.taskId", "任务 ID", "task.example"),
+        field("event.finishedAt", "完成时间戳", "1717000000000")
+      ],
+      [
+        variable("event.pluginId", "插件 ID", "app.dibao.example"),
+        variable("event.taskId", "任务 ID", "task.example"),
+        variable("event.finishedAt", "完成时间戳", "1717000000000")
+      ]
+    ),
+    eventMetadata(
+      "plugin.taskFailed",
+      "插件任务失败",
+      "插件后台任务失败时触发。",
+      [
+        field("event.pluginId", "插件 ID", "app.dibao.example"),
+        field("event.taskId", "任务 ID", "task.example"),
+        field("event.error", "错误摘要", "timeout")
+      ],
+      [
+        variable("event.pluginId", "插件 ID", "app.dibao.example"),
+        variable("event.taskId", "任务 ID", "task.example"),
+        variable("event.error", "错误摘要", "timeout"),
+        variable("event.finishedAt", "完成时间戳", "1717000000000")
+      ]
+    ),
+    eventMetadata(
+      "dailyBrief.generated",
+      "每日简报生成",
+      "每日简报生成完成后触发。",
+      [
+        field("event.briefId", "简报 ID", "brief_today"),
+        field("event.articleIds", "简报文章 ID 列表", "article_recent"),
+        field("event.generatedAt", "生成时间戳", "1717000000000")
+      ],
+      [
+        variable("event.briefId", "简报 ID", "brief_today"),
+        variable("event.articleIds", "简报文章 ID 列表", "[\"article_recent\"]"),
+        variable("event.generatedAt", "生成时间戳", "1717000000000")
+      ]
+    )
+  ].map((metadata) => [metadata.name, metadata]));
+}
+
+function eventMetadata(name, title, description, fields, variables) {
+  const sample = sampleEvent(name);
+  const commonVariables = [
+    variable("eventName", "事件名称", name),
+    variable("generatedAt", "Webhook 规则处理时间", "2026-06-06T08:00:00.000Z"),
+    variable("ruleId", "当前规则 ID", "rule_..."),
+    variable("event", "完整事件对象快照", JSON.stringify(sample)),
+    variable("test", "是否为测试发送", "false")
+  ];
+  return {
+    name,
+    title,
+    description,
+    fields,
+    variables: [...commonVariables, ...variables],
+    sample
+  };
+}
+
+function field(path, description, example, options = undefined) {
+  return compactObject({ path, description, example, options });
+}
+
+function variable(path, description, example, options = undefined) {
+  return compactObject({ path, description, example, options });
+}
+
+function compactObject(record) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
 
 function normalizeSecretHeaders(value) {

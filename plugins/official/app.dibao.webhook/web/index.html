@@ -26,44 +26,110 @@
 
         <section class="panel" id="editor">
           <h2>规则设置</h2>
-          <div id="empty" class="empty">还没有规则。</div>
-          <form id="form" hidden>
-            <div class="grid">
-              <label>名称<input id="name" /></label>
-              <label>事件<select id="event"></select></label>
-              <label>方法<select id="method"><option>POST</option><option>GET</option></select></label>
-              <label>URL 模板<input id="url" placeholder="https://example.com/hook/{{event.articleId}}" /></label>
-            </div>
-            <div class="checks">
-              <label class="check"><input id="enabled" type="checkbox" />启用</label>
-              <label class="check"><input id="include-content" type="checkbox" />发送全文</label>
-            </div>
+          <div id="empty" class="empty">还没有规则。新建一条规则后，选择触发事件并填写 Webhook 地址即可开始发送。</div>
+          <form id="form" class="section-stack" hidden>
+            <section class="section-card">
+              <div class="section-head">
+                <div>
+                  <h3>基础信息</h3>
+                  <p class="help">规则启用后，匹配触发事件和条件时会创建一条可重试投递。</p>
+                </div>
+                <label class="switch-line"><input id="enabled" type="checkbox" />启用</label>
+              </div>
+              <div class="grid">
+                <label>名称<input id="name" /></label>
+                <label>HTTP 方法<select id="method"><option>POST</option><option>GET</option></select></label>
+                <label class="span-2">URL<input id="url" placeholder="https://example.com/hook/{{event.articleId}}" data-template-target="true" /></label>
+              </div>
+              <div id="url-variable-chips" class="chip-list"></div>
+            </section>
 
-            <h2>条件</h2>
-            <div id="conditions" class="conditions"></div>
-            <div class="actions">
-              <button class="button" id="add-condition" type="button">添加条件</button>
-            </div>
+            <section class="section-card">
+              <div class="section-head">
+                <div>
+                  <h3>触发事件</h3>
+                  <p class="help">选择事件后，下方条件字段和模板变量会自动切换。</p>
+                </div>
+              </div>
+              <div class="grid">
+                <label class="span-2">事件<select id="event"></select></label>
+              </div>
+              <div id="event-help" class="callout"></div>
+              <div id="event-actions" class="chip-list"></div>
+              <h3>可用变量</h3>
+              <div id="variables" class="table-scroll"></div>
+            </section>
 
-            <h2>请求</h2>
-            <div class="grid">
-              <label>静态 Headers<textarea id="headers"></textarea></label>
-              <label>Secret Headers<textarea id="secret-headers"></textarea></label>
-              <label id="query-wrap">GET Query 模板<textarea id="query"></textarea></label>
-              <label id="body-wrap">POST Body 模板<textarea id="body"></textarea></label>
-            </div>
+            <section class="section-card">
+              <div class="section-head">
+                <div>
+                  <h3>触发条件</h3>
+                  <p class="help">所有条件都按 AND 匹配。不加条件时，选中的事件都会触发。</p>
+                </div>
+                <button class="button" id="add-condition" type="button">添加条件</button>
+              </div>
+              <div id="conditions" class="table-scroll"></div>
+            </section>
 
-            <h2>Secret</h2>
-            <div class="grid">
-              <label>Key<input id="secret-key" placeholder="webhook.token" /></label>
-              <label>Hint<input id="secret-hint" placeholder="tok_..." /></label>
-              <label>Value<input id="secret-value" type="password" /></label>
-            </div>
+            <section class="section-card">
+              <div class="section-head">
+                <div>
+                  <h3>请求内容</h3>
+                  <p class="help">GET 会把字段映射合并进 query string；POST 会发送 JSON body。</p>
+                </div>
+                <label class="switch-line"><input id="include-content" type="checkbox" />发送全文</label>
+              </div>
+              <div id="query-wrap">
+                <div class="subhead">
+                  <h3>GET Query 字段</h3>
+                  <button class="button" id="add-query-row" type="button">添加 Query</button>
+                </div>
+                <div id="query-rows" class="table-scroll"></div>
+              </div>
+              <div id="body-wrap">
+                <div class="subhead">
+                  <h3>POST Body 字段</h3>
+                  <button class="button" id="add-body-row" type="button">添加字段</button>
+                </div>
+                <div id="body-rows" class="table-scroll"></div>
+              </div>
+              <details class="details" id="advanced-json">
+                <summary>高级 JSON</summary>
+                <p class="help">这里显示由上方字段映射生成的模板。需要复杂对象时可以展开编辑；保存后仍使用当前规则 schema。</p>
+                <div class="grid">
+                  <label>GET Query JSON<textarea id="query-json" class="json-textarea" data-json-template="queryTemplate"></textarea></label>
+                  <label>POST Body JSON<textarea id="body-json" class="json-textarea" data-json-template="bodyTemplate"></textarea></label>
+                </div>
+              </details>
+            </section>
+
+            <details class="details section-card" id="auth-details">
+              <summary>鉴权（高级）</summary>
+              <p class="help">用于 Authorization、API Token 等敏感 header。通常不用配置；不填写也可以保存、测试和发送。Secret 明文只保存到插件 Secret Store，不会在界面或投递记录中回显。</p>
+              <div class="subhead">
+                <h3>普通 Headers</h3>
+                <button class="button" id="add-header-row" type="button">添加 Header</button>
+              </div>
+              <div id="header-rows" class="table-scroll"></div>
+              <div class="subhead">
+                <h3>Secret Headers</h3>
+                <button class="button" id="add-secret-header-row" type="button">添加 Secret Header</button>
+              </div>
+              <div id="secret-header-rows" class="table-scroll"></div>
+              <div class="grid">
+                <label>Secret key<input id="secret-key" placeholder="webhook.token" /></label>
+                <label>提示<input id="secret-hint" placeholder="tok_..." /></label>
+                <label>Secret 值<input id="secret-value" type="password" /></label>
+              </div>
+              <div class="actions">
+                <button class="button" id="save-secret" type="button">保存 Secret</button>
+              </div>
+              <div id="secrets" class="secret-list"></div>
+            </details>
 
             <div class="actions">
               <button class="button primary" id="save" type="submit">保存</button>
               <button class="button" id="test" type="button">测试发送</button>
-              <button class="button" id="save-secret" type="button">保存 Secret</button>
               <button class="button danger" id="delete" type="button">删除规则</button>
             </div>
           </form>
@@ -78,6 +144,21 @@
 
     <script>
       const pluginId = "app.dibao.webhook";
+      const articleActions = [
+        "impression",
+        "open",
+        "mark_read",
+        "mark_unread",
+        "favorite",
+        "unfavorite",
+        "like",
+        "unlike",
+        "read_later",
+        "remove_read_later",
+        "hide",
+        "not_interested",
+        "read_progress"
+      ];
       const state = {
         rules: [],
         secrets: [],
@@ -85,7 +166,6 @@
         events: [],
         selectedId: null
       };
-
       const defaults = {
         headers: { "x-dibao-plugin": "webhook" },
         secretHeaders: {},
@@ -98,6 +178,7 @@
           ruleId: "{{ruleId}}"
         }
       };
+      let lastFocusedTemplateInput = null;
 
       const api = async (path, options = {}) => {
         const response = await fetch(`/api/plugins/${pluginId}/api/${path}`, {
@@ -112,20 +193,43 @@
         return body.data;
       };
 
+      document.addEventListener("focusin", (event) => {
+        if (event.target.matches("input[data-template-target], textarea[data-template-target], [data-map-value]")) {
+          lastFocusedTemplateInput = event.target;
+        }
+      });
+
       document.getElementById("new-rule").addEventListener("click", () => {
+        saveDraftFromForm();
         const rule = newRule();
         state.rules = [rule, ...state.rules];
         state.selectedId = rule.id;
         render();
       });
 
-      document.getElementById("method").addEventListener("change", renderMethod);
+      document.getElementById("method").addEventListener("change", () => {
+        renderMethod();
+        syncAdvancedJson();
+      });
+      document.getElementById("event").addEventListener("change", () => {
+        const rule = currentRule();
+        if (!rule) return;
+        Object.assign(rule, readForm({ allowInvalidJson: true }), { eventName: document.getElementById("event").value });
+        renderForm(rule);
+      });
       document.getElementById("add-condition").addEventListener("click", () => {
         const rule = currentRule();
         if (!rule) return;
-        rule.conditions.push({ path: "event.articleId", operator: "exists", value: "" });
+        rule.conditions = readConditions();
+        rule.conditions.push(defaultCondition(rule.eventName));
         renderForm(rule);
       });
+      document.getElementById("add-query-row").addEventListener("click", () => addMappingRow("query-rows", { key: "", type: "variable", value: "eventName" }));
+      document.getElementById("add-body-row").addEventListener("click", () => addMappingRow("body-rows", { key: "", type: "variable", value: "eventName" }));
+      document.getElementById("add-header-row").addEventListener("click", () => addHeaderRow("header-rows", "", ""));
+      document.getElementById("add-secret-header-row").addEventListener("click", () => addSecretHeaderRow("secret-header-rows", "", { key: "", prefix: "" }));
+      document.getElementById("query-json").addEventListener("input", (event) => event.target.dataset.manual = "true");
+      document.getElementById("body-json").addEventListener("input", (event) => event.target.dataset.manual = "true");
 
       document.getElementById("form").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -173,7 +277,7 @@
         const value = document.getElementById("secret-value").value;
         const hint = document.getElementById("secret-hint").value.trim();
         if (!key || !value) {
-          showError("Secret key 和 value 不能为空。");
+          showError("Secret key 和 Secret 值不能为空。");
           return;
         }
         await run(async () => {
@@ -196,7 +300,7 @@
         state.rules = next.rules || [];
         state.secrets = next.secrets || [];
         state.deliveries = next.deliveries || [];
-        state.events = next.events || [];
+        state.events = (next.events || []).map(normalizeEventMeta);
         if (!state.rules.some((rule) => rule.id === state.selectedId)) {
           state.selectedId = state.rules[0]?.id || null;
         }
@@ -232,10 +336,11 @@
           return;
         }
         for (const rule of state.rules) {
+          const meta = eventMeta(rule.eventName);
           const button = document.createElement("button");
           button.type = "button";
           button.className = `rule-row${rule.id === state.selectedId ? " active" : ""}`;
-          button.innerHTML = `<strong>${escapeHtml(rule.name)}</strong><div class="muted">${escapeHtml(rule.eventName)} · ${rule.method} · ${rule.enabled ? "启用" : "停用"}</div>`;
+          button.innerHTML = `<strong>${escapeHtml(rule.name)}</strong><div class="muted">${escapeHtml(meta.title)} · ${escapeHtml(rule.method)} · ${rule.enabled ? "启用" : "停用"}</div>`;
           button.addEventListener("click", () => {
             saveDraftFromForm();
             state.selectedId = rule.id;
@@ -249,10 +354,10 @@
         const select = document.getElementById("event");
         const selected = select.value;
         select.innerHTML = "";
-        for (const eventName of state.events) {
+        for (const event of state.events) {
           const option = document.createElement("option");
-          option.value = eventName;
-          option.textContent = eventName;
+          option.value = event.name;
+          option.textContent = `${event.title} (${event.name})`;
           select.append(option);
         }
         if (selected) select.value = selected;
@@ -265,53 +370,274 @@
         document.getElementById("url").value = rule.urlTemplate || "";
         document.getElementById("enabled").checked = rule.enabled !== false;
         document.getElementById("include-content").checked = rule.includeContent === true;
-        document.getElementById("headers").value = formatJson(rule.headers || {});
-        document.getElementById("secret-headers").value = formatJson(rule.secretHeaders || {});
-        document.getElementById("query").value = formatJson(rule.queryTemplate || {});
-        document.getElementById("body").value = formatJson(rule.bodyTemplate || {});
+        renderEventContext(rule.eventName);
         renderConditions(rule);
+        renderMappingTable("query-rows", rowsFromTemplate(rule.queryTemplate || defaults.queryTemplate));
+        renderMappingTable("body-rows", rowsFromTemplate(rule.bodyTemplate || defaults.bodyTemplate));
+        renderHeaderTable("header-rows", rule.headers || {});
+        renderSecretHeaderTable("secret-header-rows", rule.secretHeaders || {});
+        document.getElementById("query-json").value = formatJson(rule.queryTemplate || {});
+        document.getElementById("body-json").value = formatJson(rule.bodyTemplate || {});
+        document.getElementById("query-json").dataset.manual = hasComplexTemplate(rule.queryTemplate) ? "true" : "false";
+        document.getElementById("body-json").dataset.manual = hasComplexTemplate(rule.bodyTemplate) ? "true" : "false";
+        renderSecrets();
         renderMethod();
+      }
+
+      function renderEventContext(eventName) {
+        const meta = eventMeta(eventName);
+        document.getElementById("event-help").innerHTML = `
+          <strong>${escapeHtml(meta.title)}</strong>
+          <div>${escapeHtml(meta.description)}</div>
+          <div class="muted">${escapeHtml(meta.name)}</div>
+        `;
+        const actions = document.getElementById("event-actions");
+        actions.innerHTML = "";
+        const actionField = (meta.fields || []).find((field) => field.path === "event.action");
+        if (actionField?.options?.length) {
+          actions.innerHTML = '<span class="pill">可选行为</span>';
+          for (const action of actionField.options) {
+            const chip = document.createElement("span");
+            chip.className = "template-chip";
+            chip.textContent = action;
+            actions.append(chip);
+          }
+        }
+        renderVariableChips("url-variable-chips", meta.variables || []);
+        renderVariableTable(meta.variables || []);
+      }
+
+      function renderVariableChips(id, variables) {
+        const root = document.getElementById(id);
+        root.innerHTML = "";
+        for (const variable of variables.slice(0, 10)) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "template-chip";
+          button.textContent = `{{${variable.path}}}`;
+          button.addEventListener("click", () => insertTemplate(variable.path));
+          root.append(button);
+        }
+      }
+
+      function renderVariableTable(variables) {
+        const root = document.getElementById("variables");
+        root.innerHTML = tableShell("变量", "说明", "示例", "");
+        const body = root.querySelector("tbody");
+        for (const variable of variables) {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td><code>{{${escapeHtml(variable.path)}}}</code></td>
+            <td>${escapeHtml(variable.description || "")}</td>
+            <td><span class="muted">${escapeHtml(formatExample(variable.example))}</span></td>
+            <td><button class="button" type="button">插入</button></td>
+          `;
+          row.querySelector("button").addEventListener("click", () => insertTemplate(variable.path));
+          body.append(row);
+        }
+      }
+
+      function renderConditions(rule) {
+        const root = document.getElementById("conditions");
+        root.innerHTML = tableShell("字段", "操作符", "值", "");
+        const body = root.querySelector("tbody");
+        const conditions = rule.conditions || [];
+        if (conditions.length === 0) {
+          root.innerHTML = '<div class="empty">无条件。这个事件发生时都会触发。</div>';
+          return;
+        }
+        for (const [index, condition] of conditions.entries()) {
+          const row = document.createElement("tr");
+          row.dataset.conditionRow = String(index);
+          row.innerHTML = `
+            <td>${fieldSelect(rule.eventName, condition.path, index)}</td>
+            <td>
+              <select data-cond="${index}" data-field="operator">
+                <option value="exists">存在</option>
+                <option value="equals">等于</option>
+                <option value="contains">包含</option>
+              </select>
+            </td>
+            <td data-value-cell="${index}"></td>
+            <td><button class="button danger" data-remove-condition="${index}" type="button">删除</button></td>
+          `;
+          body.append(row);
+          row.querySelector(`[data-field="operator"]`).value = condition.operator || "exists";
+          renderConditionValue(row.querySelector(`[data-value-cell="${index}"]`), condition, rule.eventName, index);
+        }
+        root.querySelectorAll("select, input").forEach((node) => {
+          node.addEventListener("input", () => {
+            const live = currentRule();
+            if (!live) return;
+            const pathChanged = node.matches("[data-field='path']");
+            if (pathChanged && node.value === "__custom") {
+              const custom = node.parentElement.querySelector("[data-field='custom-path']");
+              custom.hidden = false;
+              custom.focus();
+              return;
+            }
+            live.conditions = readConditions({ keepBlankCustom: true });
+            const shapeChanged = pathChanged || node.matches("[data-field='operator']");
+            if (shapeChanged) renderConditions(live);
+          });
+        });
+        root.querySelectorAll("[data-remove-condition]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const live = currentRule();
+            if (!live) return;
+            live.conditions = readConditions();
+            live.conditions.splice(Number(button.dataset.removeCondition), 1);
+            renderConditions(live);
+          });
+        });
+      }
+
+      function renderConditionValue(cell, condition, eventName, index) {
+        const operator = condition.operator || "exists";
+        if (operator === "exists") {
+          cell.innerHTML = '<span class="muted">无需填写</span>';
+          return;
+        }
+        if (eventName === "article.actionRecorded" && condition.path === "event.action") {
+          cell.innerHTML = `<select data-cond="${index}" data-field="value">${articleActions.map((action) => `<option value="${escapeAttr(action)}">${escapeHtml(action)}</option>`).join("")}</select>`;
+          cell.querySelector("select").value = String(condition.value || "favorite");
+          return;
+        }
+        cell.innerHTML = `<input data-cond="${index}" data-field="value" value="${escapeAttr(condition.value || "")}" />`;
+      }
+
+      function renderMappingTable(id, rows) {
+        const root = document.getElementById(id);
+        root.innerHTML = tableShell("字段名", "值类型", "值", "");
+        const body = root.querySelector("tbody");
+        if (rows.length === 0) {
+          const empty = document.createElement("tr");
+          empty.innerHTML = '<td colspan="4"><span class="muted">未配置字段。</span></td>';
+          body.append(empty);
+          return;
+        }
+        for (const row of rows) addMappingRow(id, row, { sync: false });
+        syncAdvancedJson();
+      }
+
+      function addMappingRow(id, row = {}, options = {}) {
+        const root = document.getElementById(id);
+        if (!root.querySelector("table")) {
+          root.innerHTML = tableShell("字段名", "值类型", "值", "");
+        }
+        const body = root.querySelector("tbody");
+        if (body.querySelector("td[colspan]")) body.innerHTML = "";
+        const tr = document.createElement("tr");
+        tr.dataset.mapRow = "true";
+        tr.innerHTML = `
+          <td><input data-map-key value="${escapeAttr(row.key || "")}" placeholder="title" /></td>
+          <td>
+            <select data-map-type>
+              <option value="variable">变量</option>
+              <option value="fixed">固定值</option>
+              <option value="snapshot">对象快照</option>
+            </select>
+          </td>
+          <td><input data-map-value data-template-target="true" value="${escapeAttr(row.value || "")}" placeholder="event.articleId" /></td>
+          <td><button class="button danger" type="button" data-remove-row>删除</button></td>
+        `;
+        tr.querySelector("[data-map-type]").value = row.type || "variable";
+        tr.querySelector("[data-remove-row]").addEventListener("click", () => {
+          tr.remove();
+          syncAdvancedJson();
+        });
+        tr.querySelectorAll("input, select").forEach((node) => node.addEventListener("input", syncAdvancedJson));
+        body.append(tr);
+        if (options.sync !== false) syncAdvancedJson();
+      }
+
+      function renderHeaderTable(id, headers) {
+        const root = document.getElementById(id);
+        root.innerHTML = tableShell("Header 名", "值", "", "");
+        const body = root.querySelector("tbody");
+        const entries = Object.entries(headers || {});
+        if (entries.length === 0) {
+          body.innerHTML = '<tr><td colspan="4"><span class="muted">未配置普通 Header。</span></td></tr>';
+          return;
+        }
+        for (const [key, value] of entries) addHeaderRow(id, key, value, { sync: false });
+      }
+
+      function addHeaderRow(id, key = "", value = "", options = {}) {
+        const root = document.getElementById(id);
+        if (!root.querySelector("table")) root.innerHTML = tableShell("Header 名", "值", "", "");
+        const body = root.querySelector("tbody");
+        if (body.querySelector("td[colspan]")) body.innerHTML = "";
+        const tr = document.createElement("tr");
+        tr.dataset.headerRow = "true";
+        tr.innerHTML = `
+          <td><input data-header-key value="${escapeAttr(key)}" placeholder="x-api-key" /></td>
+          <td colspan="2"><input data-header-value data-template-target="true" value="${escapeAttr(value)}" placeholder="{{eventName}}" /></td>
+          <td><button class="button danger" type="button" data-remove-row>删除</button></td>
+        `;
+        tr.querySelector("[data-remove-row]").addEventListener("click", () => tr.remove());
+        body.append(tr);
+        if (options.sync !== false) syncAdvancedJson();
+      }
+
+      function renderSecretHeaderTable(id, secretHeaders) {
+        const root = document.getElementById(id);
+        root.innerHTML = tableShell("Header 名", "Secret key", "前缀", "");
+        const body = root.querySelector("tbody");
+        const entries = Object.entries(secretHeaders || {});
+        if (entries.length === 0) {
+          body.innerHTML = '<tr><td colspan="4"><span class="muted">未配置 Secret Header。</span></td></tr>';
+          return;
+        }
+        for (const [header, value] of entries) addSecretHeaderRow(id, header, value, { sync: false });
+      }
+
+      function addSecretHeaderRow(id, header = "", value = {}, options = {}) {
+        const root = document.getElementById(id);
+        if (!root.querySelector("table")) root.innerHTML = tableShell("Header 名", "Secret key", "前缀", "");
+        const body = root.querySelector("tbody");
+        if (body.querySelector("td[colspan]")) body.innerHTML = "";
+        const tr = document.createElement("tr");
+        tr.dataset.secretHeaderRow = "true";
+        tr.innerHTML = `
+          <td><input data-secret-header-name value="${escapeAttr(header)}" placeholder="authorization" /></td>
+          <td><input data-secret-header-key value="${escapeAttr(value.key || "")}" placeholder="webhook.token" /></td>
+          <td><input data-secret-header-prefix value="${escapeAttr(value.prefix || "")}" placeholder="Bearer " /></td>
+          <td><button class="button danger" type="button" data-remove-row>删除</button></td>
+        `;
+        tr.querySelector("[data-remove-row]").addEventListener("click", () => tr.remove());
+        body.append(tr);
+        if (options.sync !== false) syncAdvancedJson();
+      }
+
+      function renderSecrets() {
+        const root = document.getElementById("secrets");
+        root.innerHTML = "";
+        if (!state.secrets.length) {
+          root.innerHTML = '<div class="empty">还没有保存的 Secret。</div>';
+          return;
+        }
+        for (const secret of state.secrets) {
+          const row = document.createElement("div");
+          row.className = "list-row";
+          row.innerHTML = `
+            <div>
+              <strong>${escapeHtml(secret.key)}</strong>
+              <div class="muted">${secret.hasValue ? "已保存" : "未保存"} ${escapeHtml(secret.hint || "")}</div>
+            </div>
+            <button class="button danger" type="button">删除</button>
+          `;
+          row.querySelector("button").addEventListener("click", async () => {
+            await run(async () => applyState(await api(`secrets/${encodeURIComponent(secret.key)}/delete`, { method: "POST", body: "{}" })));
+          });
+          root.append(row);
+        }
       }
 
       function renderMethod() {
         const method = document.getElementById("method").value;
         document.getElementById("query-wrap").hidden = method !== "GET";
         document.getElementById("body-wrap").hidden = method !== "POST";
-      }
-
-      function renderConditions(rule) {
-        const root = document.getElementById("conditions");
-        root.innerHTML = "";
-        for (const [index, condition] of (rule.conditions || []).entries()) {
-          const row = document.createElement("div");
-          row.className = "condition";
-          row.innerHTML = `
-            <input data-cond="${index}" data-field="path" value="${escapeAttr(condition.path || "")}" />
-            <select data-cond="${index}" data-field="operator">
-              <option value="exists">exists</option>
-              <option value="equals">equals</option>
-              <option value="contains">contains</option>
-            </select>
-            <input data-cond="${index}" data-field="value" value="${escapeAttr(condition.value || "")}" />
-            <button class="button danger" data-remove="${index}" type="button">删除</button>
-          `;
-          row.querySelector("select").value = condition.operator || "exists";
-          row.addEventListener("input", () => {
-            const live = currentRule();
-            if (!live) return;
-            live.conditions = readConditions();
-          });
-          row.querySelector("[data-remove]").addEventListener("click", () => {
-            const live = currentRule();
-            if (!live) return;
-            live.conditions.splice(index, 1);
-            renderForm(live);
-          });
-          root.append(row);
-        }
-        if (!rule.conditions?.length) {
-          root.innerHTML = '<div class="empty">无条件</div>';
-        }
       }
 
       function renderDeliveries() {
@@ -332,7 +658,7 @@
         }
       }
 
-      function readForm() {
+      function readForm(options = {}) {
         const existing = currentRule() || newRule();
         return {
           ...existing,
@@ -343,29 +669,61 @@
           enabled: document.getElementById("enabled").checked,
           includeContent: document.getElementById("include-content").checked,
           conditions: readConditions(),
-          headers: parseJson("headers"),
-          secretHeaders: parseJson("secret-headers"),
-          queryTemplate: parseJson("query"),
-          bodyTemplate: parseJson("body")
+          headers: readHeaders(),
+          secretHeaders: readSecretHeaders(),
+          queryTemplate: readTemplate("query-json", "query-rows", options),
+          bodyTemplate: readTemplate("body-json", "body-rows", options)
         };
       }
 
-      function readConditions() {
-        const rows = [...document.querySelectorAll("[data-cond][data-field='path']")];
-        return rows.map((pathInput) => {
-          const index = pathInput.dataset.cond;
+      function readTemplate(jsonId, rowsId, options = {}) {
+        const textarea = document.getElementById(jsonId);
+        if (textarea.dataset.manual === "true") {
+          try {
+            return parseJson(jsonId);
+          } catch (error) {
+            if (options.allowInvalidJson) return {};
+            throw error;
+          }
+        }
+        return templateFromRows(rowsId);
+      }
+
+      function readConditions(options = {}) {
+        return [...document.querySelectorAll("[data-condition-row]")].map((row) => {
+          const path = row.querySelector("[data-field='path']").value.trim();
+          const custom = row.querySelector("[data-field='custom-path']")?.value.trim();
           return {
-            path: pathInput.value.trim(),
-            operator: document.querySelector(`[data-cond="${index}"][data-field="operator"]`).value,
-            value: document.querySelector(`[data-cond="${index}"][data-field="value"]`).value
+            path: path === "__custom" ? custom : path,
+            customSelected: path === "__custom",
+            operator: row.querySelector("[data-field='operator']").value,
+            value: row.querySelector("[data-field='value']")?.value ?? ""
           };
-        }).filter((condition) => condition.path);
+        }).filter((condition) => condition.path || (options.keepBlankCustom && condition.customSelected))
+          .map(({ customSelected, ...condition }) => condition);
+      }
+
+      function readHeaders() {
+        return Object.fromEntries([...document.querySelectorAll("[data-header-row]")].map((row) => [
+          row.querySelector("[data-header-key]").value.trim(),
+          row.querySelector("[data-header-value]").value
+        ]).filter(([key]) => key));
+      }
+
+      function readSecretHeaders() {
+        return Object.fromEntries([...document.querySelectorAll("[data-secret-header-row]")].map((row) => [
+          row.querySelector("[data-secret-header-name]").value.trim(),
+          {
+            key: row.querySelector("[data-secret-header-key]").value.trim(),
+            prefix: row.querySelector("[data-secret-header-prefix]").value
+          }
+        ]).filter(([header, value]) => header && value.key));
       }
 
       function saveDraftFromForm() {
         const rule = currentRule();
         if (rule && rule.id.startsWith("draft_") && !document.getElementById("form").hidden) {
-          Object.assign(rule, readForm());
+          Object.assign(rule, readForm({ allowInvalidJson: true }));
         }
       }
 
@@ -374,7 +732,7 @@
       }
 
       function newRule() {
-        const eventName = state.events[0] || "article.created";
+        const eventName = state.events[0]?.name || "article.created";
         return {
           id: `draft_${Date.now()}`,
           name: "新规则",
@@ -388,6 +746,98 @@
         };
       }
 
+      function defaultCondition(eventName) {
+        if (eventName === "article.actionRecorded") {
+          return { path: "event.action", operator: "equals", value: "favorite" };
+        }
+        return { path: eventMeta(eventName).fields[0]?.path || "event.articleId", operator: "exists", value: "" };
+      }
+
+      function fieldSelect(eventName, value, index) {
+        const fields = eventMeta(eventName).fields || [];
+        const hasValue = fields.some((field) => field.path === value);
+        const options = fields.map((field) =>
+          `<option value="${escapeAttr(field.path)}" ${field.path === value ? "selected" : ""}>${escapeHtml(field.description)} (${escapeHtml(field.path)})</option>`
+        ).join("");
+        return `
+          <select data-cond="${index}" data-field="path">
+            ${options}
+            <option value="__custom" ${hasValue ? "" : "selected"}>自定义路径</option>
+          </select>
+          <input data-cond="${index}" data-field="custom-path" value="${escapeAttr(hasValue ? "" : value || "")}" placeholder="event.custom" ${hasValue ? "hidden" : ""} />
+        `;
+      }
+
+      function syncAdvancedJson() {
+        const query = document.getElementById("query-json");
+        const body = document.getElementById("body-json");
+        if (query.dataset.manual !== "true") query.value = formatJson(templateFromRows("query-rows"));
+        if (body.dataset.manual !== "true") body.value = formatJson(templateFromRows("body-rows"));
+      }
+
+      function templateFromRows(id) {
+        const output = {};
+        for (const row of document.querySelectorAll(`#${id} [data-map-row]`)) {
+          const key = row.querySelector("[data-map-key]").value.trim();
+          const type = row.querySelector("[data-map-type]").value;
+          const value = row.querySelector("[data-map-value]").value.trim();
+          if (!key) continue;
+          if (type === "fixed") {
+            output[key] = value;
+          } else {
+            output[key] = `{{${stripBraces(value)}}}`;
+          }
+        }
+        return output;
+      }
+
+      function rowsFromTemplate(template) {
+        return Object.entries(template || {}).map(([key, value]) => {
+          if (typeof value === "string") {
+            const exact = value.match(/^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}$/);
+            return exact ? { key, type: "variable", value: exact[1] } : { key, type: "fixed", value };
+          }
+          return { key, type: "snapshot", value: JSON.stringify(value) };
+        });
+      }
+
+      function hasComplexTemplate(template) {
+        return Object.values(template || {}).some((value) => value && typeof value === "object");
+      }
+
+      function insertTemplate(path) {
+        const target = lastFocusedTemplateInput || document.getElementById("url");
+        const token = `{{${path}}}`;
+        const start = target.selectionStart ?? target.value.length;
+        const end = target.selectionEnd ?? target.value.length;
+        target.value = `${target.value.slice(0, start)}${token}${target.value.slice(end)}`;
+        target.focus();
+        target.selectionStart = target.selectionEnd = start + token.length;
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      function eventMeta(name) {
+        return state.events.find((event) => event.name === name) || normalizeEventMeta(name);
+      }
+
+      function normalizeEventMeta(input) {
+        if (typeof input === "string") {
+          return { name: input, title: input, description: "稳定插件事件。", fields: [], variables: [], sample: {} };
+        }
+        return {
+          name: input.name,
+          title: input.title || input.name,
+          description: input.description || "",
+          fields: input.fields || [],
+          variables: input.variables || [],
+          sample: input.sample || {}
+        };
+      }
+
+      function tableShell(...headers) {
+        return `<table class="data-table"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody></tbody></table>`;
+      }
+
       function parseJson(id) {
         const text = document.getElementById(id).value.trim();
         if (!text) return {};
@@ -396,6 +846,15 @@
 
       function formatJson(value) {
         return JSON.stringify(value || {}, null, 2);
+      }
+
+      function formatExample(value) {
+        if (value === undefined || value === null) return "";
+        return typeof value === "string" ? value : JSON.stringify(value);
+      }
+
+      function stripBraces(value) {
+        return String(value || "").replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
       }
 
       function showError(message) {

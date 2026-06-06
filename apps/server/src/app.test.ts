@@ -159,6 +159,8 @@ describe("server API vertical slice", () => {
       expect(response.headers["content-type"]).toContain("text/css");
       expect(response.body).toContain("body.dibao-plugin");
       expect(response.body).toContain(".dibao-plugin .button");
+      expect(response.body).toContain(".dibao-plugin .template-chip");
+      expect(response.body).toContain(".dibao-plugin .data-table");
     } finally {
       await app.close();
       db.close();
@@ -448,6 +450,16 @@ describe("server API vertical slice", () => {
       const enabled = await app.inject({ method: "POST", url: "/api/plugins/app.dibao.webhook/enable" });
       expect(enabled.statusCode, enabled.body).toBe(200);
 
+      const webhookAsset = await app.inject({
+        method: "GET",
+        url: "/api/plugins/app.dibao.webhook/assets/web/index.html"
+      });
+      expect(webhookAsset.statusCode, webhookAsset.body).toBe(200);
+      expect(webhookAsset.body).toContain('/api/plugins/ui.css');
+      expect(webhookAsset.body).toContain("可用变量");
+      expect(webhookAsset.body).toContain("鉴权（高级）");
+      expect(webhookAsset.body).not.toContain("<style");
+
       const contributions = await app.inject({ method: "GET", url: "/api/plugins/contributions" });
       const webhook = contributions.json().data.find((plugin: { id: string }) => plugin.id === "app.dibao.webhook");
       expect(webhook.contributions).toMatchObject({
@@ -510,7 +522,7 @@ describe("server API vertical slice", () => {
           url: `/api/plugins/app.dibao.webhook/deliveries/${testDeliveryId}`
         });
         return response.json().data.status === "succeeded";
-      });
+      }, 5000);
       expect(received.some((request) =>
         request.method === "GET" &&
         request.url.includes("event=article.created") &&
@@ -542,12 +554,14 @@ describe("server API vertical slice", () => {
       const action = await postJson(app, "/api/articles/article_recent/actions", { type: "favorite" });
       expect(action.statusCode, action.body).toBe(200);
       await waitForDeferredPostActionWork();
-      await waitForCondition(async () =>
-        Boolean(
-          db.prepare(
-            "select id from plugin_deliveries where plugin_id = ? and method = 'POST' and url = ?"
-          ).get("app.dibao.webhook", "https://hooks.example.test/post/favorite")
-        )
+      await waitForCondition(
+        async () =>
+          Boolean(
+            db.prepare(
+              "select id from plugin_deliveries where plugin_id = ? and method = 'POST' and url = ?"
+            ).get("app.dibao.webhook", "https://hooks.example.test/post/favorite")
+          ),
+        5000
       );
       const postDelivery = db.prepare(
         "select request_json as requestJson from plugin_deliveries where plugin_id = ? and method = 'POST' and url = ?"
@@ -569,7 +583,28 @@ describe("server API vertical slice", () => {
       const state = await app.inject({ method: "GET", url: "/api/plugins/app.dibao.webhook/api/state" });
       expect(state.statusCode, state.body).toBe(200);
       expect(state.body).not.toContain("top-secret-token");
-      expect(state.json().data.events).toContain("dailyBrief.generated");
+      expect(state.json().data.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "dailyBrief.generated",
+            title: "每日简报生成"
+          }),
+          expect.objectContaining({
+            name: "article.actionRecorded",
+            fields: expect.arrayContaining([
+              expect.objectContaining({
+                path: "event.action",
+                options: expect.arrayContaining(["favorite", "read_progress"])
+              })
+            ]),
+            variables: expect.arrayContaining([
+              expect.objectContaining({
+                path: "event.action"
+              })
+            ])
+          })
+        ])
+      );
       expect(state.json().data.deliveries).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
