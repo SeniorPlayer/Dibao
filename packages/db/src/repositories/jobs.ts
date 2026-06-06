@@ -23,6 +23,7 @@ type JobDbRow = {
 };
 
 export interface JobRepository {
+  claimById(id: string, now: number): JobRow | null;
   claimNextDue(now: number): JobRow | null;
   countByTypeAndStatus(type: JobType, status: JobStatus): number;
   enqueue(input: EnqueueJobInput): JobRow;
@@ -39,6 +40,30 @@ export interface JobRepository {
 
 export class SqliteJobRepository implements JobRepository {
   constructor(private readonly db: DibaoDatabase) {}
+
+  claimById(id: string, now: number): JobRow | null {
+    return this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `
+            update jobs
+            set
+              status = 'running',
+              attempts = attempts + 1,
+              started_at = ?,
+              finished_at = null,
+              updated_at = ?
+            where id = ?
+              and status = 'queued'
+              and run_after <= ?
+              and attempts < max_attempts
+          `
+        )
+        .run(now, now, id, now);
+
+      return result.changes > 0 ? this.findById(id) : null;
+    })();
+  }
 
   countByTypeAndStatus(type: JobType, status: JobStatus): number {
     const row = this.db

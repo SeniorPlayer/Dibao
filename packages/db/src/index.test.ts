@@ -705,14 +705,16 @@ describe("db package", () => {
       expect(job.status).toBe("queued");
       expect(job.attempts).toBe(0);
       expect(jobs.claimNextDue(999)).toBeNull();
+      expect(jobs.claimById("job_feed_refresh", 999)).toBeNull();
 
-      const firstClaim = jobs.claimNextDue(1000);
+      const firstClaim = jobs.claimById("job_feed_refresh", 1000);
       expect(firstClaim).toMatchObject({
         id: "job_feed_refresh",
         status: "running",
         attempts: 1,
         startedAt: 1000
       });
+      expect(jobs.claimById("job_feed_refresh", 1000)).toBeNull();
 
       const retry = jobs.markFailedOrRetry("job_feed_refresh", "temporary", 1100, 5000);
       expect(retry).toMatchObject({

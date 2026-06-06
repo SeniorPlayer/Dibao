@@ -209,6 +209,19 @@
         return body.data;
       };
 
+      const coreApi = async (path, options = {}) => {
+        const response = await fetch(`/api/plugins/${pluginId}/${path}`, {
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          ...options
+        });
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(body.error?.message || "Plugin request failed");
+        }
+        return body.data;
+      };
+
       document.addEventListener("focusin", (event) => {
         if (event.target.matches("input[data-template-target], textarea[data-template-target], [data-map-value]")) {
           lastFocusedTemplateInput = event.target;
@@ -283,8 +296,13 @@
             body: JSON.stringify({})
           });
           applyState(result.state, { selectedId: rule.id });
-          if (result.delivery?.status !== "succeeded") {
-            throw new Error(`测试连接失败：${result.delivery?.error || result.delivery?.status || "未知错误"}`);
+          let delivery = result.delivery;
+          if (delivery && !isTerminalDelivery(delivery)) {
+            delivery = await waitForDelivery(delivery.id);
+            mergeDelivery(delivery);
+          }
+          if (delivery?.status !== "succeeded") {
+            throw new Error(`测试连接失败：${delivery?.error || delivery?.status || "未知错误"}`);
           }
         });
       });
@@ -694,6 +712,41 @@
           `;
           root.append(row);
         }
+      }
+
+      async function waitForDelivery(deliveryId) {
+        const deadline = Date.now() + 120000;
+        let delivery = null;
+        while (Date.now() < deadline) {
+          delivery = await coreApi(`deliveries/${encodeURIComponent(deliveryId)}`);
+          mergeDelivery(delivery);
+          if (isTerminalDelivery(delivery)) {
+            return delivery;
+          }
+          await delay(1000);
+        }
+        return delivery;
+      }
+
+      function mergeDelivery(delivery) {
+        if (!delivery?.id) return;
+        const index = state.deliveries.findIndex((candidate) => candidate.id === delivery.id);
+        if (index >= 0) {
+          state.deliveries[index] = delivery;
+        } else {
+          state.deliveries = [delivery, ...state.deliveries];
+        }
+        document.getElementById("summary").textContent =
+          `${state.rules.length} 条规则，${state.deliveries.length} 条最近投递`;
+        renderDeliveries();
+      }
+
+      function isTerminalDelivery(delivery) {
+        return delivery?.status === "succeeded" || delivery?.status === "failed" || delivery?.status === "cancelled";
+      }
+
+      async function delay(ms) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
       }
 
       function readForm(options = {}) {

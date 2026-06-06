@@ -70,6 +70,9 @@ const PLUGIN_OUTBOUND_TIMEOUT_MS = 10_000;
 const PLUGIN_OUTBOUND_MAX_REQUEST_BYTES = 256 * 1024;
 const PLUGIN_OUTBOUND_MAX_RESPONSE_BYTES = 512 * 1024;
 const PLUGIN_OUTBOUND_MAX_REDIRECTS = 3;
+const PLUGIN_DELIVERY_FLUSH_TIMEOUT_MS = 15_000;
+const PLUGIN_DELIVERY_FLUSH_POLL_MS = 250;
+const PLUGIN_DELIVERY_FLUSH_RETRY_DELAY_MS = 60_000;
 
 export type PluginManifest = {
   manifestVersion: 1;
@@ -1187,14 +1190,53 @@ export class PluginService {
   }
 
   private async flushDelivery(pluginId: string, deliveryId: string): Promise<PluginDeliveryListItem> {
-    const delivery = this.options.plugins.findDelivery(deliveryId);
+    let delivery = this.options.plugins.findDelivery(deliveryId);
     if (!delivery || delivery.pluginId !== pluginId) {
       throw new PluginServiceError(404, "NOT_FOUND", "Plugin delivery not found");
     }
-    if (!delivery.jobId || delivery.status === "succeeded" || delivery.status === "failed" || delivery.status === "cancelled") {
+    if (!delivery.jobId || isTerminalDeliveryStatus(delivery.status)) {
       return mapPluginDeliveryListItem(delivery);
     }
     await this.options.drainDueJobs?.();
+    delivery = this.options.plugins.findDelivery(deliveryId);
+    if (!delivery || delivery.pluginId !== pluginId) {
+      throw new PluginServiceError(404, "NOT_FOUND", "Plugin delivery not found");
+    }
+    if (isTerminalDeliveryStatus(delivery.status)) {
+      return mapPluginDeliveryListItem(delivery);
+    }
+
+    const job = delivery.jobId ? this.options.jobs.claimById(delivery.jobId, this.now()) : null;
+    if (job) {
+      try {
+        await this.handleDeliveryJob(pluginId, job);
+        this.options.jobs.markSucceeded(job.id, this.now());
+      } catch (error) {
+        const message = errorMessage(error);
+        if (error instanceof PermanentJobFailure) {
+          this.options.jobs.markFailed(job.id, message, this.now());
+        } else {
+          this.options.jobs.markFailedOrRetry(job.id, message, this.now(), PLUGIN_DELIVERY_FLUSH_RETRY_DELAY_MS);
+        }
+      }
+      return this.getDelivery(pluginId, deliveryId);
+    }
+
+    return await this.waitForDeliveryTerminal(pluginId, deliveryId, PLUGIN_DELIVERY_FLUSH_TIMEOUT_MS);
+  }
+
+  private async waitForDeliveryTerminal(pluginId: string, deliveryId: string, timeoutMs: number): Promise<PluginDeliveryListItem> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const delivery = this.options.plugins.findDelivery(deliveryId);
+      if (!delivery || delivery.pluginId !== pluginId) {
+        throw new PluginServiceError(404, "NOT_FOUND", "Plugin delivery not found");
+      }
+      if (isTerminalDeliveryStatus(delivery.status)) {
+        return mapPluginDeliveryListItem(delivery);
+      }
+      await sleep(PLUGIN_DELIVERY_FLUSH_POLL_MS);
+    }
     return this.getDelivery(pluginId, deliveryId);
   }
 
@@ -2843,4 +2885,12 @@ function summarizePluginApiResult(result: unknown): {
     ...(Array.isArray(record.targets?.families) ? { familyCount: record.targets.families.length } : {}),
     ...(Array.isArray(record.targets?.clusters) ? { clusterCount: record.targets.clusters.length } : {})
   };
+}
+
+function isTerminalDeliveryStatus(status: PluginDeliveryStatus): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
