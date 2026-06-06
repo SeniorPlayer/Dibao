@@ -917,6 +917,19 @@
   line-height: 1.6;
 }
 
+.pluginSettingsPanel {
+  min-height: min(760px, calc(100vh - 210px));
+  align-content: stretch;
+}
+
+.pluginSettingsFrame {
+  width: 100%;
+  min-height: 640px;
+  border: var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
 .algorithmTermList {
   display: grid;
   gap: var(--space-3);

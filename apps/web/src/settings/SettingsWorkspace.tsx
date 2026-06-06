@@ -8,9 +8,18 @@ import { NumberSettingField, RangeSettingField } from "../ui/FormFields.js";
 import { ActionIcon } from "../reader/ReaderPanels.js";
 import { classNames, closestInterestClusterPresetIndex, defaultFavoriteArticleSort, defaultReadLaterArticleSort, draftForEmbeddingProvider, draftForSettings, draftWithProviderType, embeddingCoverageText, interestClusterLimitPresets, interestClusterPresetIndexFromSliderValue, newEmbeddingProviderId, parseEmbeddingProviderDraft, parseSettingsDraft, presetIndexForInterestClusterLimitDraft, presetIndexForInterestClusterLimits, retentionSettingsRequireCleanupConfirmation, shouldLetBrowserHandleLinkClick, urlForAppPage, type EmbeddingProviderDraft, type SettingsDraft } from "../app/shared.js";
 
-type SettingsTabId = "basic" | "algorithm" | "plugins";
+type CoreSettingsTabId = "basic" | "algorithm" | "plugins";
+type PluginSettingsTabId = `plugin:${string}:${string}`;
+type SettingsTabId = CoreSettingsTabId | PluginSettingsTabId;
+type PluginSettingsTab = {
+  id: PluginSettingsTabId;
+  plugin: PluginListItem;
+  tab: NonNullable<PluginListItem["contributions"]["settingsTabs"]>[number];
+};
 
-const settingsTabLabels: Record<SettingsTabId, { zhCN: string; enUS: string; jaJP: string }> = {
+const coreSettingsTabs = ["basic", "algorithm", "plugins"] as const;
+
+const settingsTabLabels: Record<CoreSettingsTabId, { zhCN: string; enUS: string; jaJP: string }> = {
   basic: { zhCN: "基础设置", enUS: "Basics", jaJP: "基本設定" },
   algorithm: { zhCN: "算法", enUS: "Algorithm", jaJP: "アルゴリズム" },
   plugins: { zhCN: "插件", enUS: "Plugins", jaJP: "プラグイン" }
@@ -171,6 +180,8 @@ export function SettingsWorkspace(props: {
   const [latestReleaseError, setLatestReleaseError] = useState<string | null>(null);
   const [isLoadingLatestRelease, setIsLoadingLatestRelease] = useState(false);
   const [isCheckingLatestRelease, setIsCheckingLatestRelease] = useState(false);
+  const [pluginSettingsPlugins, setPluginSettingsPlugins] = useState<PluginListItem[]>([]);
+  const [pluginSettingsError, setPluginSettingsError] = useState<string | null>(null);
   const savedSettingsRef = useRef(props.settings);
   const hasUnsavedSettingsDraftRef = useRef(false);
 
@@ -244,6 +255,22 @@ export function SettingsWorkspace(props: {
     return () => {
       cancelled = true;
     };
+  }, [t.errors.api]);
+
+  async function loadPluginSettingsContributions() {
+    try {
+      const plugins = await dibaoApi.listPluginContributions();
+      setPluginSettingsPlugins(
+        plugins.filter((plugin) => plugin.contributions.settingsTabs.length > 0)
+      );
+      setPluginSettingsError(null);
+    } catch (error) {
+      setPluginSettingsError(userMessageForError(error, t.errors.api));
+    }
+  }
+
+  useEffect(() => {
+    void loadPluginSettingsContributions();
   }, [t.errors.api]);
 
   function applyDraft(nextDraft: SettingsDraft) {
@@ -368,7 +395,27 @@ export function SettingsWorkspace(props: {
   const exactInterestClusterPresetIndex = presetIndexForInterestClusterLimitDraft(draft);
   const interestClusterPresetIndex =
     exactInterestClusterPresetIndex ?? lastInterestClusterPresetIndex;
-  const labelForSettingsTab = (tabId: SettingsTabId) => {
+  const pluginSettingsTabs = pluginSettingsPlugins
+    .flatMap((plugin) =>
+      plugin.contributions.settingsTabs.map((tab) => ({
+        id: pluginSettingsTabId(plugin.id, tab.id),
+        plugin,
+        tab
+      }))
+    )
+    .sort((left, right) =>
+      (left.tab.order ?? 100) - (right.tab.order ?? 100) ||
+      left.tab.label.localeCompare(right.tab.label)
+    );
+  const activePluginSettingsTab = pluginSettingsTabs.find((tab) => tab.id === activeTab) ?? null;
+
+  useEffect(() => {
+    if (isPluginSettingsTabId(activeTab) && !pluginSettingsTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab("plugins");
+    }
+  }, [activeTab, pluginSettingsTabs]);
+
+  const labelForCoreSettingsTab = (tabId: CoreSettingsTabId) => {
     const labels = settingsTabLabels[tabId];
     return props.settings.ui.locale === "en-US"
       ? labels.enUS
@@ -376,7 +423,14 @@ export function SettingsWorkspace(props: {
         ? labels.jaJP
         : labels.zhCN;
   };
-  const activeTabLabel = labelForSettingsTab(activeTab);
+  const labelForSettingsTab = (tabId: SettingsTabId) => {
+    if (isPluginSettingsTabId(tabId)) {
+      return pluginSettingsTabs.find((tab) => tab.id === tabId)?.tab.label ?? "";
+    }
+    return labelForCoreSettingsTab(tabId);
+  };
+  const activeTabLabel = activePluginSettingsTab?.tab.label ?? labelForSettingsTab(activeTab);
+  const isCoreSaveVisible = activeTab !== "plugins" && !isPluginSettingsTabId(activeTab);
 
   return (
     <form
@@ -385,7 +439,7 @@ export function SettingsWorkspace(props: {
       aria-labelledby="settings-title"
     >
       <div className={styles.managementTabs} aria-label={t.settings.pageTitle} role="tablist">
-        {(["basic", "algorithm", "plugins"] as const).map((tabId) => (
+        {coreSettingsTabs.map((tabId) => (
           <button
             aria-selected={activeTab === tabId}
             className={activeTab === tabId ? styles.managementTabActive : styles.managementTab}
@@ -394,7 +448,19 @@ export function SettingsWorkspace(props: {
             role="tab"
             type="button"
           >
-            {labelForSettingsTab(tabId)}
+            {labelForCoreSettingsTab(tabId)}
+          </button>
+        ))}
+        {pluginSettingsTabs.map((pluginTab) => (
+          <button
+            aria-selected={activeTab === pluginTab.id}
+            className={activeTab === pluginTab.id ? styles.managementTabActive : styles.managementTab}
+            key={pluginTab.id}
+            onClick={() => setActiveTab(pluginTab.id)}
+            role="tab"
+            type="button"
+          >
+            {pluginTab.tab.label}
           </button>
         ))}
       </div>
@@ -407,7 +473,7 @@ export function SettingsWorkspace(props: {
         <button
           className={styles.primaryButton}
           disabled={props.isSaving}
-          hidden={activeTab === "plugins"}
+          hidden={!isCoreSaveVisible}
           type="submit"
         >
           {props.isSaving ? t.settings.actions.saving : t.settings.actions.save}
@@ -418,6 +484,7 @@ export function SettingsWorkspace(props: {
         {props.isLoading ? <p className={styles.settingsNotice}>{t.settings.loading}</p> : null}
         {props.error ? <p className={styles.errorText}>{props.error}</p> : null}
         {localError ? <p className={styles.errorText}>{localError}</p> : null}
+        {pluginSettingsError ? <p className={styles.errorText}>{pluginSettingsError}</p> : null}
 
         <section className={classNames(styles.settingsSection, "settings-card")} hidden={activeTab !== "basic"} aria-labelledby="settings-language-title">
           <div>
@@ -1215,7 +1282,20 @@ export function SettingsWorkspace(props: {
           </div>
         </section>
 
-        <PluginManagerSection active={activeTab === "plugins"} locale={props.settings.ui.locale} />
+        <PluginManagerSection
+          active={activeTab === "plugins"}
+          locale={props.settings.ui.locale}
+          onPluginsChanged={loadPluginSettingsContributions}
+        />
+
+        {pluginSettingsTabs.map((pluginTab) => (
+          <PluginSettingsTabPanel
+            active={activeTab === pluginTab.id}
+            key={pluginTab.id}
+            plugin={pluginTab.plugin}
+            tab={pluginTab.tab}
+          />
+        ))}
 
         <section className={classNames(styles.settingsSection, "settings-card", "about-settings-card")} hidden={activeTab !== "basic"} aria-labelledby="settings-about-title">
           <div>
@@ -1324,7 +1404,51 @@ export function SettingsWorkspace(props: {
   );
 }
 
-function PluginManagerSection(props: { active: boolean; locale: AppSettings["ui"]["locale"] }) {
+function pluginSettingsTabId(pluginId: string, tabId: string): PluginSettingsTabId {
+  return `plugin:${pluginId}:${tabId}`;
+}
+
+function isPluginSettingsTabId(tabId: SettingsTabId): tabId is PluginSettingsTabId {
+  return tabId.startsWith("plugin:");
+}
+
+function PluginSettingsTabPanel(props: {
+  active: boolean;
+  plugin: PluginListItem;
+  tab: PluginSettingsTab["tab"];
+}) {
+  const baseUrl =
+    props.plugin.webEntryUrl ??
+    `/api/plugins/${encodeURIComponent(props.plugin.id)}/assets/web/index.html`;
+  const params = new URLSearchParams();
+  params.set("route", props.tab.route);
+  params.set("panel", "settings");
+  params.set("settingsTab", props.tab.id);
+
+  return (
+    <section
+      className={classNames(styles.settingsSection, styles.pluginSettingsPanel, "settings-card")}
+      hidden={!props.active}
+      aria-labelledby={`settings-plugin-${props.plugin.id}-${props.tab.id}`}
+    >
+      <div>
+        <h3 id={`settings-plugin-${props.plugin.id}-${props.tab.id}`}>{props.tab.label}</h3>
+        <p>{props.plugin.name}</p>
+      </div>
+      <iframe
+        className={styles.pluginSettingsFrame}
+        src={`${baseUrl}?${params.toString()}`}
+        title={`${props.plugin.name} ${props.tab.label}`}
+      />
+    </section>
+  );
+}
+
+function PluginManagerSection(props: {
+  active: boolean;
+  locale: AppSettings["ui"]["locale"];
+  onPluginsChanged: () => Promise<void>;
+}) {
   const { t } = useI18n();
   const copy = pluginCopy[props.locale];
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
@@ -1368,6 +1492,7 @@ function PluginManagerSection(props: { active: boolean; locale: AppSettings["ui"
       setPlugins((current) => upsertPlugin(current, installed));
       setPackageFile(null);
       setFileInputResetKey((current) => current + 1);
+      await props.onPluginsChanged();
       setNotice(copy.installed);
     } catch (caught) {
       setError(userMessageForError(caught, t.errors.api));
@@ -1390,6 +1515,7 @@ function PluginManagerSection(props: { active: boolean; locale: AppSettings["ui"
       } else {
         setPlugins((current) => current.filter((plugin) => plugin.id !== pluginId));
       }
+      await props.onPluginsChanged();
       setNotice(copy.updated);
     } catch (caught) {
       setError(userMessageForError(caught, t.errors.api));
