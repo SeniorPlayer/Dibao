@@ -519,6 +519,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     getRankingSettings: () => settingsService.getSettings().ranking,
     now: options.now
   });
+  let drainDueJobsForPlugins: (() => Promise<number>) | null = null;
   const pluginService = new PluginService({
     db,
     plugins,
@@ -530,6 +531,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     secretKey: options.pluginSecretKey,
     fetcher: options.pluginFetcher,
     now: options.now,
+    drainDueJobs: async () => drainDueJobsForPlugins ? await drainDueJobsForPlugins() : 0,
     logPerformance: (record) => {
       app.log.info(record, "plugin.api.performance");
     }
@@ -869,6 +871,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     retryDelayMs: options.jobRetryDelayMs,
     onError: (error) => app.log.error(error)
   });
+  drainDueJobsForPlugins = async () => await jobRunner.drainDue();
   const feedRefreshScheduler = new FeedRefreshScheduler({
     refreshJobs: feedRefreshJobService,
     runner: jobRunner,

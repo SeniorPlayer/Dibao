@@ -458,6 +458,10 @@ describe("server API vertical slice", () => {
       expect(webhookAsset.body).toContain('/api/plugins/ui.css');
       expect(webhookAsset.body).toContain("可用变量");
       expect(webhookAsset.body).toContain("鉴权（高级）");
+      expect(webhookAsset.body).toContain("取值方式");
+      expect(webhookAsset.body).toContain("收藏文章时发送");
+      expect(webhookAsset.body).not.toContain("值类型");
+      expect(webhookAsset.body).not.toContain("对象快照");
       expect(webhookAsset.body).not.toContain("<style");
 
       const contributions = await app.inject({ method: "GET", url: "/api/plugins/contributions" });
@@ -489,6 +493,22 @@ describe("server API vertical slice", () => {
         hasValue: true,
         hint: "top..."
       });
+
+      const draftRule = await injectJson(app, "POST", "/api/plugins/app.dibao.webhook/api/rules", {
+        id: "draft_local_1",
+        name: "Draft safety",
+        enabled: true,
+        eventName: "article.actionRecorded",
+        method: "POST",
+        urlTemplate: "https://hooks.example.test/draft",
+        conditions: [{ path: "event.action", operator: "equals", value: "favorite" }],
+        bodyTemplate: {
+          title: "{{article.title}}"
+        }
+      });
+      expect(draftRule.statusCode, draftRule.body).toBe(200);
+      expect(draftRule.json().data.rules[0].id).toMatch(/^rule_/);
+      expect(draftRule.json().data.rules[0].id).not.toBe("draft_local_1");
 
       const getRule = await injectJson(app, "POST", "/api/plugins/app.dibao.webhook/api/rules", {
         name: "GET article test",
@@ -613,6 +633,74 @@ describe("server API vertical slice", () => {
           })
         ])
       );
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("flushes official Webhook test deliveries immediately", async () => {
+    const db = createFixtureDatabase();
+    const received: Array<{ url: string; method: string; body: string | null }> = [];
+    const app = buildServer({
+      db,
+      logger: false,
+      backgroundJobs: false,
+      pluginFetcher: async (input, init) => {
+        received.push({
+          url: String(input),
+          method: String(init?.method ?? "GET"),
+          body: init?.body ? String(init.body) : null
+        });
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    });
+
+    try {
+      expect((await app.inject({ method: "POST", url: "/api/plugins/app.dibao.webhook/enable" })).statusCode).toBe(200);
+      const rule = await injectJson(app, "POST", "/api/plugins/app.dibao.webhook/api/rules", {
+        name: "Immediate test",
+        enabled: true,
+        eventName: "article.actionRecorded",
+        method: "POST",
+        urlTemplate: "https://n8n.example.test/webhook/{{event.action}}",
+        conditions: [{ path: "event.action", operator: "equals", value: "favorite" }],
+        bodyTemplate: {
+          title: "{{article.title}}",
+          action: "{{event.action}}"
+        }
+      });
+      expect(rule.statusCode, rule.body).toBe(200);
+      const ruleId = rule.json().data.rules[0].id;
+
+      const testSend = await injectJson(
+        app,
+        "POST",
+        `/api/plugins/app.dibao.webhook/api/rules/${ruleId}/test`,
+        {
+          event: { articleId: "article_recent", feedId: "feed_design" }
+        }
+      );
+
+      expect(testSend.statusCode, testSend.body).toBe(200);
+      expect(testSend.json().data.delivery).toMatchObject({
+        status: "succeeded",
+        method: "POST",
+        url: "https://n8n.example.test/webhook/favorite"
+      });
+      expect(received).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "https://n8n.example.test/webhook/favorite"
+        })
+      ]);
+      expect(JSON.parse(received[0]?.body ?? "{}")).toMatchObject({
+        title: "Dense reader interfaces",
+        action: "favorite"
+      });
     } finally {
       await app.close();
       db.close();

@@ -84,6 +84,7 @@
                   <h3>GET Query 字段</h3>
                   <button class="button" id="add-query-row" type="button">添加 Query</button>
                 </div>
+                <p class="help">取值方式选“变量”时填写变量路径，不用加双大括号；选“固定文本”时会原样发送。</p>
                 <div id="query-rows" class="table-scroll"></div>
               </div>
               <div id="body-wrap">
@@ -91,6 +92,7 @@
                   <h3>POST Body 字段</h3>
                   <button class="button" id="add-body-row" type="button">添加字段</button>
                 </div>
+                <p class="help">默认字段已覆盖常见文章同步场景。只填 Webhook URL 后即可测试发送。</p>
                 <div id="body-rows" class="table-scroll"></div>
               </div>
               <details class="details" id="advanced-json">
@@ -129,7 +131,7 @@
 
             <div class="actions">
               <button class="button primary" id="save" type="submit">保存</button>
-              <button class="button" id="test" type="button">测试发送</button>
+              <button class="button" id="test" type="button">测试连接</button>
               <button class="button danger" id="delete" type="button">删除规则</button>
             </div>
           </form>
@@ -167,18 +169,32 @@
         selectedId: null
       };
       const defaults = {
-        headers: { "x-dibao-plugin": "webhook" },
+        headers: {},
         secretHeaders: {},
-        queryTemplate: { event: "{{eventName}}", articleId: "{{event.articleId}}" },
+        queryTemplate: {
+          event: "{{eventName}}",
+          action: "{{event.action}}",
+          articleId: "{{event.articleId}}",
+          title: "{{article.title}}",
+          url: "{{article.url}}",
+          source: "{{article.feed.title}}",
+          generatedAt: "{{generatedAt}}"
+        },
         bodyTemplate: {
           eventName: "{{eventName}}",
-          event: "{{event}}",
-          article: "{{article}}",
+          action: "{{event.action}}",
+          articleId: "{{event.articleId}}",
+          title: "{{article.title}}",
+          url: "{{article.url}}",
+          source: "{{article.feed.title}}",
+          summary: "{{article.summary}}",
           generatedAt: "{{generatedAt}}",
           ruleId: "{{ruleId}}"
         }
       };
       let lastFocusedTemplateInput = null;
+      let draftCounter = 0;
+      let busy = false;
 
       const api = async (path, options = {}) => {
         const response = await fetch(`/api/plugins/${pluginId}/api/${path}`, {
@@ -200,7 +216,14 @@
       });
 
       document.getElementById("new-rule").addEventListener("click", () => {
+        if (busy) return;
         saveDraftFromForm();
+        const existingDraft = state.rules.find((candidate) => candidate.id.startsWith("draft_"));
+        if (existingDraft) {
+          state.selectedId = existingDraft.id;
+          render();
+          return;
+        }
         const rule = newRule();
         state.rules = [rule, ...state.rules];
         state.selectedId = rule.id;
@@ -235,9 +258,10 @@
         event.preventDefault();
         await run(async () => {
           const rule = readForm();
-          const path = rule.id.startsWith("draft_") ? "rules" : `rules/${encodeURIComponent(rule.id)}`;
-          const result = await api(path, { method: "POST", body: JSON.stringify(rule) });
-          applyState(result);
+          const isDraft = rule.id.startsWith("draft_");
+          const path = isDraft ? "rules" : `rules/${encodeURIComponent(rule.id)}`;
+          const result = await api(path, { method: "POST", body: JSON.stringify(isDraft ? withoutDraftId(rule) : rule) });
+          applyState(result, { selectedId: isDraft ? result.rules?.[0]?.id : rule.id });
         });
       });
 
@@ -245,14 +269,22 @@
         const rule = readForm();
         await run(async () => {
           if (rule.id.startsWith("draft_")) {
-            const saved = await api("rules", { method: "POST", body: JSON.stringify(rule) });
-            applyState(saved);
-          } else {
-            const result = await api(`rules/${encodeURIComponent(rule.id)}/test`, {
-              method: "POST",
-              body: JSON.stringify({})
-            });
-            applyState(result.state);
+            const saved = await api("rules", { method: "POST", body: JSON.stringify(withoutDraftId(rule)) });
+            const savedId = saved.rules?.[0]?.id;
+            if (!savedId) {
+              applyState(saved);
+              return;
+            }
+            applyState(saved, { selectedId: savedId });
+            rule.id = savedId;
+          }
+          const result = await api(`rules/${encodeURIComponent(rule.id)}/test`, {
+            method: "POST",
+            body: JSON.stringify({})
+          });
+          applyState(result.state, { selectedId: rule.id });
+          if (result.delivery?.status !== "succeeded") {
+            throw new Error(`测试连接失败：${result.delivery?.error || result.delivery?.status || "未知错误"}`);
           }
         });
       });
@@ -296,23 +328,29 @@
         await run(async () => applyState(await api("state")));
       }
 
-      function applyState(next) {
-        state.rules = next.rules || [];
+      function applyState(next, options = {}) {
+        state.rules = dedupeRules(next.rules || []);
         state.secrets = next.secrets || [];
         state.deliveries = next.deliveries || [];
         state.events = (next.events || []).map(normalizeEventMeta);
-        if (!state.rules.some((rule) => rule.id === state.selectedId)) {
+        if (options.selectedId && state.rules.some((rule) => rule.id === options.selectedId)) {
+          state.selectedId = options.selectedId;
+        } else if (!state.rules.some((rule) => rule.id === state.selectedId)) {
           state.selectedId = state.rules[0]?.id || null;
         }
         render();
       }
 
       async function run(fn) {
+        if (busy) return;
+        setBusy(true);
         try {
           await fn();
           showError(null);
         } catch (error) {
           showError(error.message);
+        } finally {
+          setBusy(false);
         }
       }
 
@@ -508,7 +546,7 @@
 
       function renderMappingTable(id, rows) {
         const root = document.getElementById(id);
-        root.innerHTML = tableShell("字段名", "值类型", "值", "");
+        root.innerHTML = tableShell("字段名", "取值方式", "值", "");
         const body = root.querySelector("tbody");
         if (rows.length === 0) {
           const empty = document.createElement("tr");
@@ -523,7 +561,7 @@
       function addMappingRow(id, row = {}, options = {}) {
         const root = document.getElementById(id);
         if (!root.querySelector("table")) {
-          root.innerHTML = tableShell("字段名", "值类型", "值", "");
+          root.innerHTML = tableShell("字段名", "取值方式", "值", "");
         }
         const body = root.querySelector("tbody");
         if (body.querySelector("td[colspan]")) body.innerHTML = "";
@@ -534,8 +572,8 @@
           <td>
             <select data-map-type>
               <option value="variable">变量</option>
-              <option value="fixed">固定值</option>
-              <option value="snapshot">对象快照</option>
+              <option value="fixed">固定文本</option>
+              ${row.type === "snapshot" ? '<option value="snapshot">JSON 对象</option>' : ""}
             </select>
           </td>
           <td><input data-map-value data-template-target="true" value="${escapeAttr(row.value || "")}" placeholder="event.articleId" /></td>
@@ -732,13 +770,15 @@
       }
 
       function newRule() {
-        const eventName = state.events[0]?.name || "article.created";
+        const eventName = state.events.some((event) => event.name === "article.actionRecorded")
+          ? "article.actionRecorded"
+          : state.events[0]?.name || "article.created";
         return {
-          id: `draft_${Date.now()}`,
-          name: "新规则",
+          id: `draft_${Date.now()}_${++draftCounter}`,
+          name: "收藏文章时发送",
           enabled: true,
           eventName,
-          conditions: [],
+          conditions: eventName === "article.actionRecorded" ? [defaultCondition(eventName)] : [],
           method: "POST",
           urlTemplate: "",
           includeContent: false,
@@ -784,6 +824,12 @@
           if (!key) continue;
           if (type === "fixed") {
             output[key] = value;
+          } else if (type === "snapshot") {
+            try {
+              output[key] = JSON.parse(value);
+            } catch {
+              output[key] = value;
+            }
           } else {
             output[key] = `{{${stripBraces(value)}}}`;
           }
@@ -807,6 +853,15 @@
 
       function insertTemplate(path) {
         const target = lastFocusedTemplateInput || document.getElementById("url");
+        const mapRow = target.closest?.("[data-map-row]");
+        if (mapRow && target.matches("[data-map-value]")) {
+          mapRow.querySelector("[data-map-type]").value = "variable";
+          target.value = path;
+          target.focus();
+          target.selectionStart = target.selectionEnd = target.value.length;
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
+        }
         const token = `{{${path}}}`;
         const start = target.selectionStart ?? target.value.length;
         const end = target.selectionEnd ?? target.value.length;
@@ -855,6 +910,28 @@
 
       function stripBraces(value) {
         return String(value || "").replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+      }
+
+      function withoutDraftId(rule) {
+        const { id, ...rest } = rule;
+        return rest;
+      }
+
+      function dedupeRules(rules) {
+        const seen = new Set();
+        return rules.filter((rule) => {
+          if (!rule?.id || seen.has(rule.id)) return false;
+          seen.add(rule.id);
+          return true;
+        });
+      }
+
+      function setBusy(value) {
+        busy = value;
+        for (const id of ["new-rule", "save", "test", "delete", "save-secret"]) {
+          const node = document.getElementById(id);
+          if (node) node.disabled = value;
+        }
       }
 
       function showError(message) {

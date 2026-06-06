@@ -44,7 +44,7 @@ export default {
 
     ctx.api.post("/rules", ({ body }) => {
       const current = readRules(ctx);
-      const rule = normalizeRule(body);
+      const rule = normalizeRule(body, { replaceDraftId: true });
       writeRules(ctx, [rule, ...current]);
       return state(ctx);
     });
@@ -73,7 +73,8 @@ export default {
         ...event,
         test: true
       }, { force: true, test: true });
-      return { delivery, state: state(ctx) };
+      const completedDelivery = delivery ? await ctx.deliveries.flush(delivery.id) : delivery;
+      return { delivery: completedDelivery, state: state(ctx) };
     });
 
     ctx.api.post("/rules/:id/delete", ({ params }) => {
@@ -175,11 +176,27 @@ function buildContext(ctx, rule, eventName, event, options = {}) {
 
 function readRules(ctx) {
   const value = ctx.storage.get(RULES_KEY);
-  return Array.isArray(value) ? value.map(normalizeRule).filter((rule) => rule.urlTemplate) : [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value.map(normalizeRule).filter((rule) => rule.urlTemplate);
+  const deduped = dedupeRules(normalized);
+  let repairedDraftId = false;
+  const repaired = deduped.map((rule) => {
+    if (!rule.id.startsWith("draft_")) {
+      return rule;
+    }
+    repairedDraftId = true;
+    return { ...rule, id: `rule_${randomUUID()}` };
+  });
+  if (repairedDraftId || deduped.length !== normalized.length) {
+    ctx.storage.set(RULES_KEY, repaired.map(normalizeRule));
+  }
+  return repaired;
 }
 
 function writeRules(ctx, rules) {
-  ctx.storage.set(RULES_KEY, rules.map(normalizeRule));
+  ctx.storage.set(RULES_KEY, dedupeRules(rules.map(normalizeRule)));
 }
 
 function state(ctx) {
@@ -196,11 +213,12 @@ function state(ctx) {
   };
 }
 
-function normalizeRule(input) {
+function normalizeRule(input, options = {}) {
   const record = objectValue(input);
   const method = stringValue(record.method).toUpperCase();
   const eventName = stringValue(record.eventName);
-  const id = stringValue(record.id) || `rule_${randomUUID()}`;
+  const inputId = stringValue(record.id);
+  const id = !inputId || (options.replaceDraftId && inputId.startsWith("draft_")) ? `rule_${randomUUID()}` : inputId;
   return {
     id,
     name: stringValue(record.name) || "Untitled rule",
@@ -216,6 +234,17 @@ function normalizeRule(input) {
     includeContent: record.includeContent === true,
     updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : Date.now()
   };
+}
+
+function dedupeRules(rules) {
+  const seen = new Set();
+  return rules.filter((rule) => {
+    if (!rule?.id || seen.has(rule.id)) {
+      return false;
+    }
+    seen.add(rule.id);
+    return true;
+  });
 }
 
 function normalizeConditions(value) {

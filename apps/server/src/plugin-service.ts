@@ -246,6 +246,7 @@ export type PluginServiceOptions = {
   fetcher?: typeof fetch;
   secretKey?: string;
   now?: () => number;
+  drainDueJobs?: () => Promise<number>;
   logPerformance?: (record: {
     route: string;
     pluginId: string;
@@ -1052,6 +1053,10 @@ export class PluginService {
         cancel: (deliveryId: string) => {
           requireCapability("deliveries:write");
           return this.cancelDelivery(pluginId, deliveryId);
+        },
+        flush: async (deliveryId: string) => {
+          requireCapability("deliveries:write");
+          return await this.flushDelivery(pluginId, deliveryId);
         }
       },
       database: {
@@ -1179,6 +1184,18 @@ export class PluginService {
       now: this.now()
     });
     return mapPluginDeliveryListItem(updated ?? delivery);
+  }
+
+  private async flushDelivery(pluginId: string, deliveryId: string): Promise<PluginDeliveryListItem> {
+    const delivery = this.options.plugins.findDelivery(deliveryId);
+    if (!delivery || delivery.pluginId !== pluginId) {
+      throw new PluginServiceError(404, "NOT_FOUND", "Plugin delivery not found");
+    }
+    if (!delivery.jobId || delivery.status === "succeeded" || delivery.status === "failed" || delivery.status === "cancelled") {
+      return mapPluginDeliveryListItem(delivery);
+    }
+    await this.options.drainDueJobs?.();
+    return this.getDelivery(pluginId, deliveryId);
   }
 
   private async handleDeliveryJob(pluginId: string, job: JobRow): Promise<void> {
