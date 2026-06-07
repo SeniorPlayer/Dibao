@@ -138,6 +138,11 @@ import {
   type RecommendationClusterFamily
 } from "./interest-family-service.js";
 import { JobRunner } from "./job-runner.js";
+import {
+  DEFAULT_JOB_HISTORY_CLEANUP_INTERVAL_MS,
+  DEFAULT_JOB_HISTORY_RETENTION_DAYS,
+  JobHistoryCleanupScheduler
+} from "./job-history-cleanup-scheduler.js";
 import { LatestReleaseService } from "./latest-release-service.js";
 import { OpmlService, OpmlServiceError } from "./opml-service.js";
 import { PluginService, PluginServiceError } from "./plugin-service.js";
@@ -418,6 +423,8 @@ type BuildServerOptions = {
   backgroundJobs?: boolean;
   feedRefreshIntervalMs?: number;
   retentionCleanupIntervalMs?: number;
+  jobHistoryCleanupIntervalMs?: number;
+  jobHistoryRetentionDays?: number;
   profileDecayIntervalMs?: number;
   recommendationMaintenanceIntervalMs?: number;
   jobRunnerIntervalMs?: number;
@@ -887,6 +894,23 @@ export function buildServer(options: BuildServerOptions = {}) {
     intervalMs: options.retentionCleanupIntervalMs ?? DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
     onError: (error) => app.log.error(error)
   });
+  const jobHistoryCleanupScheduler = new JobHistoryCleanupScheduler({
+    jobs,
+    retentionDays: options.jobHistoryRetentionDays ?? DEFAULT_JOB_HISTORY_RETENTION_DAYS,
+    intervalMs:
+      options.jobHistoryCleanupIntervalMs ?? DEFAULT_JOB_HISTORY_CLEANUP_INTERVAL_MS,
+    now: options.now,
+    onCleanup: (result) => {
+      if (result.deleted > 0) {
+        app.log.info({
+          route: "jobs.historyCleanup",
+          cutoff: result.cutoff,
+          deleted: result.deleted
+        });
+      }
+    },
+    onError: (error) => app.log.error(error)
+  });
   const profileDecayScheduler = new ProfileDecayScheduler({
     decayJobs: profileDecayJobService,
     runner: jobRunner,
@@ -1069,6 +1093,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     jobRunner.start();
     feedRefreshScheduler.start();
     retentionCleanupScheduler.start();
+    jobHistoryCleanupScheduler.start();
     profileDecayScheduler.start();
     recommendationMaintenanceScheduler.start();
     if (!maintenanceTickTimer) {
@@ -1128,6 +1153,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.addHook("onClose", async () => {
     recommendationMaintenanceScheduler.stop();
     profileDecayScheduler.stop();
+    jobHistoryCleanupScheduler.stop();
     retentionCleanupScheduler.stop();
     feedRefreshScheduler.stop();
     jobRunner.stop();

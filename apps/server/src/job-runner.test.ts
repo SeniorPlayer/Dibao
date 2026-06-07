@@ -34,6 +34,7 @@ import {
 } from "./feed-refresh-job-service.js";
 import { FeedRefreshService, type FeedFetcher } from "./feed-refresh-service.js";
 import { DeferredJobRun, JobRunner } from "./job-runner.js";
+import { JobHistoryCleanupScheduler } from "./job-history-cleanup-scheduler.js";
 import {
   ProfileDecayJobService,
   PROFILE_DECAY_JOB_TYPE
@@ -985,6 +986,86 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("deletes only old finished job history and keeps open or referenced jobs", () => {
+    const db = createEmptyDatabase();
+    const jobs = new SqliteJobRepository(db);
+    const day = 24 * 60 * 60 * 1000;
+    const cutoff = 30 * day;
+
+    try {
+      enqueueFeedJob(jobs, "job_old_succeeded", 1);
+      jobs.claimById("job_old_succeeded", 2);
+      jobs.markSucceeded("job_old_succeeded", 5 * day);
+
+      enqueueFeedJob(jobs, "job_old_failed", 1);
+      jobs.claimById("job_old_failed", 2);
+      jobs.markFailed("job_old_failed", "failed fixture", 6 * day);
+
+      enqueueFeedJob(jobs, "job_old_cancelled", 1);
+      jobs.cancel("job_old_cancelled", "cancelled fixture", 7 * day);
+
+      enqueueFeedJob(jobs, "job_new_succeeded", 1);
+      jobs.claimById("job_new_succeeded", 2);
+      jobs.markSucceeded("job_new_succeeded", cutoff + 1);
+
+      enqueueFeedJob(jobs, "job_old_queued", 1);
+      enqueueFeedJob(jobs, "job_old_running", 1);
+      jobs.claimById("job_old_running", 2);
+
+      enqueueFeedJob(jobs, "job_referenced_succeeded", 1);
+      jobs.claimById("job_referenced_succeeded", 2);
+      jobs.markSucceeded("job_referenced_succeeded", 8 * day);
+      db.prepare(
+        `
+          insert into recommendation_maintenance_schedule_state (
+            task_key,
+            last_enqueued_at,
+            last_completed_at,
+            last_skipped_reason,
+            last_job_id,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?)
+        `
+      ).run("fixture_task", 8 * day, 8 * day, null, "job_referenced_succeeded", 8 * day);
+
+      expect(jobs.deleteFinishedBefore({ cutoff, limit: 10 })).toBe(3);
+      expect(jobs.findById("job_old_succeeded")).toBeNull();
+      expect(jobs.findById("job_old_failed")).toBeNull();
+      expect(jobs.findById("job_old_cancelled")).toBeNull();
+      expect(jobs.findById("job_new_succeeded")).toMatchObject({ status: "succeeded" });
+      expect(jobs.findById("job_old_queued")).toMatchObject({ status: "queued" });
+      expect(jobs.findById("job_old_running")).toMatchObject({ status: "running" });
+      expect(jobs.findById("job_referenced_succeeded")).toMatchObject({
+        status: "succeeded"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("cleans job history using the configured retention window", () => {
+    const day = 24 * 60 * 60 * 1000;
+    const calls: Array<{ cutoff: number; limit?: number }> = [];
+    const scheduler = new JobHistoryCleanupScheduler({
+      jobs: {
+        deleteFinishedBefore(input) {
+          calls.push(input);
+          return 4;
+        }
+      },
+      retentionDays: 30,
+      batchSize: 7,
+      now: () => 45 * day
+    });
+
+    expect(scheduler.runOnce()).toEqual({
+      cutoff: 15 * day,
+      deleted: 4
+    });
+    expect(calls).toEqual([{ cutoff: 15 * day, limit: 7 }]);
+  });
+
   it("continues active index backfill until remaining embedding candidates are covered", async () => {
     const fixture = createEmbeddingPipelineFixture();
     const { db, articles, embeddingJobs, jobs } = fixture;
@@ -1580,6 +1661,17 @@ function tempDatabasePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "dibao-server-jobs-"));
   tempDirs.push(dir);
   return join(dir, "dibao.sqlite");
+}
+
+function enqueueFeedJob(jobs: SqliteJobRepository, id: string, now: number): JobRow {
+  return jobs.enqueue({
+    id,
+    type: "feed_refresh",
+    payloadJson: JSON.stringify({ feedId: `feed_${id}` }),
+    maxAttempts: 3,
+    runAfter: now,
+    now
+  });
 }
 
 function fixtureFetcher(fixtures: Record<string, string>): FeedFetcher {

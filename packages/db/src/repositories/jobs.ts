@@ -26,6 +26,7 @@ export interface JobRepository {
   claimById(id: string, now: number): JobRow | null;
   claimNextDue(now: number): JobRow | null;
   countByTypeAndStatus(type: JobType, status: JobStatus): number;
+  deleteFinishedBefore(input: { cutoff: number; limit?: number }): number;
   enqueue(input: EnqueueJobInput): JobRow;
   findById(id: string): JobRow | null;
   list(input?: JobListInput): JobRow[];
@@ -78,6 +79,32 @@ export class SqliteJobRepository implements JobRepository {
       .get(type, status) as { count: number } | undefined;
 
     return row?.count ?? 0;
+  }
+
+  deleteFinishedBefore(input: { cutoff: number; limit?: number }): number {
+    const limit = Math.min(Math.max(Math.trunc(input.limit ?? 5000), 1), 50_000);
+    const result = this.db
+      .prepare(
+        `
+          delete from jobs
+          where id in (
+            select j.id
+            from jobs j
+            where j.status in ('succeeded', 'failed', 'cancelled')
+              and coalesce(j.finished_at, j.updated_at) < ?
+              and not exists (
+                select 1
+                from recommendation_maintenance_schedule_state rms
+                where rms.last_job_id = j.id
+              )
+            order by coalesce(j.finished_at, j.updated_at), j.id
+            limit ?
+          )
+        `
+      )
+      .run(input.cutoff, limit);
+
+    return result.changes;
   }
 
   claimNextDue(now: number): JobRow | null {
