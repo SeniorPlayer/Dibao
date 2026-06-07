@@ -963,6 +963,7 @@ function useArticleListIgnoreTelemetry(props: {
     if (!props.enabled || !root || typeof IntersectionObserver === "undefined") {
       return;
     }
+    const scrollRoot = root;
 
     const visibleCandidates = props.articles.filter(
       (article) => articleInteractionStatusForState(article.state) === "unseen"
@@ -973,6 +974,60 @@ function useArticleListIgnoreTelemetry(props: {
       if (!candidateIds.has(id)) {
         seenVisibleIds.current.delete(id);
       }
+    }
+    for (const id of Array.from(sentIds.current)) {
+      if (!candidateIds.has(id)) {
+        sentIds.current.delete(id);
+      }
+    }
+
+    function sendIgnoredArticle(articleId: string) {
+      if (
+        !candidateIds.has(articleId) ||
+        sentIds.current.has(articleId) ||
+        selectedArticleIdRef.current === articleId
+      ) {
+        return;
+      }
+
+      sentIds.current.add(articleId);
+      onIgnoreArticleRef.current(articleId);
+    }
+
+    let scanAnimationFrame: number | null = null;
+
+    function scanScrolledPastArticles() {
+      const rootTop = scrollRoot.getBoundingClientRect().top;
+      const snapshots = Array.from(seenVisibleIds.current).map((articleId) => {
+        const element = scrollRoot.querySelector<HTMLElement>(
+          `[data-article-id="${cssEscape(articleId)}"]`
+        );
+        return {
+          articleId,
+          bottom: element?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY,
+          hasBeenSent: sentIds.current.has(articleId),
+          hasBeenVisible: true
+        };
+      });
+
+      for (const articleId of scrolledPastArticleIdsForIgnoreTelemetry(snapshots, rootTop)) {
+        sendIgnoredArticle(articleId);
+      }
+    }
+
+    function scheduleScrolledPastScan() {
+      if (typeof window === "undefined") {
+        scanScrolledPastArticles();
+        return;
+      }
+      if (scanAnimationFrame !== null) {
+        return;
+      }
+
+      scanAnimationFrame = window.requestAnimationFrame(() => {
+        scanAnimationFrame = null;
+        scanScrolledPastArticles();
+      });
     }
 
     const observer = new IntersectionObserver(
@@ -994,22 +1049,22 @@ function useArticleListIgnoreTelemetry(props: {
             continue;
           }
 
-          const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
+          const rootTop = entry.rootBounds?.top ?? scrollRoot.getBoundingClientRect().top;
           const hasScrolledPast = entry.boundingClientRect.bottom <= rootTop;
           if (seenVisibleIds.current.has(articleId) && hasScrolledPast) {
-            sentIds.current.add(articleId);
-            onIgnoreArticleRef.current(articleId);
+            sendIgnoredArticle(articleId);
           }
         }
+        scheduleScrolledPastScan();
       },
       {
-        root,
+        root: scrollRoot,
         threshold: [0, 0.6]
       }
     );
 
     for (const article of visibleCandidates) {
-      const element = root.querySelector<HTMLElement>(
+      const element = scrollRoot.querySelector<HTMLElement>(
         `[data-article-id="${cssEscape(article.id)}"]`
       );
       if (element) {
@@ -1017,10 +1072,34 @@ function useArticleListIgnoreTelemetry(props: {
       }
     }
 
+    scheduleScrolledPastScan();
+    scrollRoot.addEventListener("scroll", scheduleScrolledPastScan, { passive: true });
+
     return () => {
+      if (scanAnimationFrame !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(scanAnimationFrame);
+      }
+      scrollRoot.removeEventListener("scroll", scheduleScrolledPastScan);
       observer.disconnect();
     };
   }, [props.articles, props.enabled, props.rootRef]);
+}
+
+export function scrolledPastArticleIdsForIgnoreTelemetry(
+  candidates: Array<{
+    articleId: string;
+    bottom: number;
+    hasBeenSent: boolean;
+    hasBeenVisible: boolean;
+  }>,
+  rootTop: number
+): string[] {
+  return candidates
+    .filter(
+      (candidate) =>
+        candidate.hasBeenVisible && !candidate.hasBeenSent && candidate.bottom <= rootTop
+    )
+    .map((candidate) => candidate.articleId);
 }
 
 function usePersistedArticleListScroll(props: {
