@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type { JobRepository, JobRow } from "@dibao/db";
 import { PermanentJobFailure } from "./job-runner.js";
 import type { ArticleRankingRecalculator } from "./ranking-service.js";
@@ -7,6 +8,8 @@ export const RANKING_RECALCULATE_JOB_TYPE = "ranking_recalculate" as const;
 export const RANKING_RECALCULATE_ARTICLE_LIMIT = 500;
 export const RANKING_RECALCULATE_CHUNK_SIZE = 25;
 export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 60_000;
+export const RANKING_RECALCULATE_TARGET_CHUNK_MS = 2_000;
+export const RANKING_RECALCULATE_MIN_CHUNK_SIZE = 5;
 
 export type RankingRecalculateJobPayload = {
   articleIds?: string[];
@@ -23,6 +26,15 @@ export type RankingRecalculateJobServiceOptions = {
   ranking: ArticleRankingRecalculator;
   now?: () => number;
   jobIdFactory?: () => string;
+  targetChunkMs?: number;
+  onChunk?: (record: {
+    jobId: string;
+    processed: number;
+    durationMs: number;
+    limit: number;
+    nextLimit: number;
+    nextCursor: string | null;
+  }) => void;
 };
 
 export class RankingRecalculateJobService {
@@ -96,6 +108,7 @@ export class RankingRecalculateJobService {
         payload.limit ?? RANKING_RECALCULATE_CHUNK_SIZE,
         RANKING_RECALCULATE_CHUNK_SIZE
       );
+      const startedAt = performance.now();
       const result = this.options.ranking.recalculateChunk
         ? this.options.ranking.recalculateChunk({
             cursor: payload.cursor ?? null,
@@ -105,6 +118,20 @@ export class RankingRecalculateJobService {
             processed: this.options.ranking.recalculateAll(),
             nextCursor: null
           };
+      const durationMs = performance.now() - startedAt;
+      const nextLimit = adaptiveNextLimit(
+        limit,
+        durationMs,
+        this.options.targetChunkMs ?? RANKING_RECALCULATE_TARGET_CHUNK_MS
+      );
+      this.options.onChunk?.({
+        jobId: job.id,
+        processed: result.processed,
+        durationMs,
+        limit,
+        nextLimit,
+        nextCursor: result.nextCursor
+      });
       if (result.nextCursor) {
         const now = this.now();
         this.options.jobs.enqueue({
@@ -112,7 +139,7 @@ export class RankingRecalculateJobService {
           type: RANKING_RECALCULATE_JOB_TYPE,
           payloadJson: JSON.stringify({
             cursor: result.nextCursor,
-            limit
+            limit: nextLimit
           } satisfies RankingRecalculateJobPayload),
           maxAttempts: 2,
           runAfter: now + RANKING_RECALCULATE_CHUNK_DELAY_MS,
@@ -192,4 +219,20 @@ function uniqueStrings(values: string[]): string[] {
 
 function randomJobId(): string {
   return `job_rank_${randomBytes(10).toString("hex")}`;
+}
+
+function adaptiveNextLimit(limit: number, durationMs: number, targetMs: number): number {
+  if (targetMs <= 0) {
+    return limit;
+  }
+
+  if (durationMs > targetMs * 1.25 && limit > RANKING_RECALCULATE_MIN_CHUNK_SIZE) {
+    return Math.max(RANKING_RECALCULATE_MIN_CHUNK_SIZE, Math.floor(limit / 2));
+  }
+
+  if (durationMs < targetMs * 0.35 && limit < RANKING_RECALCULATE_CHUNK_SIZE) {
+    return Math.min(RANKING_RECALCULATE_CHUNK_SIZE, limit + RANKING_RECALCULATE_MIN_CHUNK_SIZE);
+  }
+
+  return limit;
 }

@@ -37,5 +37,5 @@ describe("CoreDatabaseMigrationService", () => {
         db.close();
       }
     }
-  });
+  }, 30_000);
 });

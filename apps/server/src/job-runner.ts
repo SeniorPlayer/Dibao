@@ -2,10 +2,15 @@ import type { JobRepository, JobRow, JobType } from "@dibao/db";
 
 export type JobHandler = (job: JobRow) => Promise<void> | void;
 
+export type JobRunDecision =
+  | { run: true }
+  | { run: false; deferUntil: number; reason: string };
+
 export type JobRunnerOptions = {
   jobs: JobRepository;
   handlers: Partial<Record<JobType, JobHandler>>;
   pluginHandler?: JobHandler;
+  beforeRun?: (job: JobRow) => JobRunDecision;
   now?: () => number;
   pollIntervalMs?: number;
   retryDelayMs?: number;
@@ -110,6 +115,12 @@ export class JobRunner {
       } else {
         this.options.jobs.markFailed(job.id, `No handler registered for job type: ${job.type}`, this.now());
       }
+      return job;
+    }
+
+    const decision = this.options.beforeRun?.(job) ?? { run: true };
+    if (!decision.run) {
+      this.options.jobs.defer(job.id, decision.reason, decision.deferUntil, this.now());
       return job;
     }
 

@@ -59,4 +59,4 @@ VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=15s --start-period=20s --retries=3 CMD ["node", "-e", "const port=process.env.DIBAO_PORT||'8080'; fetch(`http://127.0.0.1:${port}/api/system/health`).then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1));"]
 
-CMD ["node", "apps/server/dist/index.js"]
+CMD ["node", "apps/server/dist/container-entrypoint.js"]

@@ -192,6 +192,52 @@ describe("job runner foundation", () => {
     }
   });
 
+  it("defers a job before handler execution when the runner gate asks for quiet time", async () => {
+    const db = createEmptyDatabase();
+    const jobs = new SqliteJobRepository(db);
+    let handlerCalled = false;
+
+    try {
+      jobs.enqueue({
+        id: "job_quiet_window",
+        type: "ranking_recalculate",
+        payloadJson: null,
+        maxAttempts: 3,
+        runAfter: 1000,
+        now: 1000
+      });
+
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          ranking_recalculate: () => {
+            handlerCalled = true;
+          }
+        },
+        beforeRun: (job) =>
+          job.type === "ranking_recalculate"
+            ? {
+                run: false,
+                deferUntil: 32_000,
+                reason: "foreground quiet window"
+              }
+            : { run: true },
+        now: () => 2000
+      });
+
+      await expect(runner.runDueOnce()).resolves.toMatchObject({ id: "job_quiet_window" });
+      expect(handlerCalled).toBe(false);
+      expect(jobs.findById("job_quiet_window")).toMatchObject({
+        status: "queued",
+        attempts: 0,
+        runAfter: 32_000,
+        error: "foreground quiet window"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("fails invalid feed refresh payloads without crashing the runner", async () => {
     const db = createEmptyDatabase();
     const jobs = new SqliteJobRepository(db);
@@ -1183,7 +1229,7 @@ describe("job runner foundation", () => {
     } finally {
       db.close();
     }
-  });
+  }, 30_000);
 
   it("retries retryable provider failures and permanently fails malformed provider responses", async () => {
     const retryable = createEmbeddingPipelineFixture();

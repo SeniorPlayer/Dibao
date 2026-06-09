@@ -118,6 +118,11 @@ import {
   type FullContentBackfillResult,
   type FullContentPreviewResponse
 } from "./feed-full-content-service.js";
+import {
+  DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS,
+  foregroundQuietUntil,
+  markForegroundActivity
+} from "./foreground-activity.js";
 import { FullContentExtractionService } from "./full-content-extraction-service.js";
 import {
   InterestClusterLabelService,
@@ -440,6 +445,10 @@ type BuildServerOptions = {
   webDistDir?: string | false;
   coreMigrationDeferMs?: number;
   upgradeAutoStart?: boolean;
+  recordForegroundActivity?: boolean;
+  foregroundActivityWriteThrottleMs?: number;
+  foregroundQuietWindowMs?: number;
+  rankingTargetChunkMs?: number;
 };
 
 export function buildServer(options: BuildServerOptions = {}) {
@@ -550,7 +559,22 @@ export function buildServer(options: BuildServerOptions = {}) {
   const rankingJobService = new RankingRecalculateJobService({
     jobs,
     ranking: rankingService,
-    now: options.now
+    now: options.now,
+    targetChunkMs: options.rankingTargetChunkMs,
+    onChunk: (record) => {
+      app.log.info(
+        {
+          route: "jobs.rankingRecalculate.chunk",
+          jobId: record.jobId,
+          durationMs: roundDuration(record.durationMs),
+          processed: record.processed,
+          limit: record.limit,
+          nextLimit: record.nextLimit,
+          hasNextCursor: record.nextCursor !== null
+        },
+        "job.performance"
+      );
+    }
   });
   const readerCommandService = new ReaderCommandService({
     articles,
@@ -829,6 +853,12 @@ export function buildServer(options: BuildServerOptions = {}) {
   };
   const authRequired = options.authRequired ?? true;
   const backgroundJobs = options.backgroundJobs ?? false;
+  const recordForegroundActivityEnabled = options.recordForegroundActivity ?? !backgroundJobs;
+  const foregroundActivityWriteThrottleMs =
+    options.foregroundActivityWriteThrottleMs ??
+    DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS;
+  const foregroundQuietWindowMs = Math.max(0, options.foregroundQuietWindowMs ?? 0);
+  let lastForegroundActivityWriteAt = 0;
   let maintenanceTickTimer: NodeJS.Timeout | null = null;
   let maintenanceInitialTickTimer: NodeJS.Timeout | null = null;
 
@@ -879,6 +909,24 @@ export function buildServer(options: BuildServerOptions = {}) {
     pollIntervalMs: options.jobRunnerIntervalMs,
     retryDelayMs: options.jobRetryDelayMs,
     maxJobsPerDrain: options.jobRunnerMaxJobsPerDrain,
+    beforeRun: (job) => {
+      if (foregroundQuietWindowMs <= 0 || !isForegroundDeferrableJobType(job.type)) {
+        return { run: true };
+      }
+
+      const now = options.now?.() ?? Date.now();
+      const deferUntil = foregroundQuietUntil(settings, {
+        now,
+        quietWindowMs: foregroundQuietWindowMs
+      });
+      return deferUntil
+        ? {
+            run: false,
+            deferUntil,
+            reason: `Deferred ${job.type} until foreground quiet window ends`
+          }
+        : { run: true };
+    },
     onError: (error) => app.log.error(error)
   });
   drainDueJobsForPlugins = async () => await jobRunner.drainDue();
@@ -1064,6 +1112,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       return sendApiError(reply, 401, "UNAUTHORIZED", "Authentication required");
     }
 
+    recordForegroundApiActivity(request, pathname);
+
     if (
       (coreDatabaseMigrationService.isBlocking() || derivedDataUpgradeService.isBlocking()) &&
       !isUpgradeAllowedRoute(request.method, request.routeOptions.url)
@@ -1085,6 +1135,31 @@ export function buildServer(options: BuildServerOptions = {}) {
       );
     }
   });
+
+  function recordForegroundApiActivity(
+    request: FastifyRequest,
+    pathname: string | null
+  ): void {
+    if (!recordForegroundActivityEnabled || !pathname || !isForegroundActivityRoute(pathname)) {
+      return;
+    }
+
+    const now = options.now?.() ?? Date.now();
+    if (now - lastForegroundActivityWriteAt < foregroundActivityWriteThrottleMs) {
+      return;
+    }
+
+    lastForegroundActivityWriteAt = now;
+    try {
+      markForegroundActivity(settings, {
+        now,
+        route: request.routeOptions.url ?? pathname,
+        method: request.method
+      });
+    } catch (error) {
+      app.log.warn({ error }, "foreground.activity.write_failed");
+    }
+  }
 
   function startBackgroundServices(): void {
     if (!backgroundJobs) {
@@ -2740,6 +2815,44 @@ const anonymousRoutes = new Set([
   "POST /api/auth/logout",
   "GET /api/system/health"
 ]);
+
+function isForegroundActivityRoute(pathname: string): boolean {
+  if (!isApiPath(pathname)) {
+    return false;
+  }
+
+  return (
+    pathname.startsWith("/api/articles") ||
+    pathname.startsWith("/api/reader") ||
+    pathname.startsWith("/api/recommendation") ||
+    pathname.startsWith("/api/feeds") ||
+    pathname.startsWith("/api/plugins") ||
+    pathname === "/api/settings"
+  );
+}
+
+function isForegroundDeferrableJobType(type: JobType): boolean {
+  return (
+    type === "feed_refresh" ||
+    type === "embedding_generate" ||
+    type === "profile_event_process" ||
+    type === "ranking_recalculate" ||
+    type === "profile_decay" ||
+    type === "retention_cleanup" ||
+    type === "vector_index_rebuild" ||
+    type === ARTICLE_FINGERPRINT_BACKFILL_JOB_TYPE ||
+    type === DUPLICATE_GROUP_REBUILD_JOB_TYPE ||
+    type === KEYWORD_PROFILE_REBUILD_JOB_TYPE ||
+    type === RECENT_INTENT_REBUILD_JOB_TYPE ||
+    type === RANKING_EVAL_RUN_JOB_TYPE ||
+    type === FTRL_TRAIN_JOB_TYPE ||
+    type === RECOMMENDATION_BACKFILL_JOB_TYPE ||
+    type === INTEREST_CLUSTER_LABEL_REBUILD_JOB_TYPE ||
+    type === INTEREST_CLUSTER_MERGE_DIAGNOSTICS_JOB_TYPE ||
+    type === INTEREST_CLUSTER_AUTO_MERGE_JOB_TYPE ||
+    type === INTEREST_FAMILY_REBUILD_JOB_TYPE
+  );
+}
 
 const upgradeAllowedRoutes = new Set([
   "GET /api/auth/session",
