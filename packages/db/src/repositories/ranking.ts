@@ -120,20 +120,22 @@ export class SqliteRankingRepository implements RankingRepository {
   constructor(private readonly db: DibaoDatabase) {}
 
   countRankedArticles(input: { activeRankContext: string }): RankedArticleCountsRow {
-    const row = this.db
-      .prepare(
-        `
-          select
-            sum(case when rank_context = ? then 1 else 0 end) as base,
-            sum(case when rank_context = ? then 1 else 0 end) as active
-          from article_rank_scores
-        `
-      )
-      .get(BASE_RANK_CONTEXT, input.activeRankContext) as RankedArticleCountsRow | undefined;
+    const countByContext = this.db.prepare(
+      `
+        select count(*) as count
+        from article_rank_scores
+        where rank_context = ?
+      `
+    );
+    const baseRow = countByContext.get(BASE_RANK_CONTEXT) as { count: number } | undefined;
+    const activeRow =
+      input.activeRankContext === BASE_RANK_CONTEXT
+        ? null
+        : (countByContext.get(input.activeRankContext) as { count: number } | undefined);
 
     return {
-      base: row?.base ?? 0,
-      active: input.activeRankContext === BASE_RANK_CONTEXT ? 0 : row?.active ?? 0
+      base: baseRow?.count ?? 0,
+      active: activeRow?.count ?? 0
     };
   }
 

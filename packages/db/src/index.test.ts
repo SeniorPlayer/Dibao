@@ -1907,6 +1907,51 @@ describe("db package", () => {
     }
   });
 
+  it("orders recommended article lists from rank scores while preserving active and base fallback", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const feeds = new SqliteFeedRepository(db);
+      const articles = new SqliteArticleRepository(db);
+      feeds.upsert({
+        id: "feed_ranked_list",
+        title: "Ranked List Feed",
+        feedUrl: "https://example.com/ranked-list.xml",
+        now: 1000
+      });
+
+      for (const id of ["base_only", "active_high", "active_low", "unranked"]) {
+        articles.upsert({
+          id: `article_${id}`,
+          feedId: "feed_ranked_list",
+          url: `https://example.com/${id}`,
+          title: id,
+          publishedAt: 1000,
+          discoveredAt: 1000,
+          dedupeKey: id,
+          now: 1000
+        });
+      }
+
+      insertRank(db, "article_base_only", 0.95, 2000);
+      insertRank(db, "article_active_high", 0.1, 2000);
+      insertRank(db, "article_active_high", 0.9, 3000, "active");
+      insertRank(db, "article_active_low", 0.7, 3000, "active");
+
+      expect(
+        articles
+          .list({ view: "recommended", rankContext: "active", limit: 2 })
+          .items.map((item) => item.id)
+      ).toEqual(["article_base_only", "article_active_high"]);
+      expect(
+        articles
+          .list({ view: "recommended", rankContext: "active", limit: 3, offset: 2 })
+          .items.map((item) => item.id)
+      ).toEqual(["article_active_low", "article_unranked"]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("stores auth credentials and hashed sessions", () => {
     const db = openDatabase(tempDatabasePath(), { migrate: true });
     try {
@@ -1968,7 +2013,8 @@ function insertRank(
   db: ReturnType<typeof openDatabase>,
   articleId: string,
   score: number,
-  calculatedAt: number
+  calculatedAt: number,
+  rankContext = "base"
 ): void {
   db.prepare(
     `
@@ -1985,9 +2031,9 @@ function insertRank(
         penalty_score,
         calculated_at
       )
-      values (?, 'base', null, ?, 0, 0, 0, 0, 0, 0, ?)
+      values (?, ?, null, ?, 0, 0, 0, 0, 0, 0, ?)
     `
-  ).run(articleId, score, calculatedAt);
+  ).run(articleId, rankContext, score, calculatedAt);
 }
 
 function hasTableOrView(db: ReturnType<typeof openDatabase>, name: string): boolean {

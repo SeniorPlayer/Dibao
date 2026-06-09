@@ -458,18 +458,27 @@ export class SqliteArticleRepository implements ArticleRepository {
       conditions.push(unreadArticleCondition());
     }
 
-    const rows = this.db
-      .prepare(
-        `
-          ${baseArticleReadSelect()}
-          ${baseArticleReadFrom()}
-          where ${conditions.join(" and ")}
-          ${orderByForView(input.view, input.sort)}
-          limit ?
-          offset ?
-        `
-      )
-      .all(...rankParams, ...filterParams, limit + 1, offset) as ArticleReadDbRow[];
+    const rows =
+      input.view === "recommended"
+        ? this.listRecommendedByRank({
+            rankContext,
+            conditions,
+            filterParams,
+            limit,
+            offset
+          })
+        : (this.db
+            .prepare(
+              `
+                ${baseArticleReadSelect()}
+                ${baseArticleReadFrom()}
+                where ${conditions.join(" and ")}
+                ${orderByForView(input.view, input.sort)}
+                limit ?
+                offset ?
+              `
+            )
+            .all(...rankParams, ...filterParams, limit + 1, offset) as ArticleReadDbRow[]);
 
     const hasMore = rows.length > limit;
     const items = (hasMore ? rows.slice(0, limit) : rows).map(mapArticleListItem);
@@ -479,6 +488,90 @@ export class SqliteArticleRepository implements ArticleRepository {
       nextOffset: hasMore ? offset + limit : null,
       unreadCount
     };
+  }
+
+  private listRecommendedByRank(input: {
+    rankContext: string;
+    conditions: string[];
+    filterParams: unknown[];
+    limit: number;
+    offset: number;
+  }): ArticleReadDbRow[] {
+    const rows = this.db
+      .prepare(
+        `
+          with ranked as (
+            select
+              article_id,
+              score,
+              calculated_at,
+              rerank_position
+            from article_rank_scores
+            where rank_context = ?
+            union all
+            select
+              base.article_id,
+              base.score,
+              base.calculated_at,
+              null as rerank_position
+            from article_rank_scores base
+            where base.rank_context = ?
+              and ? != ?
+              and not exists (
+                select 1
+                from article_rank_scores active
+                where active.article_id = base.article_id
+                  and active.rank_context = ?
+              )
+          )
+          ${baseArticleReadSelect()}
+          ${rankedArticleReadFrom()}
+          where ${input.conditions.join(" and ")}
+          order by
+            ranked.score desc,
+            case when ranked.rerank_position is null then 1 else 0 end,
+            ranked.rerank_position asc,
+            coalesce(a.published_at, a.discovered_at) desc,
+            a.id desc
+          limit ?
+          offset ?
+        `
+      )
+      .all(
+        input.rankContext,
+        BASE_RANK_CONTEXT,
+        input.rankContext,
+        BASE_RANK_CONTEXT,
+        input.rankContext,
+        input.rankContext,
+        BASE_RANK_CONTEXT,
+        ...input.filterParams,
+        input.limit + 1,
+        input.offset
+      ) as ArticleReadDbRow[];
+
+    if (rows.length <= input.limit) {
+      return this.db
+        .prepare(
+          `
+            ${baseArticleReadSelect()}
+            ${baseArticleReadFrom()}
+            where ${input.conditions.join(" and ")}
+            ${orderByForView("recommended", undefined)}
+            limit ?
+            offset ?
+          `
+        )
+        .all(
+          input.rankContext,
+          BASE_RANK_CONTEXT,
+          ...input.filterParams,
+          input.limit + 1,
+          input.offset
+        ) as ArticleReadDbRow[];
+    }
+
+    return rows;
   }
 
   search(input: ArticleSearchInput): ArticleSearchResult {
@@ -993,6 +1086,21 @@ function baseArticleReadSelect(): string {
 function baseArticleReadFrom(): string {
   return `
     from articles a
+    join feeds f on f.id = a.feed_id and f.deleted_at is null
+    left join article_states s on s.article_id = a.id
+    left join article_rank_scores rs
+      on rs.article_id = a.id
+      and rs.rank_context = ?
+    left join article_rank_scores base_rs
+      on base_rs.article_id = a.id
+      and base_rs.rank_context = ?
+  `;
+}
+
+function rankedArticleReadFrom(): string {
+  return `
+    from ranked
+    join articles a on a.id = ranked.article_id
     join feeds f on f.id = a.feed_id and f.deleted_at is null
     left join article_states s on s.article_id = a.id
     left join article_rank_scores rs
