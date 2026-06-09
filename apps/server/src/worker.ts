@@ -1,9 +1,36 @@
-import { existsSync } from "node:fs";
-import { loadDefaultMigrations, openDatabase } from "@dibao/db";
 import { buildServer } from "./app.js";
+import {
+  DEFAULT_WORKER_CORE_MIGRATION_WAIT_MS,
+  waitForCoreMigrationsReady,
+  WorkerCoreMigrationWaitTimeoutError
+} from "./core-migration-wait.js";
 import { DEFAULT_FOREGROUND_QUIET_WINDOW_MS } from "./foreground-activity.js";
 
-await waitForCoreMigrationsReady();
+try {
+  await waitForWorkerCoreMigrationsReady();
+} catch (error) {
+  if (error instanceof WorkerCoreMigrationWaitTimeoutError) {
+    console.error(
+      "[dibao] worker failed waiting for core migrations",
+      JSON.stringify(
+        {
+          reason: error.reason,
+          message: error.message,
+          timeoutMs: error.details.timeoutMs,
+          pollIntervalMs: error.details.pollIntervalMs,
+          readiness: error.details.readiness,
+          issueHint:
+            "Core database migration did not finish before the worker timeout. Please attach this log and /api/system/upgrade/status output when filing an issue."
+        },
+        null,
+        2
+      )
+    );
+  } else {
+    console.error("[dibao] worker failed before startup", error);
+  }
+  process.exit(1);
+}
 
 const server = buildServer({
   backgroundJobs: true,
@@ -87,64 +114,28 @@ function parseOptionalPositiveInteger(value: string | undefined): number | undef
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-async function waitForCoreMigrationsReady(): Promise<void> {
+async function waitForWorkerCoreMigrationsReady(): Promise<void> {
   const databasePath = process.env.DIBAO_DATABASE_PATH ?? "/data/dibao.sqlite";
   if (databasePath === ":memory:") {
     return;
   }
 
-  const timeoutMs =
-    parseOptionalPositiveInteger(process.env.DIBAO_WORKER_CORE_MIGRATION_WAIT_MS) ?? 10 * 60_000;
-  const deadline = Date.now() + timeoutMs;
-  const latestVersion = loadDefaultMigrations().at(-1)?.version ?? null;
-  while (Date.now() < deadline) {
-    if (latestVersion && coreMigrationVersionApplied(databasePath, latestVersion)) {
-      return;
+  await waitForCoreMigrationsReady({
+    databasePath,
+    timeoutMs:
+      parseOptionalPositiveInteger(process.env.DIBAO_WORKER_CORE_MIGRATION_WAIT_MS) ??
+      DEFAULT_WORKER_CORE_MIGRATION_WAIT_MS,
+    onWait: (readiness) => {
+      console.info(
+        "[dibao] worker waiting for core migrations before starting background jobs",
+        JSON.stringify(readiness)
+      );
+    },
+    onReady: (readiness) => {
+      console.info(
+        "[dibao] worker observed completed core migrations",
+        JSON.stringify(readiness)
+      );
     }
-    await delay(1_000);
-  }
-
-  console.warn("[dibao] worker starting before core migration wait observed latest schema");
-}
-
-function coreMigrationVersionApplied(databasePath: string, version: string): boolean {
-  if (!existsSync(databasePath)) {
-    return false;
-  }
-
-  let db: ReturnType<typeof openDatabase> | null = null;
-  try {
-    db = openDatabase(databasePath, {
-      loadSqliteVec: false,
-      migrate: false
-    });
-    const table = db
-      .prepare(
-        `
-          select 1 as ok
-          from sqlite_master
-          where type = 'table'
-            and name = 'schema_migrations'
-        `
-      )
-      .get() as { ok: number } | undefined;
-    if (!table) {
-      return false;
-    }
-
-    const row = db
-      .prepare("select 1 as ok from schema_migrations where version = ?")
-      .get(version) as { ok: number } | undefined;
-    return !!row;
-  } catch {
-    return false;
-  } finally {
-    db?.close();
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
   });
 }
