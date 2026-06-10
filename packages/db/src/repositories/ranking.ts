@@ -333,21 +333,37 @@ export class SqliteRankingRepository implements RankingRepository {
       articleIds === undefined && input.afterArticleId ? "and a.id > ?" : "";
     const limit = input.limit === undefined ? null : normalizeCandidateLimit(input.limit);
     const limitClause = limit === null ? "" : "limit ?";
-    const params: unknown[] = [input.embeddingIndexId ?? ""];
+    const filterParams: unknown[] = [];
     if (articleIds) {
-      params.push(...articleIds);
+      filterParams.push(...articleIds);
     } else if (input.afterArticleId) {
-      params.push(input.afterArticleId);
+      filterParams.push(input.afterArticleId);
     }
     if (limit !== null) {
-      params.push(limit);
+      filterParams.push(limit);
     }
 
     return (
       this.db
         .prepare(
           `
-            with event_stats as (
+            with eligible_articles as (
+              select a.id
+              from articles a
+              join feeds f on f.id = a.feed_id
+              left join article_states s on s.article_id = a.id
+              where a.deleted_at is null
+                and a.status != 'deleted'
+                and s.hidden_at is null
+                and s.not_interested_at is null
+                and f.deleted_at is null
+                and f.enabled = 1
+                ${articleFilter}
+                ${cursorFilter}
+              order by a.id
+              ${limitClause}
+            ),
+            event_stats as (
               select
                 be.article_id,
                 coalesce(sum(
@@ -380,6 +396,7 @@ export class SqliteRankingRepository implements RankingRepository {
                 ), 0) as behaviorProjectionScore,
                 count(*) as behaviorEventCount
               from behavior_events be
+              join eligible_articles ea on ea.id = be.article_id
               left join article_states s on s.article_id = be.article_id
               group by be.article_id
             )
@@ -430,7 +447,8 @@ export class SqliteRankingRepository implements RankingRepository {
                 when ae.vector_blob is null then 'embedding_pending'
                 else 'ready'
               end as embeddingStatus
-            from articles a
+            from eligible_articles ea
+            join articles a on a.id = ea.id
             join feeds f on f.id = a.feed_id
             left join article_states s on s.article_id = a.id
             left join article_contents ac on ac.article_id = a.id
@@ -439,19 +457,10 @@ export class SqliteRankingRepository implements RankingRepository {
             left join article_embeddings ae
               on ae.article_id = a.id
              and ae.embedding_index_id = ?
-            where a.deleted_at is null
-              and a.status != 'deleted'
-              and s.hidden_at is null
-              and s.not_interested_at is null
-              and f.deleted_at is null
-              and f.enabled = 1
-              ${articleFilter}
-              ${cursorFilter}
             order by a.id
-            ${limitClause}
           `
         )
-        .all(input.embeddingIndexId ?? "", ...params) as ArticleRankingCandidateDbRow[]
+        .all(...filterParams, input.embeddingIndexId ?? "", input.embeddingIndexId ?? "") as ArticleRankingCandidateDbRow[]
     ).map(mapCandidate);
   }
 

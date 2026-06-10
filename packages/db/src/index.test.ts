@@ -1788,6 +1788,16 @@ describe("db package", () => {
         candidate?.behaviorProjectionScore ?? 0
       );
 
+      const pagedCandidate = rankings.listCandidates({
+        afterArticleId: "article_like_rank",
+        limit: 1
+      })[0];
+      expect(pagedCandidate).toMatchObject({
+        articleId: "article_rank",
+        behaviorProjectionScore: 0.12,
+        behaviorEventCount: 1
+      });
+
       rankings.upsertBaseScore({
         articleId: "article_rank",
         score: 0.75,

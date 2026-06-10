@@ -1360,6 +1360,28 @@ describe("job runner foundation", () => {
     expect(drained).toBe(1);
   });
 
+  it("feed refresh scheduler honors an initial startup delay", async () => {
+    let enqueued = 0;
+    const scheduler = new FeedRefreshScheduler({
+      refreshJobs: {
+        enqueueDueFeeds: () => {
+          enqueued += 1;
+          return [minimalJob("job_delayed_startup")];
+        }
+      },
+      intervalMs: 60_000,
+      initialDelayMs: 25
+    });
+
+    scheduler.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(enqueued).toBe(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    scheduler.stop();
+    expect(enqueued).toBe(1);
+  });
+
   it("feed refresh jobs enqueue only feeds due for refresh", () => {
     const db = createEmptyDatabase();
     const feeds = new SqliteFeedRepository(db);

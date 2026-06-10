@@ -860,6 +860,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS;
   const foregroundQuietWindowMs = Math.max(0, options.foregroundQuietWindowMs ?? 0);
   const backgroundStartupDelayMs = Math.max(0, options.backgroundStartupDelayMs ?? 0);
+  const backgroundInitialTickDelayMs = backgroundJobs
+    ? Math.max(backgroundStartupDelayMs, foregroundQuietWindowMs)
+    : 0;
   let lastForegroundActivityWriteAt = 0;
   let maintenanceTickTimer: NodeJS.Timeout | null = null;
   let maintenanceInitialTickTimer: NodeJS.Timeout | null = null;
@@ -938,12 +941,14 @@ export function buildServer(options: BuildServerOptions = {}) {
     refreshJobs: feedRefreshJobService,
     runner: jobRunner,
     intervalMs: options.feedRefreshIntervalMs ?? DEFAULT_FEED_REFRESH_INTERVAL_MS,
+    initialDelayMs: backgroundInitialTickDelayMs,
     onError: (error) => app.log.error(error)
   });
   const retentionCleanupScheduler = new RetentionCleanupScheduler({
     cleanupJobs: retentionCleanupJobService,
     runner: jobRunner,
     intervalMs: options.retentionCleanupIntervalMs ?? DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
+    initialDelayMs: backgroundInitialTickDelayMs,
     onError: (error) => app.log.error(error)
   });
   const jobHistoryCleanupScheduler = new JobHistoryCleanupScheduler({
@@ -951,6 +956,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     retentionDays: options.jobHistoryRetentionDays ?? DEFAULT_JOB_HISTORY_RETENTION_DAYS,
     intervalMs:
       options.jobHistoryCleanupIntervalMs ?? DEFAULT_JOB_HISTORY_CLEANUP_INTERVAL_MS,
+    initialDelayMs: backgroundInitialTickDelayMs,
     now: options.now,
     onCleanup: (result) => {
       if (result.deleted > 0) {
@@ -967,6 +973,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     decayJobs: profileDecayJobService,
     runner: jobRunner,
     intervalMs: options.profileDecayIntervalMs ?? DEFAULT_PROFILE_DECAY_INTERVAL_MS,
+    initialDelayMs: backgroundInitialTickDelayMs,
     onError: (error) => app.log.error(error)
   });
   const recommendationMaintenanceScheduler = new RecommendationMaintenanceScheduler({
@@ -979,6 +986,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     intervalMs:
       options.recommendationMaintenanceIntervalMs ??
       DEFAULT_RECOMMENDATION_MAINTENANCE_SCHEDULER_INTERVAL_MS,
+    initialDelayMs: backgroundInitialTickDelayMs,
     now: options.now,
     onError: (error) => app.log.error(error)
   });
@@ -1216,7 +1224,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       maintenanceInitialTickTimer = setTimeout(() => {
         maintenanceInitialTickTimer = null;
         emitMaintenanceTick();
-      }, 0);
+      }, backgroundInitialTickDelayMs);
       maintenanceInitialTickTimer.unref?.();
       maintenanceTickTimer = setInterval(emitMaintenanceTick, intervalMs);
       maintenanceTickTimer.unref?.();
