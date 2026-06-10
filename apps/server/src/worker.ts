@@ -52,8 +52,12 @@ const server = buildServer({
   ),
   jobRunnerIntervalMs: parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_INTERVAL_MS),
   jobRunnerMaxJobsPerDrain:
-    parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_MAX_JOBS_PER_DRAIN) ?? 5,
+    parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_MAX_JOBS_PER_DRAIN) ?? 1,
   foregroundQuietWindowMs:
+    parseOptionalPositiveInteger(process.env.DIBAO_FOREGROUND_QUIET_WINDOW_MS) ??
+    DEFAULT_FOREGROUND_QUIET_WINDOW_MS,
+  backgroundStartupDelayMs:
+    parseOptionalPositiveInteger(process.env.DIBAO_BACKGROUND_STARTUP_DELAY_MS) ??
     parseOptionalPositiveInteger(process.env.DIBAO_FOREGROUND_QUIET_WINDOW_MS) ??
     DEFAULT_FOREGROUND_QUIET_WINDOW_MS,
   rankingTargetChunkMs: parseOptionalPositiveInteger(process.env.DIBAO_RANKING_TARGET_CHUNK_MS)
@@ -70,6 +74,10 @@ try {
     {
       processRole: "worker",
       foregroundQuietWindowMs:
+        parseOptionalPositiveInteger(process.env.DIBAO_FOREGROUND_QUIET_WINDOW_MS) ??
+        DEFAULT_FOREGROUND_QUIET_WINDOW_MS,
+      backgroundStartupDelayMs:
+        parseOptionalPositiveInteger(process.env.DIBAO_BACKGROUND_STARTUP_DELAY_MS) ??
         parseOptionalPositiveInteger(process.env.DIBAO_FOREGROUND_QUIET_WINDOW_MS) ??
         DEFAULT_FOREGROUND_QUIET_WINDOW_MS
     },

@@ -91,17 +91,17 @@ export class SqliteFeedRepository implements FeedRepository {
       params.push(input.enabled ? 1 : 0);
     }
 
-    return (
-      this.db
-        .prepare(
-          `
-            ${baseFeedSelect()}
-            where ${conditions.join(" and ")}
-            order by title collate nocase, id
-          `
-        )
-        .all(...params) as FeedDbRow[]
-    ).map((row) => this.mapFeed(row));
+    const rows = this.db
+      .prepare(
+        `
+          ${baseFeedSelect()}
+          where ${conditions.join(" and ")}
+          order by title collate nocase, id
+        `
+      )
+      .all(...params) as FeedDbRow[];
+    const refreshIntervals = this.refreshIntervalsForFeeds(rows);
+    return rows.map((row) => this.mapFeed(row, refreshIntervals.get(row.id)));
   }
 
   listActive(): FeedRow[] {
@@ -253,7 +253,7 @@ export class SqliteFeedRepository implements FeedRepository {
     return this.db.prepare(`${baseFeedSelect()} where id = ? and deleted_at is null`);
   }
 
-  private mapFeed(row: FeedDbRow): FeedRow {
+  private mapFeed(row: FeedDbRow, refreshIntervalMs?: number): FeedRow {
     return {
       id: row.id,
       folderId: row.folderId,
@@ -269,22 +269,30 @@ export class SqliteFeedRepository implements FeedRepository {
       lastError: row.lastError,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      nextRefreshAt: this.nextRefreshAtForFeed(row)
+      nextRefreshAt: this.nextRefreshAtForFeed(row, refreshIntervalMs)
     };
   }
 
-  private nextRefreshAtForFeed(feed: FeedDbRow): number | null {
+  private nextRefreshAtForFeed(feed: FeedDbRow, refreshIntervalMs?: number): number | null {
     const baseline = feed.lastFetchedAt ?? feed.lastSuccessAt;
     if (baseline === null) {
       return null;
     }
 
-    return baseline + this.refreshIntervalForFeed(feed);
+    return baseline + (refreshIntervalMs ?? this.refreshIntervalForFeed(feed));
+  }
+
+  private configuredRefreshIntervalForFeed(feed: FeedDbRow): number | null {
+    if (feed.fetchIntervalMinutes !== DEFAULT_FEED_REFRESH_TTL_MINUTES) {
+      return Math.max(1, Math.trunc(feed.fetchIntervalMinutes)) * 60 * 1000;
+    }
+    return null;
   }
 
   private refreshIntervalForFeed(feed: FeedDbRow): number {
-    if (feed.fetchIntervalMinutes !== DEFAULT_FEED_REFRESH_TTL_MINUTES) {
-      return Math.max(1, Math.trunc(feed.fetchIntervalMinutes)) * 60 * 1000;
+    const configured = this.configuredRefreshIntervalForFeed(feed);
+    if (configured !== null) {
+      return configured;
     }
 
     const rows = this.db
@@ -328,6 +336,98 @@ export class SqliteFeedRepository implements FeedRepository {
       MAX_FEED_REFRESH_TTL_MS
     );
   }
+
+  private refreshIntervalsForFeeds(feeds: FeedDbRow[]): Map<string, number> {
+    const intervals = new Map<string, number>();
+    const defaultIntervalFeeds: FeedDbRow[] = [];
+
+    for (const feed of feeds) {
+      const configured = this.configuredRefreshIntervalForFeed(feed);
+      if (configured !== null) {
+        intervals.set(feed.id, configured);
+      } else {
+        defaultIntervalFeeds.push(feed);
+      }
+    }
+
+    if (defaultIntervalFeeds.length === 0) {
+      return intervals;
+    }
+
+    const placeholders = defaultIntervalFeeds.map(() => "(?)").join(", ");
+    const rows = this.db
+      .prepare(
+        `
+          with feed_ids(id) as (
+            values ${placeholders}
+          ),
+          ranked_articles as (
+            select
+              a.feed_id as feedId,
+              coalesce(a.published_at, a.discovered_at) as timestamp,
+              row_number() over (
+                partition by a.feed_id
+                order by coalesce(a.published_at, a.discovered_at) desc
+              ) as rn
+            from articles a
+            join feed_ids fi on fi.id = a.feed_id
+            where a.deleted_at is null
+              and a.status != 'deleted'
+              and coalesce(a.published_at, a.discovered_at) is not null
+          )
+          select feedId, timestamp
+          from ranked_articles
+          where rn <= ?
+          order by feedId, rn
+        `
+      )
+      .all(...defaultIntervalFeeds.map((feed) => feed.id), AUTO_TTL_SAMPLE_SIZE) as Array<{
+        feedId: string;
+        timestamp: number | null;
+      }>;
+
+    const timestampsByFeed = new Map<string, number[]>();
+    for (const row of rows) {
+      if (typeof row.timestamp !== "number") {
+        continue;
+      }
+      const timestamps = timestampsByFeed.get(row.feedId) ?? [];
+      timestamps.push(row.timestamp);
+      timestampsByFeed.set(row.feedId, timestamps);
+    }
+
+    for (const feed of defaultIntervalFeeds) {
+      intervals.set(feed.id, refreshIntervalForTimestamps(timestampsByFeed.get(feed.id) ?? []));
+    }
+
+    return intervals;
+  }
+}
+
+function refreshIntervalForTimestamps(timestamps: number[]): number {
+  if (timestamps.length < 2) {
+    return DEFAULT_FEED_REFRESH_TTL_MS;
+  }
+
+  let totalInterval = 0;
+  let intervalCount = 0;
+  for (let index = 0; index < timestamps.length - 1; index += 1) {
+    const interval = timestamps[index] - timestamps[index + 1];
+    if (interval > 0) {
+      totalInterval += interval;
+      intervalCount += 1;
+    }
+  }
+
+  if (intervalCount === 0) {
+    return DEFAULT_FEED_REFRESH_TTL_MS;
+  }
+
+  const averageInterval = totalInterval / intervalCount;
+  return Math.min(
+    Math.max(Math.round(averageInterval), DEFAULT_FEED_REFRESH_TTL_MS),
+    MAX_FEED_REFRESH_TTL_MS
+  );
 }
 
 function baseFeedSelect(): string {

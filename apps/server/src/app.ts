@@ -448,6 +448,7 @@ type BuildServerOptions = {
   recordForegroundActivity?: boolean;
   foregroundActivityWriteThrottleMs?: number;
   foregroundQuietWindowMs?: number;
+  backgroundStartupDelayMs?: number;
   rankingTargetChunkMs?: number;
 };
 
@@ -858,9 +859,12 @@ export function buildServer(options: BuildServerOptions = {}) {
     options.foregroundActivityWriteThrottleMs ??
     DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS;
   const foregroundQuietWindowMs = Math.max(0, options.foregroundQuietWindowMs ?? 0);
+  const backgroundStartupDelayMs = Math.max(0, options.backgroundStartupDelayMs ?? 0);
   let lastForegroundActivityWriteAt = 0;
   let maintenanceTickTimer: NodeJS.Timeout | null = null;
   let maintenanceInitialTickTimer: NodeJS.Timeout | null = null;
+  let backgroundStartupTimer: NodeJS.Timeout | null = null;
+  let backgroundServicesStarted = false;
 
   const jobRunner = new JobRunner({
     jobs,
@@ -1165,6 +1169,29 @@ export function buildServer(options: BuildServerOptions = {}) {
     if (!backgroundJobs) {
       return;
     }
+    if (backgroundStartupTimer || backgroundServicesStarted) {
+      return;
+    }
+    if (backgroundStartupDelayMs > 0) {
+      backgroundStartupTimer = setTimeout(() => {
+        backgroundStartupTimer = null;
+        startBackgroundServicesNow();
+      }, backgroundStartupDelayMs);
+      backgroundStartupTimer.unref?.();
+      app.log.info(
+        { delayMs: backgroundStartupDelayMs },
+        "background services waiting for startup quiet window"
+      );
+      return;
+    }
+    startBackgroundServicesNow();
+  }
+
+  function startBackgroundServicesNow(): void {
+    if (backgroundServicesStarted) {
+      return;
+    }
+    backgroundServicesStarted = true;
     jobRunner.start();
     feedRefreshScheduler.start();
     retentionCleanupScheduler.start();
@@ -1239,6 +1266,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     if (maintenanceInitialTickTimer) {
       clearTimeout(maintenanceInitialTickTimer);
       maintenanceInitialTickTimer = null;
+    }
+    if (backgroundStartupTimer) {
+      clearTimeout(backgroundStartupTimer);
+      backgroundStartupTimer = null;
     }
   });
 
