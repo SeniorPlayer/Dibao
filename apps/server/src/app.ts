@@ -2999,14 +2999,10 @@ function getRecommendationStatus(options: {
   const activeRankContext = options.rankingService.getActiveRankContext();
   const coverage = needsDiagnosticIndex
     ? coverageFor(activeIndex as EmbeddingIndexListRow | null)
-    : includeClusterItems
-      ? lightweightCoverageFor(options.db, activeIndex)
-      : summaryCoverageFor(activeIndex);
-  const behaviorCounts = summaryOnly
-    ? {}
-    : Object.fromEntries(
-        options.profiles.countBehaviorEvents().map((row) => [row.eventType, row.count])
-      );
+    : lightweightCoverageFor(options.db, activeIndex);
+  const behaviorCounts = Object.fromEntries(
+    options.profiles.countBehaviorEvents().map((row) => [row.eventType, row.count])
+  );
   const clusters = options.profiles.countClusters({
     ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
   });
@@ -3051,24 +3047,13 @@ function getRecommendationStatus(options: {
   const familySummary = summaryOnly
     ? emptyRecommendationFamilySummary()
     : options.interestFamilies.listFamilySummary(activeIndex?.id ?? null, 8);
-  const rankedArticles = summaryOnly
-    ? { base: 0, active: 0 }
-    : options.rankings.countRankedArticles({ activeRankContext });
-  const lastProfileUpdate = summaryOnly
-    ? null
-    : options.profiles.getLastProfileUpdate({
-        ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
-      });
-  const lastRankingUpdate = summaryOnly
-    ? null
-    : options.rankings.getLastRankingUpdate({ activeRankContext });
-  const profileSignals = summaryOnly
-    ? {
-        signalCount: PROFILE_WARMUP_MIN_SIGNAL_COUNT,
-        articleCount: PROFILE_WARMUP_MIN_SIGNAL_ARTICLE_COUNT
-      }
-    : options.profiles.countProfileSignals();
-  const profileLearning = summaryOnly ? false : isProfileLearning(profileSignals, clusters);
+  const rankedArticles = options.rankings.countRankedArticles({ activeRankContext });
+  const lastProfileUpdate = options.profiles.getLastProfileUpdate({
+    ...(activeIndex ? { embeddingIndexId: activeIndex.id } : {})
+  });
+  const lastRankingUpdate = options.rankings.getLastRankingUpdate({ activeRankContext });
+  const profileSignals = options.profiles.countProfileSignals();
+  const profileLearning = isProfileLearning(profileSignals, clusters);
   const warnings = recommendationWarnings({
     activeProvider,
     activeIndex,
@@ -3078,7 +3063,8 @@ function getRecommendationStatus(options: {
   const mode = recommendationMode({
     activeProvider,
     activeIndex,
-    coverage
+    coverage,
+    rankedArticles
   });
 
   return {
@@ -3928,26 +3914,6 @@ function coverageFor(index: EmbeddingIndexListRow | null): RecommendationCoverag
   };
 }
 
-function summaryCoverageFor(index: EmbeddingIndexRow | null): RecommendationCoverage {
-  if (!index) {
-    return coverageFor(null);
-  }
-
-  return {
-    candidateCount: 1,
-    eligibleArticleCount: 1,
-    missingEmbeddingCount: 1,
-    staleEmbeddingCount: 0,
-    coveredArticleCount: 0,
-    embeddingCount: 0,
-    coverageRatio: 0,
-    pendingJobs: 0,
-    failedJobs: 0,
-    lastFailedAt: null,
-    lastError: null
-  };
-}
-
 function emptyRecommendationFamilySummary() {
   return {
     positive: 0,
@@ -3962,6 +3928,7 @@ function recommendationMode(input: {
   activeProvider: EmbeddingProviderRow | null;
   activeIndex: EmbeddingIndexRow | null;
   coverage: RecommendationCoverage;
+  rankedArticles: { base: number; active: number };
 }): RecommendationMode {
   if (!input.activeProvider || !input.activeIndex) {
     return "baseline";
@@ -3975,7 +3942,8 @@ function recommendationMode(input: {
     return "degraded";
   }
 
-  if (input.coverage.pendingJobs > 0 || input.coverage.coverageRatio < 1) {
+  const hasUsableRanking = input.rankedArticles.base + input.rankedArticles.active > 0;
+  if (!hasUsableRanking || input.coverage.coverageRatio < STOPPED_COVERAGE_THRESHOLD) {
     return "embedding";
   }
 

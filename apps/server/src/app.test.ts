@@ -3734,6 +3734,21 @@ describe("server API vertical slice", () => {
       expect(lightStatus.json()).toMatchObject({
         data: {
           mode: "embedding",
+          coverage: {
+            candidateCount: 2,
+            eligibleArticleCount: 2,
+            missingEmbeddingCount: 1,
+            staleEmbeddingCount: 0,
+            embeddingCount: 1,
+            coverageRatio: 0.5,
+            pendingJobs: 1,
+            failedJobs: 0,
+            lastFailedAt: null,
+            lastError: null
+          },
+          behaviorCounts: {
+            favorite: 1
+          },
           clusters: {
             positive: 1,
             negative: 0,
@@ -3743,7 +3758,13 @@ describe("server API vertical slice", () => {
               topFamilies: []
             },
             items: []
-          }
+          },
+          rankedArticles: {
+            base: 2,
+            active: 0
+          },
+          lastProfileUpdate: "1970-01-01T00:00:06.150Z",
+          lastRankingUpdate: "1970-01-01T00:00:04.000Z"
         }
       });
       expect(lightStatus.body).not.toContain("cluster_overfit_probe");
@@ -3845,6 +3866,87 @@ describe("server API vertical slice", () => {
           details: {
             field: "clusterItemLimit"
           }
+        }
+      });
+    } finally {
+      await app.close();
+      db.close();
+    }
+  });
+
+  it("reports cached ranking as personalized while embedding backfill continues", async () => {
+    const db = createFixtureDatabase();
+    const { index } = createActiveEmbeddingDiagnosticsFixture(db, {
+      providerTestStatus: "success"
+    });
+    const jobs = new SqliteJobRepository(db);
+    jobs.enqueue({
+      id: "job_embedding_followup",
+      type: "embedding_generate",
+      payloadJson: JSON.stringify({
+        embeddingIndexId: index.id,
+        articleIds: ["article_recent"]
+      }),
+      now: 6000
+    });
+    const vectors = new SqliteVecVectorStore(db);
+    vectors.upsertArticleVector({
+      articleId: "article_recommended",
+      embeddingIndexId: index.id,
+      vector: [1, 0, 0],
+      contentHash: "article_recommended:2000",
+      now: 6100
+    });
+    vectors.upsertArticleVector({
+      articleId: "article_recent",
+      embeddingIndexId: index.id,
+      vector: [0, 1, 0],
+      contentHash: "article_recent:3000",
+      now: 6100
+    });
+    const activeRankContext = "rec_v3:embedding:cocoon_5:schema_3";
+    insertRankForContext(db, {
+      articleId: "article_recommended",
+      rankContext: activeRankContext,
+      embeddingIndexId: index.id,
+      score: 0.9,
+      calculatedAt: 6200
+    });
+    insertRankForContext(db, {
+      articleId: "article_recent",
+      rankContext: activeRankContext,
+      embeddingIndexId: index.id,
+      score: 0.7,
+      calculatedAt: 6200
+    });
+    const app = buildServer({ db, logger: false });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/recommendation/status?includeClusterItems=false"
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toMatchObject({
+        data: {
+          mode: "personalized",
+          coverage: {
+            candidateCount: 2,
+            coveredArticleCount: 2,
+            coverageRatio: 1,
+            pendingJobs: 1
+          },
+          rankedArticles: {
+            active: 2
+          },
+          lastRankingUpdate: "1970-01-01T00:00:06.200Z",
+          warnings: expect.arrayContaining([
+            {
+              code: "EMBEDDING_PENDING",
+              message: "Embedding generation is still running or incomplete for the active index."
+            }
+          ])
         }
       });
     } finally {
