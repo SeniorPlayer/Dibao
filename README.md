@@ -245,6 +245,7 @@ Dibao 采用 [Business Source License 1.1](./LICENSE.md)（`BUSL-1.1`）实现 s
 | `DIBAO_DATABASE_PATH` | `/data/dibao.sqlite` | SQLite 数据库路径。 |
 | `DIBAO_COOKIE_SECURE` | `false` | HTTP/LAN 自托管可保持 `false`；HTTPS 反向代理后建议设为 `true`。 |
 | `DIBAO_BACKGROUND_JOBS` | `true` | Docker 默认启动独立 worker 进程执行后台任务；设为 `false` 可关闭 worker。直接运行 server 进程时，只有设为 `true` 才会在该进程内执行后台任务。 |
+| `DIBAO_JOB_RUNNER_MAX_JOBS_PER_DRAIN` | `5` | worker 每轮最多处理的 due jobs 数量，避免后台任务被单轮无限 drain，也避免吞吐退化到一次只跑一个 job。 |
 | `DIBAO_FOREGROUND_QUIET_WINDOW_MS` | `30000` | worker 检测到前台使用后的低优先级任务暂停窗口。 |
 | `DIBAO_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS` | `2000` | HTTP 进程写入前台活动时间的节流间隔。 |
 | `DIBAO_RANKING_TARGET_CHUNK_MS` | `2000` | 排序重算 chunk 的目标耗时，worker 会据此调整后续 chunk 大小。 |

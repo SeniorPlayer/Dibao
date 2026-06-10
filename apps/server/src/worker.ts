@@ -52,7 +52,7 @@ const server = buildServer({
   ),
   jobRunnerIntervalMs: parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_INTERVAL_MS),
   jobRunnerMaxJobsPerDrain:
-    parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_MAX_JOBS_PER_DRAIN) ?? 1,
+    parseOptionalPositiveInteger(process.env.DIBAO_JOB_RUNNER_MAX_JOBS_PER_DRAIN) ?? 5,
   foregroundQuietWindowMs:
     parseOptionalPositiveInteger(process.env.DIBAO_FOREGROUND_QUIET_WINDOW_MS) ??
     DEFAULT_FOREGROUND_QUIET_WINDOW_MS,

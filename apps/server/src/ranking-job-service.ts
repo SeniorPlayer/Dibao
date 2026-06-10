@@ -6,10 +6,11 @@ import type { ArticleRankingRecalculator } from "./ranking-service.js";
 
 export const RANKING_RECALCULATE_JOB_TYPE = "ranking_recalculate" as const;
 export const RANKING_RECALCULATE_ARTICLE_LIMIT = 500;
-export const RANKING_RECALCULATE_CHUNK_SIZE = 5;
-export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 60_000;
-export const RANKING_RECALCULATE_TARGET_CHUNK_MS = 750;
-export const RANKING_RECALCULATE_MIN_CHUNK_SIZE = 1;
+export const RANKING_RECALCULATE_CHUNK_SIZE = 50;
+export const RANKING_RECALCULATE_MAX_CHUNK_SIZE = 200;
+export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 5_000;
+export const RANKING_RECALCULATE_TARGET_CHUNK_MS = 2_000;
+export const RANKING_RECALCULATE_MIN_CHUNK_SIZE = 10;
 
 export type RankingRecalculateJobPayload = {
   articleIds?: string[];
@@ -104,10 +105,7 @@ export class RankingRecalculateJobService {
     if (payload.articleIds) {
       this.options.ranking.recalculateArticles(payload.articleIds);
     } else {
-      const limit = Math.min(
-        payload.limit ?? RANKING_RECALCULATE_CHUNK_SIZE,
-        RANKING_RECALCULATE_CHUNK_SIZE
-      );
+      const limit = normalizeRankingChunkLimit(payload.limit);
       const startedAt = performance.now();
       const result = this.options.ranking.recalculateChunk
         ? this.options.ranking.recalculateChunk({
@@ -222,17 +220,39 @@ function randomJobId(): string {
 }
 
 function adaptiveNextLimit(limit: number, durationMs: number, targetMs: number): number {
+  const normalizedLimit = normalizeRankingChunkLimit(limit);
   if (targetMs <= 0) {
-    return limit;
+    return normalizedLimit;
   }
 
-  if (durationMs > targetMs * 1.25 && limit > RANKING_RECALCULATE_MIN_CHUNK_SIZE) {
-    return Math.max(RANKING_RECALCULATE_MIN_CHUNK_SIZE, Math.floor(limit / 2));
+  if (
+    durationMs > targetMs * 1.25 &&
+    normalizedLimit > RANKING_RECALCULATE_MIN_CHUNK_SIZE
+  ) {
+    return normalizeRankingChunkLimit(Math.floor(normalizedLimit / 2));
   }
 
-  if (durationMs < targetMs * 0.35 && limit < RANKING_RECALCULATE_CHUNK_SIZE) {
-    return Math.min(RANKING_RECALCULATE_CHUNK_SIZE, limit + RANKING_RECALCULATE_MIN_CHUNK_SIZE);
+  if (
+    durationMs < targetMs * 0.35 &&
+    normalizedLimit < RANKING_RECALCULATE_MAX_CHUNK_SIZE
+  ) {
+    return normalizeRankingChunkLimit(
+      Math.max(
+        normalizedLimit + RANKING_RECALCULATE_MIN_CHUNK_SIZE,
+        Math.ceil(normalizedLimit * 1.5)
+      )
+    );
   }
 
-  return limit;
+  return normalizedLimit;
+}
+
+function normalizeRankingChunkLimit(limit: number | undefined): number {
+  const normalized = Number.isInteger(limit) && limit !== undefined
+    ? limit
+    : RANKING_RECALCULATE_CHUNK_SIZE;
+  return Math.max(
+    RANKING_RECALCULATE_MIN_CHUNK_SIZE,
+    Math.min(RANKING_RECALCULATE_MAX_CHUNK_SIZE, normalized)
+  );
 }

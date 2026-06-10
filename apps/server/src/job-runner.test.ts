@@ -44,6 +44,8 @@ import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_CHUNK_DELAY_MS,
   RANKING_RECALCULATE_CHUNK_SIZE,
+  RANKING_RECALCULATE_MAX_CHUNK_SIZE,
+  RANKING_RECALCULATE_MIN_CHUNK_SIZE,
   RANKING_RECALCULATE_JOB_TYPE
 } from "./ranking-job-service.js";
 import { RecommendationRankingService } from "./ranking-service.js";
@@ -1569,7 +1571,8 @@ describe("job runner foundation", () => {
           }
         },
         jobIdFactory: () => `job_rank_${calls.length}_${randomFixtureId()}`,
-        now: () => now
+        now: () => now,
+        targetChunkMs: 0
       });
       rankingJobs.enqueueAll();
       const runner = new JobRunner({
@@ -1597,7 +1600,7 @@ describe("job runner foundation", () => {
     }
   });
 
-  it("clamps legacy full ranking chunks to the current chunk size", async () => {
+  it("clamps oversized legacy full ranking chunks to the maximum chunk size", async () => {
     const db = createEmptyDatabase();
     try {
       const jobs = new SqliteJobRepository(db);
@@ -1647,12 +1650,69 @@ describe("job runner foundation", () => {
 
       await expect(runner.drainDue()).resolves.toBe(1);
       expect(calls).toEqual([
-        { cursor: "cursor_legacy", limit: RANKING_RECALCULATE_CHUNK_SIZE }
+        { cursor: "cursor_legacy", limit: RANKING_RECALCULATE_MAX_CHUNK_SIZE }
       ]);
       expect(JSON.parse(jobs.findById("job_rank_legacy_next")?.payloadJson ?? "{}")).toEqual({
         cursor: "cursor_legacy_next",
-        limit: RANKING_RECALCULATE_CHUNK_SIZE
+        limit: RANKING_RECALCULATE_MAX_CHUNK_SIZE
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("raises stale tiny full ranking chunk limits to the minimum chunk size", async () => {
+    const db = createEmptyDatabase();
+    try {
+      const jobs = new SqliteJobRepository(db);
+      const calls: Array<{ cursor: string | null; limit: number }> = [];
+      const rankingJobs = new RankingRecalculateJobService({
+        jobs,
+        ranking: {
+          recalculateArticle() {
+            return 1;
+          },
+          recalculateArticles(articleIds: string[]) {
+            return articleIds.length;
+          },
+          recalculateAll() {
+            return 0;
+          },
+          recalculateChunk(input: { cursor?: string | null; limit: number }) {
+            calls.push({
+              cursor: input.cursor ?? null,
+              limit: input.limit
+            });
+            return {
+              processed: input.limit,
+              nextCursor: null
+            };
+          }
+        },
+        jobIdFactory: () => "job_rank_tiny_next",
+        now: () => 1000
+      });
+      jobs.enqueue({
+        id: "job_rank_tiny",
+        type: RANKING_RECALCULATE_JOB_TYPE,
+        payloadJson: JSON.stringify({ cursor: "cursor_tiny", limit: 1 }),
+        maxAttempts: 2,
+        runAfter: 1000,
+        now: 1000
+      });
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [RANKING_RECALCULATE_JOB_TYPE]: (job) =>
+            rankingJobs.handleRankingRecalculateJob(job)
+        },
+        now: () => 1000
+      });
+
+      await expect(runner.drainDue()).resolves.toBe(1);
+      expect(calls).toEqual([
+        { cursor: "cursor_tiny", limit: RANKING_RECALCULATE_MIN_CHUNK_SIZE }
+      ]);
     } finally {
       db.close();
     }
