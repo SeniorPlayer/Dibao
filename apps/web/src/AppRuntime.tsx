@@ -58,6 +58,7 @@ import {
   articleListAfterStateUpdate,
   articleListWithKnownLocalStates,
   articlesVisibleForUnreadFilter,
+  shouldSkipPassiveIgnoreTelemetry,
   unreadCountWithKnownLocalStates,
   unreadCountAfterStateChange
 } from "./articleListState.js";
@@ -751,10 +752,6 @@ export function App() {
 
   useEffect(() => {
     selectedArticleIdRef.current = selectedArticleId;
-    if (selectedArticleId) {
-      ignoredArticleQueue.current = [];
-      ignoredArticleInFlightIds.current.clear();
-    }
   }, [selectedArticleId]);
 
   useEffect(() => {
@@ -2293,10 +2290,13 @@ export function App() {
     const interactionStatus = articleInteractionStatusForState(liveState);
 
     if (
-      selectedArticleIdRef.current !== null ||
-      openedArticleIds.current.has(item.articleId) ||
-      ignoredArticleIds.current.has(item.articleId) ||
-      interactionStatus !== "unseen"
+      shouldSkipPassiveIgnoreTelemetry({
+        articleId: item.articleId,
+        interactionStatus,
+        isAlreadyIgnored: ignoredArticleIds.current.has(item.articleId),
+        isOpened: openedArticleIds.current.has(item.articleId),
+        selectedArticleId: selectedArticleIdRef.current
+      })
     ) {
       return;
     }
@@ -2322,7 +2322,7 @@ export function App() {
         abortController ? { signal: abortController.signal } : undefined
       );
       if (
-        selectedArticleIdRef.current === null &&
+        selectedArticleIdRef.current !== item.articleId &&
         !openedArticleIds.current.has(item.articleId)
       ) {
         applyArticleState(item.articleId, result.state);

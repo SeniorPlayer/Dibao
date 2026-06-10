@@ -79,6 +79,21 @@ export function unreadCountWithKnownLocalStates<T extends { id: string; state: A
   }, current);
 }
 
+export function shouldSkipPassiveIgnoreTelemetry(input: {
+  articleId: string;
+  interactionStatus: ArticleInteractionStatus;
+  isAlreadyIgnored: boolean;
+  isOpened: boolean;
+  selectedArticleId: string | null;
+}): boolean {
+  return (
+    input.selectedArticleId === input.articleId ||
+    input.isOpened ||
+    input.isAlreadyIgnored ||
+    input.interactionStatus !== "unseen"
+  );
+}
+
 export function unreadCountAfterStateChange(
   current: number,
   previous: ArticleState,
