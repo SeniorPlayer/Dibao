@@ -1,3 +1,7 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   checksumSql,
   getAppliedMigrations,
@@ -49,9 +53,16 @@ export type CoreDatabaseMigrationStatus = {
 
 export type CoreDatabaseMigrationServiceOptions = {
   db: DibaoDatabase;
+  databasePath?: string;
   migrations?: readonly Migration[];
   now?: () => number;
   deferMs?: number;
+  runInChildProcess?: boolean;
+  runnerScriptPath?: string;
+  spawnMigrationProcess?: (input: {
+    scriptPath: string;
+    databasePath: string;
+  }) => ChildProcess;
   onError?: (error: unknown) => void;
 };
 
@@ -61,6 +72,7 @@ export class CoreDatabaseMigrationService {
   private readonly deferMs: number;
   private status: CoreDatabaseMigrationStatus | null = null;
   private running: Promise<CoreDatabaseMigrationStatus> | null = null;
+  private activeChild: ChildProcess | null = null;
 
   constructor(private readonly options: CoreDatabaseMigrationServiceOptions) {
     this.migrations = options.migrations ?? loadDefaultMigrations();
@@ -131,6 +143,12 @@ export class CoreDatabaseMigrationService {
     return this.startIfRequired();
   }
 
+  stop(): void {
+    if (this.activeChild && this.activeChild.exitCode === null && !this.activeChild.killed) {
+      this.activeChild.kill("SIGTERM");
+    }
+  }
+
   private async runMigration(initial: CoreDatabaseMigrationStatus): Promise<CoreDatabaseMigrationStatus> {
     if (this.deferMs > 0) {
       await delay(this.deferMs);
@@ -155,18 +173,13 @@ export class CoreDatabaseMigrationService {
     };
 
     try {
-      const appliedNow = runMigrations(this.options.db, this.migrations, this.now);
+      const appliedNow = await this.applyMigrations(pending);
       this.status = {
         ...this.status,
         state: "completed",
         blocking: false,
         step: "completed",
-        progress: {
-          current: appliedNow.length,
-          total: pending.length,
-          chunksProcessed: appliedNow.length,
-          percent: 1
-        },
+        progress: progressFor(pending.length, pending.length),
         finishedAt: this.now(),
         error: null,
         result: { appliedNow }
@@ -182,6 +195,156 @@ export class CoreDatabaseMigrationService {
         error: error instanceof Error ? error.message : String(error)
       };
       throw error;
+    }
+  }
+
+  private applyMigrations(pending: readonly Migration[]): Promise<AppliedMigration[]> {
+    if (this.shouldRunInChildProcess()) {
+      return this.applyMigrationsInChildProcess(pending);
+    }
+    return Promise.resolve(runMigrations(this.options.db, this.migrations, this.now));
+  }
+
+  private shouldRunInChildProcess(): boolean {
+    if (this.options.runInChildProcess !== undefined) {
+      return this.options.runInChildProcess;
+    }
+    return Boolean(this.options.databasePath && this.options.databasePath !== ":memory:");
+  }
+
+  private applyMigrationsInChildProcess(
+    pending: readonly Migration[]
+  ): Promise<AppliedMigration[]> {
+    const databasePath = this.options.databasePath;
+    if (!databasePath) {
+      return Promise.reject(new Error("databasePath is required for child-process migrations"));
+    }
+
+    const child = (
+      this.options.spawnMigrationProcess ?? spawnDefaultMigrationProcess
+    )({
+      scriptPath: this.options.runnerScriptPath ?? defaultRunnerScriptPath(),
+      databasePath: resolve(databasePath)
+    });
+    this.activeChild = child;
+
+    return new Promise((resolvePromise, reject) => {
+      let stdoutBuffer = "";
+      let stderr = "";
+      let finalAppliedNow: AppliedMigration[] | null = null;
+      let settled = false;
+
+      child.stdout?.on("data", (chunk) => {
+        stdoutBuffer += String(chunk);
+        const lines = stdoutBuffer.split(/\r?\n/);
+        stdoutBuffer = lines.pop() ?? "";
+        for (const line of lines) {
+          this.handleChildMessage(line, pending, (appliedNow) => {
+            finalAppliedNow = appliedNow;
+          });
+        }
+      });
+
+      child.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+
+      child.once("error", (error) => {
+        if (this.activeChild === child) {
+          this.activeChild = null;
+        }
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(error);
+      });
+
+      child.once("exit", (code, signal) => {
+        if (this.activeChild === child) {
+          this.activeChild = null;
+        }
+        if (stdoutBuffer.trim()) {
+          this.handleChildMessage(stdoutBuffer, pending, (appliedNow) => {
+            finalAppliedNow = appliedNow;
+          });
+          stdoutBuffer = "";
+        }
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (code === 0) {
+          resolvePromise(finalAppliedNow ?? []);
+          return;
+        }
+        reject(
+          new Error(
+            `Core migration runner exited with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}${
+              stderr.trim() ? `: ${stderr.trim()}` : ""
+            }`
+          )
+        );
+      });
+    });
+  }
+
+  private handleChildMessage(
+    line: string,
+    pending: readonly Migration[],
+    onCompleted: (appliedNow: AppliedMigration[]) => void
+  ): void {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    let message: CoreMigrationRunnerMessage;
+    try {
+      message = JSON.parse(trimmed) as CoreMigrationRunnerMessage;
+    } catch {
+      return;
+    }
+
+    if (!this.status || this.status.state !== "running") {
+      return;
+    }
+
+    if (message.type === "migration_started") {
+      const current = Math.max(0, message.index - 1);
+      this.status = {
+        ...this.status,
+        progress: progressFor(current, message.total || pending.length)
+      };
+      return;
+    }
+
+    if (message.type === "migration_applied") {
+      this.status = {
+        ...this.status,
+        progress: progressFor(message.index, message.total || pending.length)
+      };
+      return;
+    }
+
+    if (message.type === "completed") {
+      onCompleted(message.appliedNow);
+      this.status = {
+        ...this.status,
+        progress: progressFor(pending.length, pending.length)
+      };
+      return;
+    }
+
+    if (message.type === "failed") {
+      this.status = {
+        ...this.status,
+        state: "failed",
+        blocking: true,
+        step: "failed",
+        finishedAt: this.now(),
+        error: message.error
+      };
     }
   }
 
@@ -214,6 +377,60 @@ export class CoreDatabaseMigrationService {
         }
       : { required: false, reason: "no_pending_core_migrations", pending };
   }
+}
+
+type CoreMigrationRunnerMessage =
+  | {
+      type: "migration_started";
+      index: number;
+      total: number;
+    }
+  | {
+      type: "migration_applied";
+      index: number;
+      total: number;
+    }
+  | {
+      type: "completed";
+      appliedNow: AppliedMigration[];
+    }
+  | {
+      type: "failed";
+      error: string;
+    };
+
+function spawnDefaultMigrationProcess(input: {
+  scriptPath: string;
+  databasePath: string;
+}): ChildProcess {
+  return spawn(process.execPath, [...process.execArgv, input.scriptPath], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      DIBAO_DATABASE_PATH: input.databasePath,
+      DIBAO_PROCESS_ROLE: "core-migration"
+    }
+  });
+}
+
+function defaultRunnerScriptPath(): string {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const compiled = join(currentDir, "core-migration-runner.js");
+  if (existsSync(compiled)) {
+    return compiled;
+  }
+  return join(currentDir, "core-migration-runner.ts");
+}
+
+function progressFor(current: number, total: number): CoreDatabaseMigrationStatus["progress"] {
+  const normalizedTotal = Math.max(0, total);
+  const normalizedCurrent = Math.max(0, Math.min(current, normalizedTotal));
+  return {
+    current: normalizedCurrent,
+    total: normalizedTotal,
+    chunksProcessed: normalizedCurrent,
+    percent: normalizedTotal > 0 ? normalizedCurrent / normalizedTotal : 1
+  };
 }
 
 function delay(ms: number): Promise<void> {

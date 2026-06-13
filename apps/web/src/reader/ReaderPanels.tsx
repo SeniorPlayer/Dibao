@@ -1,5 +1,5 @@
-import type { CSSProperties, FormEvent, RefObject, SyntheticEvent } from "react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, MouseEvent, RefObject, SyntheticEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ArticleDetail, ArticleListItem, ArticleSearchSort, ArticleSearchState, ArticleState, ArticleTimeWindow, ArticleView, FavoriteArticleSort, Feed, FeedDiagnosticItem, FeedFolder, PluginContributions, RankExplanation, RankExplanationReason, ReaderCommandMarkScopeReadPreviewResponse, ReaderSettings, ReadLaterArticleSort, RecommendationStatus } from "../api.js";
 import { useI18n, type Dictionary, type NavigationItemKey } from "../i18n.js";
 import styles from "../design-system/AppShell/AppShell.module.css";
@@ -9,6 +9,7 @@ import { articleSortForView, canLoadRankExplanation, classNames, clusterDisplayN
 const ARTICLE_ROW_ESTIMATED_HEIGHT = 164;
 const ARTICLE_ROW_OVERSCAN = 8;
 const ARTICLE_LIST_VIRTUALIZATION_THRESHOLD = 80;
+const PASSIVE_IGNORE_SCROLL_DELTA_PX = 24;
 const sanitizedArticleHtmlCache = new Map<string, string>();
 
 export type PluginActionButton = PluginContributions["actions"][number] & {
@@ -157,7 +158,7 @@ export function ArticleListPanel(props: {
   onFavoriteSortChange: (sort: FavoriteArticleSort) => void;
   onReadLaterSortChange: (sort: ReadLaterArticleSort) => void;
   onIgnoreArticle: (articleId: string) => void;
-  onLoadMore: () => void;
+  onLoadMore: () => void | Promise<void>;
   onMarkScopeRead: () => void;
   onPreviewMarkScopeRead: () => Promise<number>;
   onOpenSources: () => void;
@@ -184,6 +185,9 @@ export function ArticleListPanel(props: {
   const { t, formatDate, formatArticleDate } = useI18n();
   const scrollContainerRef = useRef<HTMLElement>(null);
   const [virtualViewport, setVirtualViewport] = useState({ scrollTop: 0, height: 800 });
+  const [rowHeightRevision, setRowHeightRevision] = useState(0);
+  const measuredRowHeights = useRef(new Map<string, number>());
+  const pendingLoadMoreAnchor = useRef<ArticleListScrollAnchor | null>(null);
   const listScrollKey = props.listScrollKey ?? `dibao:list-scroll:${props.articleView}`;
   const sourceTitle =
     props.selectedFeed?.title ?? props.selectedFolder?.title ?? t.articles.allSources;
@@ -228,22 +232,74 @@ export function ArticleListPanel(props: {
   const shouldVirtualize =
     !props.isArticlesLoading &&
     props.articles.length > ARTICLE_LIST_VIRTUALIZATION_THRESHOLD;
-  const virtualStartIndex = shouldVirtualize
-    ? Math.max(
-        0,
-        Math.floor(virtualViewport.scrollTop / ARTICLE_ROW_ESTIMATED_HEIGHT) -
-          ARTICLE_ROW_OVERSCAN
-      )
-    : 0;
-  const virtualEndIndex = shouldVirtualize
-    ? Math.min(
-        props.articles.length,
-        Math.ceil(
-          (virtualViewport.scrollTop + virtualViewport.height) / ARTICLE_ROW_ESTIMATED_HEIGHT
-        ) + ARTICLE_ROW_OVERSCAN
-      )
-    : props.articles.length;
+  const articleIds = useMemo(() => props.articles.map((article) => article.id), [props.articles]);
+  const virtualWindow = useMemo(
+    () =>
+      measuredVirtualArticleWindow({
+        articleIds,
+        estimatedHeight: ARTICLE_ROW_ESTIMATED_HEIGHT,
+        overscan: ARTICLE_ROW_OVERSCAN,
+        rowHeights: measuredRowHeights.current,
+        scrollTop: virtualViewport.scrollTop,
+        viewportHeight: virtualViewport.height
+      }),
+    [articleIds, rowHeightRevision, virtualViewport.height, virtualViewport.scrollTop]
+  );
+  const virtualStartIndex = shouldVirtualize ? virtualWindow.startIndex : 0;
+  const virtualEndIndex = shouldVirtualize ? virtualWindow.endIndex : props.articles.length;
   const visibleArticles = props.articles.slice(virtualStartIndex, virtualEndIndex);
+
+  useEffect(() => {
+    const articleIdSet = new Set(articleIds);
+    let changed = false;
+    for (const id of Array.from(measuredRowHeights.current.keys())) {
+      if (!articleIdSet.has(id)) {
+        measuredRowHeights.current.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      setRowHeightRevision((current) => current + 1);
+    }
+  }, [articleIds]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingLoadMoreAnchor.current;
+    const root = scrollContainerRef.current;
+    if (!anchor || !root || props.isLoadingMore) {
+      return;
+    }
+
+    pendingLoadMoreAnchor.current = null;
+    const anchoredElement = root.querySelector<HTMLElement>(
+      `[data-article-id="${cssEscape(anchor.articleId)}"]`
+    );
+    if (anchoredElement) {
+      const rootTop = root.getBoundingClientRect().top;
+      root.scrollTop += anchoredElement.getBoundingClientRect().top - rootTop - anchor.offsetTop;
+      return;
+    }
+    root.scrollTop = anchor.scrollTop;
+  }, [props.articles.length, props.isLoadingMore, rowHeightRevision]);
+
+  const handleMeasuredArticleRowHeight = useCallback((articleId: string, height: number) => {
+    const nextHeight = Math.ceil(height);
+    if (nextHeight <= 0) {
+      return;
+    }
+    const previousHeight = measuredRowHeights.current.get(articleId);
+    if (previousHeight !== nextHeight) {
+      measuredRowHeights.current.set(articleId, nextHeight);
+      setRowHeightRevision((current) => current + 1);
+    }
+  }, []);
+
+  async function handleLoadMoreClick(event: MouseEvent<HTMLButtonElement>) {
+    const root = scrollContainerRef.current;
+    pendingLoadMoreAnchor.current = root ? articleListScrollAnchorForRoot(root) : null;
+    event.currentTarget.blur();
+    await props.onLoadMore();
+  }
 
   return (
     <section
@@ -380,7 +436,7 @@ export function ArticleListPanel(props: {
         {!props.isArticlesLoading && shouldVirtualize ? (
           <div
             className={styles.listVirtualWindow}
-            style={{ height: props.articles.length * ARTICLE_ROW_ESTIMATED_HEIGHT }}
+            style={{ height: virtualWindow.totalHeight }}
           >
             {visibleArticles.map((article, visibleIndex) => {
               const articleIndex = virtualStartIndex + visibleIndex;
@@ -395,17 +451,17 @@ export function ArticleListPanel(props: {
                   onExplainArticle={props.onExplainArticle}
                   onPluginAction={props.onPluginAction}
                   onSelectArticle={props.onSelectArticle}
+                  onMeasuredHeight={handleMeasuredArticleRowHeight}
                   pendingAction={props.pendingAction}
                   pluginActions={props.pluginRowActions ?? []}
                   readLaterSort={props.readLaterSort}
                   selectedArticleId={props.selectedArticleId}
                   style={{
                     left: 0,
-                    minHeight: ARTICLE_ROW_ESTIMATED_HEIGHT,
                     position: "absolute",
                     right: 0,
                     top: 0,
-                    transform: `translateY(${articleIndex * ARTICLE_ROW_ESTIMATED_HEIGHT}px)`
+                    transform: `translateY(${virtualWindow.offsets[articleIndex] ?? 0}px)`
                   }}
                   timeWindow={props.timeWindow}
                   t={t}
@@ -444,7 +500,9 @@ export function ArticleListPanel(props: {
             <button
               className={styles.secondaryButton}
               disabled={props.isLoadingMore}
-              onClick={props.onLoadMore}
+              onClick={(event) => {
+                void handleLoadMoreClick(event);
+              }}
               type="button"
             >
               {props.isLoadingMore ? t.articles.loadingMore : t.articles.loadMore}
@@ -467,6 +525,7 @@ function ArticleListRow(props: {
   formatArticleDate: (value: string | Date) => string;
   onArticleAction?: (article: ArticleListItem, intent: ArticleActionIntent) => void;
   onExplainArticle: (articleId: string) => void;
+  onMeasuredHeight?: (articleId: string, height: number) => void;
   onPluginAction?: (action: PluginActionButton, context: PluginActionContext) => void;
   onSelectArticle: (articleId: string) => void;
   pendingAction?: PendingArticleAction | null;
@@ -479,6 +538,33 @@ function ArticleListRow(props: {
   unreadOnly: boolean;
 }) {
   const article = props.article;
+  const rowRef = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!props.onMeasuredHeight) {
+      return;
+    }
+    const element = rowRef.current;
+    if (!element) {
+      return;
+    }
+
+    const measure = () => {
+      props.onMeasuredHeight?.(article.id, element.getBoundingClientRect().height);
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [article.id, props.onMeasuredHeight]);
+
   return (
     <article
       className={articleItemClassName(article, props.selectedArticleId)}
@@ -487,6 +573,7 @@ function ArticleListRow(props: {
       data-favorited={article.state.favorited ? "true" : undefined}
       data-liked={article.state.liked ? "true" : undefined}
       data-read-later={article.state.readLater ? "true" : undefined}
+      ref={rowRef}
       style={props.style}
     >
       <a
@@ -1092,7 +1179,7 @@ function useArticleListIgnoreTelemetry(props: {
 }) {
   const onIgnoreArticleRef = useRef(props.onIgnoreArticle);
   const selectedArticleIdRef = useRef(props.selectedArticleId);
-  const seenVisibleIds = useRef(new Set<string>());
+  const firstVisibleScrollTopById = useRef(new Map<string, number>());
   const sentIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -1102,7 +1189,7 @@ function useArticleListIgnoreTelemetry(props: {
   useEffect(() => {
     selectedArticleIdRef.current = props.selectedArticleId;
     if (props.selectedArticleId) {
-      seenVisibleIds.current.delete(props.selectedArticleId);
+      firstVisibleScrollTopById.current.delete(props.selectedArticleId);
     }
   }, [props.selectedArticleId]);
 
@@ -1118,9 +1205,9 @@ function useArticleListIgnoreTelemetry(props: {
     );
     const candidateIds = new Set(visibleCandidates.map((article) => article.id));
 
-    for (const id of Array.from(seenVisibleIds.current)) {
+    for (const id of Array.from(firstVisibleScrollTopById.current.keys())) {
       if (!candidateIds.has(id)) {
-        seenVisibleIds.current.delete(id);
+        firstVisibleScrollTopById.current.delete(id);
       }
     }
     for (const id of Array.from(sentIds.current)) {
@@ -1148,11 +1235,12 @@ function useArticleListIgnoreTelemetry(props: {
       const rootRect = scrollRoot.getBoundingClientRect();
       const rootTop = rootRect.top;
       const rootBottom = rootRect.bottom;
+      const currentScrollTop = scrollRoot.scrollTop;
       for (const article of visibleCandidates) {
         if (
           sentIds.current.has(article.id) ||
           selectedArticleIdRef.current === article.id ||
-          seenVisibleIds.current.has(article.id)
+          firstVisibleScrollTopById.current.has(article.id)
         ) {
           continue;
         }
@@ -1160,23 +1248,31 @@ function useArticleListIgnoreTelemetry(props: {
           `[data-article-id="${cssEscape(article.id)}"]`
         );
         if (element && elementVisibilityRatioInRoot(element, rootTop, rootBottom) >= 0.6) {
-          seenVisibleIds.current.add(article.id);
+          firstVisibleScrollTopById.current.set(article.id, currentScrollTop);
         }
       }
 
-      const snapshots = Array.from(seenVisibleIds.current).map((articleId) => {
+      const snapshots = Array.from(firstVisibleScrollTopById.current).map(
+        ([articleId, firstVisibleScrollTop]) => {
         const element = scrollRoot.querySelector<HTMLElement>(
           `[data-article-id="${cssEscape(articleId)}"]`
         );
         return {
           articleId,
           bottom: element?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY,
+          currentScrollTop,
+          firstVisibleScrollTop,
           hasBeenSent: sentIds.current.has(articleId),
           hasBeenVisible: true
         };
-      });
+        }
+      );
 
-      for (const articleId of scrolledPastArticleIdsForIgnoreTelemetry(snapshots, rootTop)) {
+      for (const articleId of scrolledPastArticleIdsForIgnoreTelemetry(
+        snapshots,
+        rootTop,
+        PASSIVE_IGNORE_SCROLL_DELTA_PX
+      )) {
         sendIgnoredArticle(articleId);
       }
     }
@@ -1211,13 +1307,29 @@ function useArticleListIgnoreTelemetry(props: {
           }
 
           if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-            seenVisibleIds.current.add(articleId);
+            if (!firstVisibleScrollTopById.current.has(articleId)) {
+              firstVisibleScrollTopById.current.set(articleId, scrollRoot.scrollTop);
+            }
             continue;
           }
 
           const rootTop = entry.rootBounds?.top ?? scrollRoot.getBoundingClientRect().top;
-          const hasScrolledPast = entry.boundingClientRect.bottom <= rootTop;
-          if (seenVisibleIds.current.has(articleId) && hasScrolledPast) {
+          const firstVisibleScrollTop = firstVisibleScrollTopById.current.get(articleId);
+          const ignoredIds = scrolledPastArticleIdsForIgnoreTelemetry(
+            [
+              {
+                articleId,
+                bottom: entry.boundingClientRect.bottom,
+                currentScrollTop: scrollRoot.scrollTop,
+                firstVisibleScrollTop: firstVisibleScrollTop ?? Number.POSITIVE_INFINITY,
+                hasBeenSent: sentIds.current.has(articleId),
+                hasBeenVisible: firstVisibleScrollTop !== undefined
+              }
+            ],
+            rootTop,
+            PASSIVE_IGNORE_SCROLL_DELTA_PX
+          );
+          if (ignoredIds.includes(articleId)) {
             sendIgnoredArticle(articleId);
           }
         }
@@ -1255,15 +1367,21 @@ export function scrolledPastArticleIdsForIgnoreTelemetry(
   candidates: Array<{
     articleId: string;
     bottom: number;
+    currentScrollTop: number;
+    firstVisibleScrollTop: number;
     hasBeenSent: boolean;
     hasBeenVisible: boolean;
   }>,
-  rootTop: number
+  rootTop: number,
+  minimumScrollDeltaPx: number = PASSIVE_IGNORE_SCROLL_DELTA_PX
 ): string[] {
   return candidates
     .filter(
       (candidate) =>
-        candidate.hasBeenVisible && !candidate.hasBeenSent && candidate.bottom <= rootTop
+        candidate.hasBeenVisible &&
+        !candidate.hasBeenSent &&
+        candidate.bottom <= rootTop &&
+        candidate.currentScrollTop - candidate.firstVisibleScrollTop >= minimumScrollDeltaPx
     )
     .map((candidate) => candidate.articleId);
 }
@@ -1281,6 +1399,73 @@ function elementVisibilityRatioInRoot(
 
   const visibleHeight = Math.max(0, Math.min(rect.bottom, rootBottom) - Math.max(rect.top, rootTop));
   return visibleHeight / height;
+}
+
+type ArticleListScrollAnchor = {
+  articleId: string;
+  offsetTop: number;
+  scrollTop: number;
+};
+
+function articleListScrollAnchorForRoot(root: HTMLElement): ArticleListScrollAnchor | null {
+  const rootTop = root.getBoundingClientRect().top;
+  const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-article-id]"));
+  for (const row of rows) {
+    const articleId = row.dataset.articleId;
+    if (!articleId) {
+      continue;
+    }
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > rootTop) {
+      return {
+        articleId,
+        offsetTop: rect.top - rootTop,
+        scrollTop: root.scrollTop
+      };
+    }
+  }
+  return null;
+}
+
+export function measuredVirtualArticleWindow(input: {
+  articleIds: string[];
+  rowHeights: ReadonlyMap<string, number>;
+  estimatedHeight: number;
+  scrollTop: number;
+  viewportHeight: number;
+  overscan: number;
+}): {
+  startIndex: number;
+  endIndex: number;
+  totalHeight: number;
+  offsets: number[];
+} {
+  const heights = input.articleIds.map((articleId) =>
+    Math.max(1, Math.ceil(input.rowHeights.get(articleId) ?? input.estimatedHeight))
+  );
+  const offsets: number[] = [];
+  let totalHeight = 0;
+  for (const height of heights) {
+    offsets.push(totalHeight);
+    totalHeight += height;
+  }
+
+  const viewportTop = Math.max(0, input.scrollTop);
+  const viewportBottom = viewportTop + Math.max(0, input.viewportHeight);
+  const firstVisibleIndex = heights.findIndex(
+    (height, index) => offsets[index] + height >= viewportTop
+  );
+  const visibleStart = firstVisibleIndex === -1 ? Math.max(0, input.articleIds.length - 1) : firstVisibleIndex;
+  const firstAfterViewport = offsets.findIndex((offset) => offset > viewportBottom);
+  const visibleEnd =
+    firstAfterViewport === -1 ? input.articleIds.length : Math.max(visibleStart + 1, firstAfterViewport);
+
+  return {
+    startIndex: Math.max(0, visibleStart - input.overscan),
+    endIndex: Math.min(input.articleIds.length, visibleEnd + input.overscan),
+    totalHeight,
+    offsets
+  };
 }
 
 function usePersistedArticleListScroll(props: {

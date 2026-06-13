@@ -196,12 +196,28 @@ export function loadDefaultMigrations(): Migration[] {
 export function runMigrations(
   db: DibaoDatabase,
   migrations: readonly Migration[] = loadDefaultMigrations(),
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  hooks: {
+    onMigrationStart?: (progress: {
+      migration: Migration;
+      index: number;
+      total: number;
+      appliedAt: number;
+    }) => void;
+    onMigrationApplied?: (progress: {
+      migration: Migration;
+      index: number;
+      total: number;
+      appliedAt: number;
+      applied: AppliedMigration;
+    }) => void;
+  } = {}
 ): AppliedMigration[] {
   ensureMigrationTable(db);
 
   const applied = getAppliedMigrations(db);
   const appliedByVersion = new Map(applied.map((migration) => [migration.version, migration]));
+  const pending: Migration[] = [];
   const appliedNow: AppliedMigration[] = [];
 
   for (const migration of migrations) {
@@ -216,9 +232,17 @@ export function runMigrations(
       }
       continue;
     }
+    pending.push(migration);
+  }
+
+  for (const [pendingIndex, migration] of pending.entries()) {
+    const checksum = migration.checksum ?? checksumSql(migration.sql);
+    const index = pendingIndex + 1;
+    const total = pending.length;
 
     const appliedAt = now();
     const disableForeignKeys = migration.sql.includes("-- dibao: disable-foreign-keys");
+    hooks.onMigrationStart?.({ migration, index, total, appliedAt });
 
     try {
       if (disableForeignKeys) {
@@ -240,11 +264,19 @@ export function runMigrations(
       }
     }
 
-    appliedNow.push({
+    const appliedMigration = {
       version: migration.version,
       name: migration.name,
       appliedAt,
       checksum
+    };
+    appliedNow.push(appliedMigration);
+    hooks.onMigrationApplied?.({
+      migration,
+      index,
+      total,
+      appliedAt,
+      applied: appliedMigration
     });
   }
 

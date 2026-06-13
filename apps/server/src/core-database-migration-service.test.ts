@@ -1,3 +1,6 @@
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
   getAppliedMigrations,
@@ -38,4 +41,74 @@ describe("CoreDatabaseMigrationService", () => {
       }
     }
   }, 30_000);
+
+  it("keeps migration status responsive while child-process migrations run", async () => {
+    const db = openDatabase(":memory:");
+    const fakeChild = createFakeChildProcess();
+    const service = new CoreDatabaseMigrationService({
+      db,
+      databasePath: "/tmp/dibao-test.sqlite",
+      migrations: [
+        {
+          version: "001",
+          name: "one",
+          sql: "create table one (id text primary key);"
+        }
+      ],
+      deferMs: 0,
+      now: () => 3000,
+      spawnMigrationProcess: () => fakeChild
+    });
+
+    try {
+      expect(service.getStatus()).toMatchObject({
+        state: "pending",
+        blocking: true
+      });
+
+      const running = service.startIfRequired();
+      await Promise.resolve();
+
+      expect(service.getStatus()).toMatchObject({
+        state: "running",
+        blocking: true,
+        progress: {
+          current: 0,
+          total: 1
+        }
+      });
+
+      fakeChild.stdout.write(
+        `${JSON.stringify({ type: "migration_applied", index: 1, total: 1 })}\n`
+      );
+      fakeChild.stdout.write(`${JSON.stringify({ type: "completed", appliedNow: [] })}\n`);
+      fakeChild.emit("exit", 0, null);
+
+      await expect(running).resolves.toMatchObject({
+        state: "completed",
+        blocking: false,
+        progress: {
+          current: 1,
+          total: 1,
+          percent: 1
+        }
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
+
+function createFakeChildProcess(): ChildProcess & {
+  stdout: PassThrough;
+  stderr: PassThrough;
+} {
+  const child = new EventEmitter() as ChildProcess & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  return child;
+}

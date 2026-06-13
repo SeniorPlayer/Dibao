@@ -465,6 +465,11 @@ type BuildServerOptions = {
 };
 
 export function buildServer(options: BuildServerOptions = {}) {
+  const configuredDatabasePath = options.databasePath
+    ? resolveDatabasePath(options.databasePath)
+    : options.db
+      ? undefined
+      : resolveDatabasePath(undefined);
   const db = options.db ?? openConfiguredDatabase(options);
   const closeDatabaseOnClose = options.closeDatabaseOnClose ?? !options.db;
   const settings = new SqliteAppSettingsRepository(db);
@@ -497,6 +502,8 @@ export function buildServer(options: BuildServerOptions = {}) {
   let lastForegroundActivityWriteAt = 0;
   const coreDatabaseMigrationService = new CoreDatabaseMigrationService({
     db,
+    databasePath: configuredDatabasePath,
+    runInChildProcess: !options.db && configuredDatabasePath !== undefined,
     now: options.now,
     deferMs: options.coreMigrationDeferMs,
     onError: (error) => app.log.error(error)
@@ -1344,6 +1351,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   }
 
   app.addHook("onClose", async () => {
+    coreDatabaseMigrationService.stop();
     recommendationMaintenanceScheduler.stop();
     profileDecayScheduler.stop();
     jobHistoryCleanupScheduler.stop();
