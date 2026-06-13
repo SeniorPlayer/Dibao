@@ -26,9 +26,14 @@ import { buildServer as buildRealServer, getHealth } from "./app.js";
 import type { FeedFetcher } from "./feed-refresh-service.js";
 import { JobRunner } from "./job-runner.js";
 import {
+  BEHAVIOR_EVENT_PROJECT_JOB_TYPE,
+  BehaviorProjectionJobService
+} from "./behavior-projection-job-service.js";
+import {
   RankingRecalculateJobService,
   RANKING_RECALCULATE_JOB_TYPE
 } from "./ranking-job-service.js";
+import { ProfileService } from "./profile-service.js";
 import { RecommendationRankingService } from "./ranking-service.js";
 
 const tempDirs: string[] = [];
@@ -8146,7 +8151,7 @@ describe("server API vertical slice", () => {
     }
   });
 
-  it("records like and unlike article actions without exposing event ids", async () => {
+  it("records like and unlike article actions and returns event ids", async () => {
     const db = createFixtureDatabase();
     const app = buildServer({ db, logger: false, now: () => 5050 });
 
@@ -8159,12 +8164,12 @@ describe("server API vertical slice", () => {
       });
 
       expect(like.statusCode, like.body).toBe(200);
-      expect(like.json().data).not.toHaveProperty("eventId");
+      expect(like.json().data.eventId).toEqual(expect.any(String));
       expect(like.json().data.state).toMatchObject({
         liked: true
       });
       expect(unlike.statusCode, unlike.body).toBe(200);
-      expect(unlike.json().data).not.toHaveProperty("eventId");
+      expect(unlike.json().data.eventId).toEqual(expect.any(String));
       expect(unlike.json().data.state).toMatchObject({
         liked: false
       });
@@ -9403,14 +9408,29 @@ async function drainRankingJobs(db: DibaoDatabase, now: number): Promise<void> {
     rankings,
     now: () => now
   });
+  const profile = new ProfileService({
+    embeddings,
+    profiles,
+    now: () => now
+  });
   const rankingJobs = new RankingRecalculateJobService({
     jobs,
     ranking,
     now: () => now
   });
+  const behaviorProjectionJobs = new BehaviorProjectionJobService({
+    db,
+    jobs,
+    profile,
+    rankingJobs,
+    now: () => now
+  });
   const runner = new JobRunner({
     jobs,
     handlers: {
+      [BEHAVIOR_EVENT_PROJECT_JOB_TYPE]: (job) => {
+        behaviorProjectionJobs.handleBehaviorEventProjectJob(job);
+      },
       [RANKING_RECALCULATE_JOB_TYPE]: (job) => {
         rankingJobs.handleRankingRecalculateJob(job);
       }

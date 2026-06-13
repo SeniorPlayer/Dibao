@@ -11,6 +11,7 @@ export const RANKING_RECALCULATE_MAX_CHUNK_SIZE = 200;
 export const RANKING_RECALCULATE_CHUNK_DELAY_MS = 5_000;
 export const RANKING_RECALCULATE_TARGET_CHUNK_MS = 2_000;
 export const RANKING_RECALCULATE_MIN_CHUNK_SIZE = 1;
+export const RANKING_RECALCULATE_JOB_PRIORITY = -20;
 
 export type RankingRecalculateJobPayload = {
   articleIds?: string[];
@@ -66,6 +67,7 @@ export class RankingRecalculateJobService {
       type: RANKING_RECALCULATE_JOB_TYPE,
       payloadJson: null,
       maxAttempts: 2,
+      priority: RANKING_RECALCULATE_JOB_PRIORITY,
       runAfter: now + Math.max(0, options.delayMs ?? 0),
       now
     });
@@ -93,6 +95,7 @@ export class RankingRecalculateJobService {
       type: RANKING_RECALCULATE_JOB_TYPE,
       payloadJson: JSON.stringify({ articleIds: uniqueArticleIds } satisfies RankingRecalculateJobPayload),
       maxAttempts: 2,
+      priority: RANKING_RECALCULATE_JOB_PRIORITY,
       runAfter: now,
       now
     });
@@ -155,6 +158,7 @@ export class RankingRecalculateJobService {
             limit: nextLimit
           } satisfies RankingRecalculateJobPayload),
           maxAttempts: 2,
+          priority: RANKING_RECALCULATE_JOB_PRIORITY,
           runAfter: result.paused === true
             ? Math.max(now, result.resumeAfter ?? now + RANKING_RECALCULATE_CHUNK_DELAY_MS)
             : now + RANKING_RECALCULATE_CHUNK_DELAY_MS,

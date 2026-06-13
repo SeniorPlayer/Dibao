@@ -5,6 +5,7 @@ import type {
 } from "@dibao/db";
 import type { ProfileEventProcessJobService } from "./profile-event-job-service.js";
 import type { RankingRecalculateJobService } from "./ranking-job-service.js";
+import type { BehaviorProjectionJobService } from "./behavior-projection-job-service.js";
 
 export class ArticleActionServiceError extends Error {
   constructor(
@@ -28,6 +29,7 @@ export type RecordArticleActionServiceInput = {
 export type ArticleActionServiceOptions = {
   actions: ArticleActionRepository;
   profileJobs?: Pick<ProfileEventProcessJobService, "enqueueEvent">;
+  behaviorProjectionJobs?: Pick<BehaviorProjectionJobService, "enqueueProjection">;
   rankingJobs?: Pick<RankingRecalculateJobService, "enqueueAll" | "enqueueArticles">;
   maintenance?: { enqueueStrongActionMaintenance: (now?: number) => unknown };
   removeReadLaterOnReadComplete?: () => boolean;
@@ -68,12 +70,16 @@ export class ArticleActionService {
     }
 
     this.deferPostActionWork(() => {
-      this.options.rankingJobs?.enqueueArticles([input.articleId]);
-      this.options.profileJobs?.enqueueEvent({
-        eventId: result.eventId,
-        articleId: input.articleId,
-        actionType: input.type
-      });
+      if (this.options.behaviorProjectionJobs) {
+        this.options.behaviorProjectionJobs.enqueueProjection();
+      } else {
+        this.options.rankingJobs?.enqueueArticles([input.articleId]);
+        this.options.profileJobs?.enqueueEvent({
+          eventId: result.eventId,
+          articleId: input.articleId,
+          actionType: input.type
+        });
+      }
       if (isStrongMaintenanceAction(input)) {
         this.options.maintenance?.enqueueStrongActionMaintenance(this.now());
       }

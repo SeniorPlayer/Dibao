@@ -190,6 +190,7 @@ export type ArticleActionRequest =
     };
 
 export type ArticleActionResponse = {
+  eventId: string;
   state: ArticleState;
 };
 

@@ -165,6 +165,7 @@ describe("db package", () => {
         "plugin_secrets",
         "plugin_deliveries",
         "plugin_delivery_attempts",
+        "behavior_projection_cursors",
         "jobs"
       ]) {
         expect(hasTableOrView(db, name), name).toBe(true);
@@ -175,6 +176,7 @@ describe("db package", () => {
       expect(hasIndex(db, "idx_article_states_liked_at")).toBe(true);
       expect(hasColumn(db, "rank_model_weights", "z")).toBe(true);
       expect(hasColumn(db, "rank_model_weights", "n")).toBe(true);
+      expect(hasColumn(db, "jobs", "priority")).toBe(true);
       expect(hasColumn(db, "feed_stats", "clear_positive")).toBe(true);
       expect(hasColumn(db, "feed_stats", "source_confidence")).toBe(true);
       expect(hasColumn(db, "interest_cluster_evidence", "article_title_snapshot")).toBe(true);
@@ -190,6 +192,8 @@ describe("db package", () => {
       expect(hasIndex(db, "idx_profile_terms_polarity_scope_weight")).toBe(true);
       expect(hasIndex(db, "idx_plugin_deliveries_plugin_status")).toBe(true);
       expect(hasIndex(db, "idx_plugin_delivery_attempts_delivery")).toBe(true);
+      expect(hasIndex(db, "idx_behavior_events_projection_order")).toBe(true);
+      expect(hasIndex(db, "idx_jobs_status_priority_run_after")).toBe(true);
     } finally {
       db.close();
     }
@@ -230,7 +234,8 @@ describe("db package", () => {
         "019",
         "020",
         "021",
-        "022"
+        "022",
+        "023"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
@@ -257,6 +262,8 @@ describe("db package", () => {
       expect(hasTableOrView(db, "plugin_secrets")).toBe(true);
       expect(hasTableOrView(db, "plugin_deliveries")).toBe(true);
       expect(hasTableOrView(db, "plugin_delivery_attempts")).toBe(true);
+      expect(hasTableOrView(db, "behavior_projection_cursors")).toBe(true);
+      expect(hasColumn(db, "jobs", "priority")).toBe(true);
 
       db.prepare(
         `
@@ -413,6 +420,133 @@ describe("db package", () => {
       expect(
         db.prepare("select type from jobs where id = 'job_interest_family_rebuild'").get()
       ).toEqual({ type: "interest_family_rebuild" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("converts legacy high-volume profile jobs into behavior projection cursor state", () => {
+    const db = openDatabase(":memory:", { loadSqliteVec: false });
+    try {
+      const migrationsThrough022 = loadDefaultMigrations().filter(
+        (migration) => Number.parseInt(migration.version, 10) <= 22
+      );
+      expect(
+        runMigrations(db, migrationsThrough022, () => 1000).at(-1)?.version
+      ).toBe("022");
+
+      db.prepare(
+        `
+          insert into feeds (id, title, feed_url, created_at, updated_at)
+          values ('feed_023', '023 Feed', 'https://example.com/023.xml', 1000, 1000)
+        `
+      ).run();
+      db.prepare(
+        `
+          insert into articles (
+            id,
+            feed_id,
+            url,
+            title,
+            discovered_at,
+            dedupe_key,
+            created_at,
+            updated_at
+          )
+          values ('article_023', 'feed_023', 'https://example.com/023', '023 Article', 1000, 'article_023', 1000, 1000)
+        `
+      ).run();
+      db.prepare(
+        `
+          insert into behavior_events (
+            id,
+            article_id,
+            event_type,
+            event_weight,
+            created_at
+          )
+          values
+            ('event_open_023', 'article_023', 'open', 0.1, 2000),
+            ('event_favorite_023', 'article_023', 'favorite', 1.5, 3000)
+        `
+      ).run();
+      db.prepare(
+        `
+          insert into jobs (
+            id,
+            type,
+            status,
+            payload_json,
+            attempts,
+            max_attempts,
+            run_after,
+            created_at,
+            updated_at
+          )
+          values
+            (
+              'job_open_023',
+              'profile_event_process',
+              'queued',
+              '{"eventId":"event_open_023","articleId":"article_023","actionType":"open"}',
+              0,
+              2,
+              2000,
+              2000,
+              2000
+            ),
+            (
+              'job_favorite_023',
+              'profile_event_process',
+              'queued',
+              '{"eventId":"event_favorite_023","articleId":"article_023","actionType":"favorite"}',
+              0,
+              2,
+              3000,
+              3000,
+              3000
+            )
+        `
+      ).run();
+
+      const migration023 = loadDefaultMigrations().find((migration) => migration.version === "023");
+      expect(migration023).toBeDefined();
+      expect(runMigrations(db, [migration023!], () => 4000).map((migration) => migration.version)).toEqual([
+        "023"
+      ]);
+
+      expect(
+        db
+          .prepare("select status, priority from jobs where id = 'job_open_023'")
+          .get()
+      ).toEqual({
+        status: "cancelled",
+        priority: 40
+      });
+      expect(
+        db
+          .prepare("select status, priority from jobs where id = 'job_favorite_023'")
+          .get()
+      ).toEqual({
+        status: "queued",
+        priority: 40
+      });
+      expect(
+        db
+          .prepare(
+            `
+              select
+                last_created_at as lastCreatedAt,
+                last_event_id as lastEventId
+              from behavior_projection_cursors
+              where projector_id = 'profile'
+            `
+          )
+          .get()
+      ).toEqual({
+        lastCreatedAt: 1999,
+        lastEventId: ""
+      });
     } finally {
       db.close();
     }
@@ -665,7 +799,8 @@ describe("db package", () => {
         "019",
         "020",
         "021",
-        "022"
+        "022",
+        "023"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);
@@ -684,6 +819,8 @@ describe("db package", () => {
       expect(hasTableOrView(db, "interest_cluster_calibrations")).toBe(true);
       expect(hasTableOrView(db, "reader_command_events")).toBe(true);
       expect(hasColumn(db, "auth_credentials", "username")).toBe(true);
+      expect(hasTableOrView(db, "behavior_projection_cursors")).toBe(true);
+      expect(hasColumn(db, "jobs", "priority")).toBe(true);
     } finally {
       db.close();
     }
@@ -737,6 +874,47 @@ describe("db package", () => {
         attempts: 2,
         error: "permanent",
         finishedAt: 6200
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("claims due jobs by priority before older lower-priority work", () => {
+    const db = openDatabase(tempDatabasePath(), { migrate: true });
+    try {
+      const jobs = new SqliteJobRepository(db);
+      jobs.enqueue({
+        id: "job_low",
+        type: "feed_refresh",
+        payloadJson: JSON.stringify({ feedId: "feed_low" }),
+        maxAttempts: 1,
+        priority: 0,
+        runAfter: 900,
+        now: 900
+      });
+      jobs.enqueue({
+        id: "job_projection",
+        type: "behavior_event_project",
+        payloadJson: JSON.stringify({}),
+        maxAttempts: 1,
+        priority: 60,
+        runAfter: 1000,
+        now: 1000
+      });
+
+      expect(jobs.findById("job_projection")).toMatchObject({
+        priority: 60
+      });
+      expect(jobs.claimNextDue(1000)).toMatchObject({
+        id: "job_projection",
+        type: "behavior_event_project",
+        priority: 60
+      });
+      expect(jobs.claimNextDue(1000)).toMatchObject({
+        id: "job_low",
+        type: "feed_refresh",
+        priority: 0
       });
     } finally {
       db.close();

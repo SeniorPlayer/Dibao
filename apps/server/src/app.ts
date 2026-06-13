@@ -60,6 +60,12 @@ import {
   ArticleActionService,
   ArticleActionServiceError
 } from "./article-action-service.js";
+import { BackgroundWriteCoordinator } from "./background-write-coordinator.js";
+import {
+  BEHAVIOR_EVENT_PROJECT_JOB_PRIORITY,
+  BEHAVIOR_EVENT_PROJECT_JOB_TYPE,
+  BehaviorProjectionJobService
+} from "./behavior-projection-job-service.js";
 import {
   readSessionCookie,
   serializeClearSessionCookie,
@@ -580,6 +586,19 @@ export function buildServer(options: BuildServerOptions = {}) {
   if (!hasBlockingCoreMigration) {
     pluginService.reconcileOfficialPlugins();
   }
+  const backgroundWriteCoordinator = new BackgroundWriteCoordinator({
+    onRun: (record) => {
+      app.log.info(
+        {
+          route: "jobs.backgroundWrite",
+          name: record.name,
+          priority: record.priority,
+          durationMs: roundDuration(record.durationMs)
+        },
+        "job.performance"
+      );
+    }
+  });
   const rankingJobService = new RankingRecalculateJobService({
     jobs,
     ranking: rankingService,
@@ -601,6 +620,13 @@ export function buildServer(options: BuildServerOptions = {}) {
         "job.performance"
       );
     }
+  });
+  const behaviorProjectionJobService = new BehaviorProjectionJobService({
+    db,
+    jobs,
+    profile: profileService,
+    rankingJobs: rankingJobService,
+    now: options.now
   });
   const readerCommandService = new ReaderCommandService({
     articles,
@@ -790,8 +816,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   const articleActionService = new ArticleActionService({
     actions: articleActions,
-    profileJobs: profileEventJobService,
-    rankingJobs: rankingJobService,
+    behaviorProjectionJobs: behaviorProjectionJobService,
     maintenance: {
       enqueueStrongActionMaintenance: (now) => {
         const maintenanceSettings = settingsService.getSettings().recommendationMaintenance;
@@ -891,8 +916,33 @@ export function buildServer(options: BuildServerOptions = {}) {
       profile_decay: (job) => profileDecayJobService.handleProfileDecayJob(job),
       [PROFILE_EVENT_PROCESS_JOB_TYPE]: (job) =>
         profileEventJobService.handleProfileEventProcessJob(job),
+      [BEHAVIOR_EVENT_PROJECT_JOB_TYPE]: async (job) => {
+        const result = await backgroundWriteCoordinator.run(
+          {
+            name: BEHAVIOR_EVENT_PROJECT_JOB_TYPE,
+            priority: BEHAVIOR_EVENT_PROJECT_JOB_PRIORITY
+          },
+          () => behaviorProjectionJobService.handleBehaviorEventProjectJob(job)
+        );
+        app.log.info(
+          {
+            route: "jobs.behaviorProjection",
+            jobId: job.id,
+            processed: result.processed,
+            hasMore: result.hasMore,
+            enqueuedRanking: result.enqueuedRanking
+          },
+          "job.performance"
+        );
+      },
       [RANKING_RECALCULATE_JOB_TYPE]: async (job) => {
-        const result = await rankingJobService.handleRankingRecalculateJob(job);
+        const result = await backgroundWriteCoordinator.run(
+          {
+            name: RANKING_RECALCULATE_JOB_TYPE,
+            priority: job.priority
+          },
+          () => rankingJobService.handleRankingRecalculateJob(job)
+        );
         if (result.processed > 0) {
           await pluginService.emitHook("ranking.afterRanked", {
             jobId: job.id,
@@ -1216,6 +1266,17 @@ export function buildServer(options: BuildServerOptions = {}) {
       return;
     }
     backgroundServicesStarted = true;
+    const pendingProjectionJob = behaviorProjectionJobService.enqueueProjectionIfPending();
+    if (pendingProjectionJob) {
+      app.log.info(
+        {
+          route: "jobs.behaviorProjection.startup",
+          jobId: pendingProjectionJob.id,
+          runAfter: timestampToIso(pendingProjectionJob.runAfter)
+        },
+        "job.performance"
+      );
+    }
     jobRunner.start();
     feedRefreshScheduler.start();
     retentionCleanupScheduler.start();
@@ -2584,12 +2645,14 @@ export function buildServer(options: BuildServerOptions = {}) {
         });
         void pluginService.emitHook("article.actionRecorded", {
           articleId: request.params.id,
+          eventId: result.eventId,
           action: parsed.input.type,
           state: result.state
         }).catch((error) => app.log.error(error));
 
         return {
           data: {
+            eventId: result.eventId,
             state: result.state
           }
         };

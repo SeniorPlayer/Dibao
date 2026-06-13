@@ -17,7 +17,9 @@ import {
   type InterestClusterPolarity,
   type InterestClusterRow,
   type ProfileRepository,
-  type RankingRepository
+  type RankingRepository,
+  type UpsertArticleRankExplanationInput,
+  type UpsertArticleRankScoreInput
 } from "@dibao/db";
 import { FTRL_ACTIVE_ALPHA_CAP } from "./recommendation-maintenance-service.js";
 
@@ -370,6 +372,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
     const duplicateStats = duplicateStatsFor(candidates, duplicateFeatures);
     const rerankWindowId = `${activeRankContext}:${now}`;
     const scored: Array<{ candidate: ArticleRankingCandidateRow; score: V2Score }> = [];
+    const baseScores: UpsertArticleRankScoreInput[] = [];
     let processed = 0;
     let lastProcessedArticleId: string | null = startingCursor;
     let pauseDecision: RankingPauseDecision | null = null;
@@ -434,7 +437,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         behaviorEventCount: candidate.behaviorEventCount
       });
 
-      this.options.rankings.upsertBaseScore({
+      baseScores.push({
         articleId: candidate.articleId,
         ...baseScore
       });
@@ -462,8 +465,10 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
     }
 
     const reranked = rerankCanonicalWindow(scored, settings, MMR_WINDOW_LIMIT);
+    const rankScores: UpsertArticleRankScoreInput[] = [];
+    const explanations: UpsertArticleRankExplanationInput[] = [];
     for (const item of reranked) {
-      this.options.rankings.upsertScore({
+      rankScores.push({
         articleId: item.candidate.articleId,
         rankContext: activeRankContext,
         embeddingIndexId: activeIndexId,
@@ -493,7 +498,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         cocoonLevel: settings.cocoonLevel,
         calculatedAt: now
       });
-      this.options.rankings.upsertExplanation({
+      explanations.push({
         articleId: item.candidate.articleId,
         rankContext: activeRankContext,
         embeddingIndexId: activeIndexId,
@@ -508,6 +513,11 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         createdAt: now
       });
     }
+    this.writeRankingOutputs({
+      baseScores,
+      rankScores,
+      explanations
+    });
 
     const hasMoreAfterChunk = page?.limit !== undefined && candidates.length >= page.limit;
     if (paged && processed > 0 && pauseDecision === null && hasMoreAfterChunk) {
@@ -536,6 +546,31 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
           }
         : {})
     };
+  }
+
+  private writeRankingOutputs(input: {
+    baseScores: UpsertArticleRankScoreInput[];
+    rankScores: UpsertArticleRankScoreInput[];
+    explanations: UpsertArticleRankExplanationInput[];
+  }): void {
+    const write = () => {
+      for (const score of input.baseScores) {
+        this.options.rankings.upsertBaseScore(score);
+      }
+      for (const score of input.rankScores) {
+        this.options.rankings.upsertScore(score);
+      }
+      for (const explanation of input.explanations) {
+        this.options.rankings.upsertExplanation(explanation);
+      }
+    };
+
+    if (this.options.db) {
+      this.options.db.transaction(write)();
+      return;
+    }
+
+    write();
   }
 
   private pauseDecision(

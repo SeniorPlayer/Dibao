@@ -54,6 +54,7 @@ export type CoreJobType =
   | "content_extract"
   | "embedding_generate"
   | "profile_event_process"
+  | "behavior_event_project"
   | "ranking_recalculate"
   | "profile_decay"
   | "retention_cleanup"
@@ -84,6 +85,7 @@ export type JobRow = {
   error: string | null;
   attempts: number;
   maxAttempts: number;
+  priority: number;
   runAfter: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -102,6 +104,7 @@ export type EnqueueJobInput = {
   type: JobType;
   payloadJson?: string | null;
   maxAttempts?: number;
+  priority?: number;
   runAfter?: number;
   now?: number;
 };

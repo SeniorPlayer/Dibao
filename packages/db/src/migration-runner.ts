@@ -66,6 +66,9 @@ const interestFamilyLabelsPath = fileURLToPath(
 const pluginSecretsAndDeliveriesPath = fileURLToPath(
   new URL("../migrations/022_plugin_secrets_and_deliveries.sql", import.meta.url)
 );
+const behaviorProjectionQueuePath = fileURLToPath(
+  new URL("../migrations/023_behavior_projection_queue.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -173,6 +176,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "022",
       name: "plugin_secrets_and_deliveries",
       sql: readFileSync(pluginSecretsAndDeliveriesPath, "utf8")
+    },
+    {
+      version: "023",
+      name: "behavior_projection_queue",
+      sql: readFileSync(behaviorProjectionQueuePath, "utf8")
     }
   ];
 }

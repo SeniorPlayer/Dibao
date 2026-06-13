@@ -20,6 +20,10 @@ import { JobRunner } from "./job-runner.js";
 import { DerivedDataUpgradeService } from "./derived-data-upgrade-service.js";
 import { ProfileDecayJobService } from "./profile-decay-job-service.js";
 import {
+  BEHAVIOR_EVENT_PROJECT_JOB_TYPE,
+  BehaviorProjectionJobService
+} from "./behavior-projection-job-service.js";
+import {
   PROFILE_EVENT_PROCESS_JOB_TYPE,
   ProfileEventProcessJobService
 } from "./profile-event-job-service.js";
@@ -559,9 +563,10 @@ describe("profile algorithm and recommendation ranking", () => {
       });
 
       expect(response.statusCode, response.body).toBe(200);
-      expect(response.json().data.eventId).toBeUndefined();
+      expect(response.json().data.eventId).toEqual(expect.any(String));
       await waitForDeferredPostActionWork();
-      expect(jobs.countByTypeAndStatus(RANKING_RECALCULATE_JOB_TYPE, "queued")).toBe(1);
+      expect(jobs.countByTypeAndStatus(BEHAVIOR_EVENT_PROJECT_JOB_TYPE, "queued")).toBe(1);
+      expect(jobs.countByTypeAndStatus(RANKING_RECALCULATE_JOB_TYPE, "queued")).toBe(0);
       expect(activeScore(db, "article_similar")).toBeNull();
 
       await drainProfileAndRankingJobs(db, 5000);
@@ -1650,6 +1655,7 @@ describe("profile algorithm and recommendation ranking", () => {
         error: null,
         attempts: 1,
         maxAttempts: 1,
+        priority: 0,
         runAfter: 0,
         startedAt: null,
         finishedAt: null,
@@ -1667,6 +1673,7 @@ describe("profile algorithm and recommendation ranking", () => {
         error: null,
         attempts: 1,
         maxAttempts: 1,
+        priority: 0,
         runAfter: 0,
         startedAt: null,
         finishedAt: null,
@@ -2270,11 +2277,21 @@ async function drainJobs(
     rankingJobs,
     now: () => now
   });
+  const behaviorProjectionJobs = new BehaviorProjectionJobService({
+    db,
+    jobs,
+    profile,
+    rankingJobs,
+    now: () => now
+  });
   const runner = new JobRunner({
     jobs,
     handlers: {
       ...(includeProfileEvents
         ? {
+            [BEHAVIOR_EVENT_PROJECT_JOB_TYPE]: (job) => {
+              behaviorProjectionJobs.handleBehaviorEventProjectJob(job);
+            },
             [PROFILE_EVENT_PROCESS_JOB_TYPE]: (job) =>
               profileEventJobs.handleProfileEventProcessJob(job)
           }
@@ -2369,6 +2386,7 @@ function maintenanceJob(type: Parameters<RecommendationMaintenanceService["handl
     error: null,
     attempts: 1,
     maxAttempts: 1,
+    priority: 0,
     runAfter: 0,
     startedAt: null,
     finishedAt: null,

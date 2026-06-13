@@ -1962,6 +1962,7 @@ function minimalJob(id: string): JobRow {
     error: null,
     attempts: 0,
     maxAttempts: 3,
+    priority: 0,
     runAfter: 1000,
     startedAt: null,
     finishedAt: null,

@@ -213,6 +213,7 @@ function createJobRecorder() {
         status: "queued" as const,
         attempts: 0,
         maxAttempts: 2,
+        priority: 0,
         runAfter: 1000,
         createdAt: 1000,
         updatedAt: 1000,

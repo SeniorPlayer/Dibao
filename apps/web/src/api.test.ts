@@ -1403,6 +1403,7 @@ describe("web API client", () => {
       return new Response(
         JSON.stringify({
           data: {
+            eventId: "event_1",
             state: {
               read: false,
               favorited: false,

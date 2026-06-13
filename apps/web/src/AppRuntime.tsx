@@ -143,11 +143,25 @@ const LazySetupProviderPanel = lazy(() =>
 
 const IGNORE_TELEMETRY_MAX_IN_FLIGHT = 3;
 const IGNORE_TELEMETRY_TIMEOUT_MS = 8_000;
+const ARTICLE_STATE_OVERLAY_STORAGE_KEY = "dibao:article-state-overlay:v1";
+const ARTICLE_STATE_OVERLAY_TTL_MS = 24 * 60 * 60 * 1000;
+const ARTICLE_STATE_OVERLAY_LIMIT = 500;
 
 type IgnoredArticleQueueItem = {
   articleId: string;
   state: ArticleState;
   view: ArticleView;
+};
+
+type ArticleStateOverlayEntry = {
+  articleId: string;
+  state: ArticleState;
+  updatedAt: number;
+};
+
+type ArticleStateOverlay = {
+  states: Map<string, ArticleState>;
+  locallyUpdatedIds: Set<string>;
 };
 const LazyFullContentPreviewPage = lazy(() =>
   import("./fullContent/FullContentPreviewPage.js").then((module) => ({ default: module.FullContentPreviewPage }))
@@ -178,6 +192,7 @@ export function App() {
     [initialRoute.page]
   );
   const initialSearchForm = useMemo(() => searchFormFromLocation(), []);
+  const initialArticleStateOverlay = useMemo(() => readArticleStateOverlay(), []);
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -305,8 +320,10 @@ export function App() {
   const ignoredArticleQueue = useRef<IgnoredArticleQueueItem[]>([]);
   const ignoredArticleInFlightIds = useRef(new Set<string>());
   const selectedArticleIdRef = useRef<string | null>(selectedArticleId);
-  const articleStateById = useRef(new Map<string, ArticleState>());
-  const locallyUpdatedArticleIds = useRef(new Set<string>());
+  const articleStateById = useRef(new Map<string, ArticleState>(initialArticleStateOverlay.states));
+  const locallyUpdatedArticleIds = useRef(
+    new Set<string>(initialArticleStateOverlay.locallyUpdatedIds)
+  );
   const articleRequestVersion = useRef(0);
   const detailExplanationRequestVersion = useRef(0);
   const listExplanationRequestVersion = useRef(0);
@@ -373,7 +390,9 @@ export function App() {
       articleStateById.current.get(articleId) ??
       (articleDetail?.id === articleId ? articleDetail.state : null);
     articleStateById.current.set(articleId, state);
+    locallyUpdatedArticleIds.current.delete(articleId);
     locallyUpdatedArticleIds.current.add(articleId);
+    writeArticleStateOverlay(articleStateById.current, locallyUpdatedArticleIds.current);
     if (previousState) {
       setUnreadCount((current) =>
         unreadCountAfterStateChange(current, previousState, state)
@@ -409,12 +428,37 @@ export function App() {
     setListExplanationError(null);
   }
 
+  function reloadArticleStateOverlay() {
+    const overlay = readArticleStateOverlay();
+    articleStateById.current = overlay.states;
+    locallyUpdatedArticleIds.current = overlay.locallyUpdatedIds;
+    setArticles((current) =>
+      articleListWithKnownLocalStates(
+        current,
+        articleStateById.current,
+        locallyUpdatedArticleIds.current
+      )
+    );
+    setArticleDetail((current) => {
+      if (!current || !locallyUpdatedArticleIds.current.has(current.id)) {
+        return current;
+      }
+      const state = articleStateById.current.get(current.id);
+      return state ? { ...current, state } : current;
+    });
+  }
+
+  function clearLocalArticleStates() {
+    articleStateById.current.clear();
+    locallyUpdatedArticleIds.current.clear();
+    clearArticleStateOverlay();
+  }
+
   function resetArticleListForPendingQuery() {
     articleRequestVersion.current += 1;
     setArticles([]);
     setUnreadCount(0);
-    articleStateById.current.clear();
-    locallyUpdatedArticleIds.current.clear();
+    clearLocalArticleStates();
     setNextArticleCursor(null);
     clearSelectedArticle();
     clearListExplanation();
@@ -498,8 +542,7 @@ export function App() {
     setFeeds([]);
     setArticles([]);
     setUnreadCount(0);
-    articleStateById.current.clear();
-    locallyUpdatedArticleIds.current.clear();
+    clearLocalArticleStates();
     setSourceSelection({ type: "all" });
     setAppPage({ type: "reader", view: defaultAppSettings.ui.defaultHomeView });
     setUnreadOnly(false);
@@ -569,7 +612,6 @@ export function App() {
     ignoredArticleIds.current.clear();
     ignoredArticleQueue.current = [];
     ignoredArticleInFlightIds.current.clear();
-    locallyUpdatedArticleIds.current.clear();
     articleRequestVersion.current += 1;
   }, [setLocale]);
 
@@ -1032,8 +1074,7 @@ export function App() {
       setArticleError(userMessageForError(error, t.errors.api));
       setArticles([]);
       setUnreadCount(0);
-      articleStateById.current.clear();
-      locallyUpdatedArticleIds.current.clear();
+      clearLocalArticleStates();
       setNextArticleCursor(null);
     } finally {
       if (requestVersion === articleRequestVersion.current) {
@@ -1092,8 +1133,7 @@ export function App() {
       setArticleError(userMessageForError(error, t.errors.api));
       setArticles([]);
       setUnreadCount(0);
-      articleStateById.current.clear();
-      locallyUpdatedArticleIds.current.clear();
+      clearLocalArticleStates();
       setNextArticleCursor(null);
     } finally {
       if (requestVersion === articleRequestVersion.current) {
@@ -1218,6 +1258,7 @@ export function App() {
 
   useEffect(() => {
     function handlePopState() {
+      reloadArticleStateOverlay();
       const route = routeFromLocation(appSettings.ui.defaultHomeView);
       hasExplicitUrlPageIntent.current = route.hasExplicitPage;
       setIsExplanationOpen(false);
@@ -1257,6 +1298,17 @@ export function App() {
       window.removeEventListener("popstate", handlePopState);
     };
   }, [appSettings.ui.defaultHomeView]);
+
+  useEffect(() => {
+    function handlePageShow() {
+      reloadArticleStateOverlay();
+    }
+
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2208,8 +2260,7 @@ export function App() {
     try {
       const result = await dibaoApi.markScopeRead(scope);
       setNotice({ type: "readerCommandMarkScopeRead", count: result.markedReadCount });
-      articleStateById.current.clear();
-      locallyUpdatedArticleIds.current.clear();
+      clearLocalArticleStates();
       await reload();
     } catch {
       setReaderCommandError(t.readerCommands.markScopeRead.error);
@@ -3255,6 +3306,138 @@ export function App() {
         )}
       </section>
     </main>
+  );
+}
+
+function readArticleStateOverlay(now: number = Date.now()): ArticleStateOverlay {
+  if (typeof window === "undefined") {
+    return {
+      states: new Map(),
+      locallyUpdatedIds: new Set()
+    };
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(ARTICLE_STATE_OVERLAY_STORAGE_KEY);
+    if (!raw) {
+      return {
+        states: new Map(),
+        locallyUpdatedIds: new Set()
+      };
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !Array.isArray((parsed as { entries?: unknown }).entries)
+    ) {
+      clearArticleStateOverlay();
+      return {
+        states: new Map(),
+        locallyUpdatedIds: new Set()
+      };
+    }
+
+    const entries = (parsed as { entries: unknown[] }).entries
+      .filter(isArticleStateOverlayEntry)
+      .filter((entry) => now - entry.updatedAt <= ARTICLE_STATE_OVERLAY_TTL_MS)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, ARTICLE_STATE_OVERLAY_LIMIT)
+      .reverse();
+    const states = new Map<string, ArticleState>();
+    const locallyUpdatedIds = new Set<string>();
+    for (const entry of entries) {
+      states.set(entry.articleId, entry.state);
+      locallyUpdatedIds.add(entry.articleId);
+    }
+    if (entries.length !== (parsed as { entries: unknown[] }).entries.length) {
+      writeArticleStateOverlay(states, locallyUpdatedIds, now);
+    }
+    return { states, locallyUpdatedIds };
+  } catch {
+    clearArticleStateOverlay();
+    return {
+      states: new Map(),
+      locallyUpdatedIds: new Set()
+    };
+  }
+}
+
+function writeArticleStateOverlay(
+  states: Map<string, ArticleState>,
+  locallyUpdatedIds: Set<string>,
+  now: number = Date.now()
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const entries: ArticleStateOverlayEntry[] = Array.from(locallyUpdatedIds)
+    .map((articleId) => {
+      const state = states.get(articleId);
+      return state
+        ? {
+            articleId,
+            state,
+            updatedAt: now
+          }
+        : null;
+    })
+    .filter((entry): entry is ArticleStateOverlayEntry => entry !== null)
+    .slice(-ARTICLE_STATE_OVERLAY_LIMIT);
+
+  try {
+    window.sessionStorage.setItem(
+      ARTICLE_STATE_OVERLAY_STORAGE_KEY,
+      JSON.stringify({
+        entries
+      })
+    );
+  } catch {
+    // Best-effort overlay. Server state remains authoritative.
+  }
+}
+
+function clearArticleStateOverlay(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(ARTICLE_STATE_OVERLAY_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function isArticleStateOverlayEntry(value: unknown): value is ArticleStateOverlayEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<ArticleStateOverlayEntry>;
+  return (
+    typeof candidate.articleId === "string" &&
+    candidate.articleId.length > 0 &&
+    typeof candidate.updatedAt === "number" &&
+    Number.isFinite(candidate.updatedAt) &&
+    isArticleState(candidate.state)
+  );
+}
+
+function isArticleState(value: unknown): value is ArticleState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<ArticleState>;
+  return (
+    typeof candidate.read === "boolean" &&
+    typeof candidate.favorited === "boolean" &&
+    typeof candidate.liked === "boolean" &&
+    typeof candidate.readLater === "boolean" &&
+    typeof candidate.hidden === "boolean" &&
+    typeof candidate.notInterested === "boolean" &&
+    typeof candidate.readingProgress === "number" &&
+    Number.isFinite(candidate.readingProgress)
   );
 }
 

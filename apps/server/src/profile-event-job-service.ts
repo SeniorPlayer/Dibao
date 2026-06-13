@@ -5,6 +5,7 @@ import type { ProfileService, ProfileUpdateResult } from "./profile-service.js";
 import type { RankingRecalculateJobService } from "./ranking-job-service.js";
 
 export const PROFILE_EVENT_PROCESS_JOB_TYPE = "profile_event_process" as const;
+export const PROFILE_EVENT_PROCESS_JOB_PRIORITY = 40;
 export const HIGH_VOLUME_PROFILE_RANKING_DELAY_MS = 5 * 60_000;
 
 export type ProfileEventProcessJobPayload = {
@@ -42,6 +43,7 @@ export class ProfileEventProcessJobService {
       type: PROFILE_EVENT_PROCESS_JOB_TYPE,
       payloadJson: JSON.stringify(input satisfies ProfileEventProcessJobPayload),
       maxAttempts: 2,
+      priority: PROFILE_EVENT_PROCESS_JOB_PRIORITY,
       runAfter: now,
       now
     });

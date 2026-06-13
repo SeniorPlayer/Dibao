@@ -15,6 +15,7 @@ type JobDbRow = {
   error: string | null;
   attempts: number;
   maxAttempts: number;
+  priority: number;
   runAfter: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -117,7 +118,7 @@ export class SqliteJobRepository implements JobRepository {
             where status = 'queued'
               and run_after <= ?
               and attempts < max_attempts
-            order by run_after, created_at, id
+            order by priority desc, run_after, created_at, id
             limit 1
           `
         )
@@ -152,6 +153,7 @@ export class SqliteJobRepository implements JobRepository {
     const now = input.now ?? Date.now();
     const runAfter = input.runAfter ?? now;
     const maxAttempts = input.maxAttempts ?? 3;
+    const priority = input.priority ?? 0;
 
     this.db
       .prepare(
@@ -164,16 +166,26 @@ export class SqliteJobRepository implements JobRepository {
             error,
             attempts,
             max_attempts,
+            priority,
             run_after,
             started_at,
             finished_at,
             created_at,
             updated_at
           )
-          values (?, ?, 'queued', ?, null, 0, ?, ?, null, null, ?, ?)
+          values (?, ?, 'queued', ?, null, 0, ?, ?, ?, null, null, ?, ?)
         `
       )
-      .run(input.id, input.type, input.payloadJson ?? null, maxAttempts, runAfter, now, now);
+      .run(
+        input.id,
+        input.type,
+        input.payloadJson ?? null,
+        maxAttempts,
+        priority,
+        runAfter,
+        now,
+        now
+      );
 
     const job = this.findById(input.id);
     if (!job) {
@@ -406,6 +418,7 @@ function baseJobSelect(): string {
       error,
       attempts,
       max_attempts as maxAttempts,
+      priority,
       run_after as runAfter,
       started_at as startedAt,
       finished_at as finishedAt,
