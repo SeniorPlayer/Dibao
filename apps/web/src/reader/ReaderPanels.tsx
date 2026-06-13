@@ -270,16 +270,29 @@ export function ArticleListPanel(props: {
       return;
     }
 
-    pendingLoadMoreAnchor.current = null;
-    const anchoredElement = root.querySelector<HTMLElement>(
-      `[data-article-id="${cssEscape(anchor.articleId)}"]`
-    );
-    if (anchoredElement) {
-      const rootTop = root.getBoundingClientRect().top;
-      root.scrollTop += anchoredElement.getBoundingClientRect().top - rootTop - anchor.offsetTop;
+    restoreArticleListScrollAnchor(root, anchor);
+    if (typeof window === "undefined") {
+      pendingLoadMoreAnchor.current = null;
       return;
     }
-    root.scrollTop = anchor.scrollTop;
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      restoreArticleListScrollAnchor(root, anchor);
+      const secondFrame = window.requestAnimationFrame(() => {
+        restoreArticleListScrollAnchor(root, anchor);
+        if (pendingLoadMoreAnchor.current === anchor) {
+          pendingLoadMoreAnchor.current = null;
+        }
+      });
+      anchor.animationFrames.push(secondFrame);
+    });
+    anchor.animationFrames.push(firstFrame);
+
+    return () => {
+      for (const frame of anchor.animationFrames.splice(0)) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
   }, [props.articles.length, props.isLoadingMore, rowHeightRevision]);
 
   const handleMeasuredArticleRowHeight = useCallback((articleId: string, height: number) => {
@@ -1402,6 +1415,7 @@ function elementVisibilityRatioInRoot(
 }
 
 type ArticleListScrollAnchor = {
+  animationFrames: number[];
   articleId: string;
   offsetTop: number;
   scrollTop: number;
@@ -1418,6 +1432,7 @@ function articleListScrollAnchorForRoot(root: HTMLElement): ArticleListScrollAnc
     const rect = row.getBoundingClientRect();
     if (rect.bottom > rootTop) {
       return {
+        animationFrames: [],
         articleId,
         offsetTop: rect.top - rootTop,
         scrollTop: root.scrollTop
@@ -1425,6 +1440,21 @@ function articleListScrollAnchorForRoot(root: HTMLElement): ArticleListScrollAnc
     }
   }
   return null;
+}
+
+function restoreArticleListScrollAnchor(root: HTMLElement, anchor: ArticleListScrollAnchor): void {
+  const anchoredElement = root.querySelector<HTMLElement>(
+    `[data-article-id="${cssEscape(anchor.articleId)}"]`
+  );
+  if (anchoredElement) {
+    const rootTop = root.getBoundingClientRect().top;
+    const delta = anchoredElement.getBoundingClientRect().top - rootTop - anchor.offsetTop;
+    if (Math.abs(delta) >= 1) {
+      root.scrollTop += delta;
+    }
+    return;
+  }
+  root.scrollTop = anchor.scrollTop;
 }
 
 export function measuredVirtualArticleWindow(input: {

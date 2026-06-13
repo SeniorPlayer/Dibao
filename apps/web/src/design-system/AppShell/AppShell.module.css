@@ -2896,10 +2896,12 @@
   justify-content: center;
   border-top: var(--border-subtle);
   padding: var(--space-3) var(--space-4);
+  overflow-anchor: none;
 }
 
 .loadMoreBar .secondaryButton {
   min-width: 128px;
+  overflow-anchor: none;
 }
 
 .paginationError {
