@@ -21,6 +21,22 @@
 
       .brief-panel-hero {
         margin-bottom: var(--dibao-plugin-space-4);
+        align-items: center;
+      }
+
+      .brief-panel-hero > div:first-child {
+        min-width: 0;
+      }
+
+      .brief-panel-hero .actions {
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+        margin-left: auto;
+      }
+
+      #generate {
+        min-width: 148px;
+        white-space: nowrap;
       }
 
       .article-title {
@@ -113,6 +129,30 @@
         padding: var(--dibao-plugin-space-3);
       }
 
+      .daily-brief-plugin .page {
+        padding: 0;
+      }
+
+      .daily-brief-plugin .shell {
+        max-width: none;
+        margin: 0;
+        gap: 0;
+      }
+
+      .daily-brief-plugin .management-tabs {
+        margin: 0;
+        border-top: 0;
+      }
+
+      .daily-brief-plugin #brief-panel,
+      .daily-brief-plugin #settings-panel {
+        padding: var(--dibao-plugin-space-5);
+      }
+
+      .daily-brief-plugin #error {
+        margin: var(--dibao-plugin-space-4) var(--dibao-plugin-space-5) 0;
+      }
+
       @media (max-width: 720px) {
         .brief-toolbar {
           display: block;
@@ -122,10 +162,32 @@
           width: 100%;
           min-width: 0;
         }
+
+        .brief-panel-hero {
+          display: grid;
+        }
+
+        .brief-panel-hero .actions {
+          margin-left: 0;
+        }
+
+        #generate {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .daily-brief-plugin #brief-panel,
+        .daily-brief-plugin #settings-panel {
+          padding: var(--dibao-plugin-space-3);
+        }
+
+        .daily-brief-plugin #error {
+          margin: var(--dibao-plugin-space-3) var(--dibao-plugin-space-3) 0;
+        }
       }
     </style>
   </head>
-  <body class="dibao-plugin">
+  <body class="dibao-plugin daily-brief-plugin">
     <main class="page">
       <div class="shell">
         <nav class="management-tabs" aria-label="每日简报视图" role="tablist">
