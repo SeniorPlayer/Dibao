@@ -19,6 +19,7 @@ import {
   type ProfileRepository,
   type RankingRepository,
   type UpsertArticleRankExplanationInput,
+  type UpsertRankContextInput,
   type UpsertArticleRankScoreInput
 } from "@dibao/db";
 import { FTRL_ACTIVE_ALPHA_CAP } from "./recommendation-maintenance-service.js";
@@ -376,9 +377,8 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
     let processed = 0;
     let lastProcessedArticleId: string | null = startingCursor;
     let pauseDecision: RankingPauseDecision | null = null;
-
-    if (activeIndexId) {
-      this.options.rankings.upsertRankContext({
+    const activeRankContextInput: UpsertRankContextInput | null = activeIndexId
+      ? {
         id: activeRankContext,
         algorithmVersion: RECOMMENDATION_ALGORITHM_VERSION,
         featureSchemaVersion: RECOMMENDATION_FEATURE_SCHEMA_VERSION,
@@ -394,8 +394,28 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
           }
         }),
         now
-      });
-    }
+      }
+      : null;
+
+    const pauseBeforeWriting = (): boolean => {
+      if (!paged || processed <= 0 || pauseDecision !== null) {
+        return false;
+      }
+
+      const decision = this.pauseDecision(processed, lastProcessedArticleId);
+      if (decision.pause) {
+        pauseDecision = decision;
+        return true;
+      }
+      if (timeBudgetExceeded()) {
+        pauseDecision = {
+          pause: true,
+          resumeAfter: this.now() + RANKING_TIME_BUDGET_RESUME_DELAY_MS
+        };
+        return true;
+      }
+      return false;
+    };
 
     for (const candidate of candidates) {
       if (paged && processed > 0) {
@@ -513,7 +533,16 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         createdAt: now
       });
     }
+    if (pauseBeforeWriting()) {
+      return {
+        processed: 0,
+        nextCursor: startingCursor,
+        paused: true,
+        resumeAfter: pauseDecision?.pause ? pauseDecision.resumeAfter : this.now()
+      };
+    }
     this.writeRankingOutputs({
+      rankContext: activeRankContextInput,
       baseScores,
       rankScores,
       explanations
@@ -549,11 +578,15 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
   }
 
   private writeRankingOutputs(input: {
+    rankContext?: UpsertRankContextInput | null;
     baseScores: UpsertArticleRankScoreInput[];
     rankScores: UpsertArticleRankScoreInput[];
     explanations: UpsertArticleRankExplanationInput[];
   }): void {
     const write = () => {
+      if (input.rankContext) {
+        this.options.rankings.upsertRankContext(input.rankContext);
+      }
       for (const score of input.baseScores) {
         this.options.rankings.upsertBaseScore(score);
       }

@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   loadDefaultMigrations,
@@ -79,13 +79,13 @@ describe("server API vertical slice", () => {
   });
 
   it("records foreground activity for static app asset requests", async () => {
-    const db = createEmptyDatabase();
+    const databasePath = tempDatabasePath();
     const webDistDir = createTempDir();
     mkdirSync(join(webDistDir, "assets"), { recursive: true });
     writeFileSync(join(webDistDir, "index.html"), "<!doctype html><div id=\"root\"></div>");
     writeFileSync(join(webDistDir, "assets", "app.js"), "console.log('dibao');");
     const app = buildServer({
-      db,
+      databasePath,
       logger: false,
       now: () => 12_345,
       recordForegroundActivity: true,
@@ -100,14 +100,21 @@ describe("server API vertical slice", () => {
       });
 
       expect(response.statusCode, response.body).toBe(200);
-      expect(new SqliteAppSettingsRepository(db).getJson("runtime.foregroundActivity")).toEqual({
+      const signalPath = join(dirname(databasePath), "foreground-activity.json");
+      await waitForCondition(async () => {
+        try {
+          return readFileSync(signalPath, "utf8").length > 0;
+        } catch {
+          return false;
+        }
+      });
+      expect(JSON.parse(readFileSync(signalPath, "utf8"))).toEqual({
         lastAt: 12_345,
         route: "/*",
         method: "GET"
       });
     } finally {
       await app.close();
-      db.close();
     }
   });
 

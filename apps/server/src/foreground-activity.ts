@@ -1,8 +1,11 @@
 import type { AppSettingsRepository } from "@dibao/db";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export const FOREGROUND_ACTIVITY_SETTING_KEY = "runtime.foregroundActivity";
 export const DEFAULT_FOREGROUND_QUIET_WINDOW_MS = 30_000;
 export const DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS = 2_000;
+const FOREGROUND_ACTIVITY_SIGNAL_FILE = "foreground-activity.json";
 
 export type ForegroundActivityState = {
   lastAt: number;
@@ -29,24 +32,65 @@ export function markForegroundActivity(
   );
 }
 
+export function foregroundActivitySignalPath(databasePath: string | undefined): string | null {
+  if (!databasePath || databasePath === ":memory:") {
+    return null;
+  }
+
+  return join(dirname(databasePath), FOREGROUND_ACTIVITY_SIGNAL_FILE);
+}
+
+export function writeForegroundActivitySignal(
+  signalPath: string,
+  input: {
+    now: number;
+    route?: string | null;
+    method?: string | null;
+  },
+  onError?: (error: unknown) => void
+): void {
+  const state = {
+    lastAt: input.now,
+    route: input.route ?? null,
+    method: input.method ?? null
+  } satisfies ForegroundActivityState;
+
+  try {
+    writeFileSync(signalPath, JSON.stringify(state));
+  } catch (error) {
+    onError?.(error);
+  }
+}
+
 export function foregroundQuietUntil(
   settings: Pick<AppSettingsRepository, "getJson">,
   input: {
     now: number;
     quietWindowMs: number;
+    signalPath?: string | null;
   }
 ): number | null {
   if (input.quietWindowMs <= 0) {
     return null;
   }
 
-  const state = settings.getJson<unknown>(FOREGROUND_ACTIVITY_SETTING_KEY);
+  const fileState = input.signalPath ? readForegroundActivitySignal(input.signalPath) : null;
+  const state = fileState ?? settings.getJson<unknown>(FOREGROUND_ACTIVITY_SETTING_KEY);
   if (!isForegroundActivityState(state)) {
     return null;
   }
 
   const quietUntil = state.lastAt + input.quietWindowMs;
   return quietUntil > input.now ? quietUntil : null;
+}
+
+function readForegroundActivitySignal(signalPath: string): ForegroundActivityState | null {
+  try {
+    const parsed = JSON.parse(readFileSync(signalPath, "utf8")) as unknown;
+    return isForegroundActivityState(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function isForegroundActivityState(value: unknown): value is ForegroundActivityState {

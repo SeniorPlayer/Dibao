@@ -128,7 +128,8 @@ import {
 import {
   DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS,
   foregroundQuietUntil,
-  markForegroundActivity
+  foregroundActivitySignalPath,
+  writeForegroundActivitySignal
 } from "./foreground-activity.js";
 import { FullContentExtractionService } from "./full-content-extraction-service.js";
 import {
@@ -494,6 +495,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const foregroundActivityWriteThrottleMs =
     options.foregroundActivityWriteThrottleMs ??
     DEFAULT_FOREGROUND_ACTIVITY_WRITE_THROTTLE_MS;
+  const foregroundSignalPath = foregroundActivitySignalPath(configuredDatabasePath);
   const foregroundQuietWindowMs = Math.max(0, options.foregroundQuietWindowMs ?? 0);
   const backgroundStartupDelayMs = Math.max(0, options.backgroundStartupDelayMs ?? 0);
   const backgroundInitialTickDelayMs = backgroundJobs
@@ -572,7 +574,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       const now = options.now?.() ?? Date.now();
       const resumeAfter = foregroundQuietUntil(settings, {
         now,
-        quietWindowMs: foregroundQuietWindowMs
+        quietWindowMs: foregroundQuietWindowMs,
+        signalPath: foregroundSignalPath
       });
       return resumeAfter ? { pause: true, resumeAfter } : { pause: false };
     },
@@ -1003,7 +1006,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       const now = options.now?.() ?? Date.now();
       const deferUntil = foregroundQuietUntil(settings, {
         now,
-        quietWindowMs: foregroundQuietWindowMs
+        quietWindowMs: foregroundQuietWindowMs,
+        signalPath: foregroundSignalPath
       });
       return deferUntil
         ? {
@@ -1241,15 +1245,19 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
 
     lastForegroundActivityWriteAt = now;
-    try {
-      markForegroundActivity(settings, {
+    if (!foregroundSignalPath) {
+      return;
+    }
+
+    writeForegroundActivitySignal(
+      foregroundSignalPath,
+      {
         now,
         route: request.routeOptions.url ?? pathname,
         method: request.method
-      });
-    } catch (error) {
-      app.log.warn({ error }, "foreground.activity.write_failed");
-    }
+      },
+      (error) => app.log.warn({ error }, "foreground.activity.write_failed")
+    );
   }
 
   function startBackgroundServices(): void {

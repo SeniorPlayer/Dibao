@@ -687,6 +687,37 @@ describe("profile algorithm and recommendation ranking", () => {
     }
   });
 
+  it("does not commit or advance a ranking chunk when foreground activity resumes before writeback", () => {
+    const fixture = createProfileFixture();
+    try {
+      const ranking = new RecommendationRankingService({
+        embeddings: fixture.embeddings,
+        profiles: fixture.profiles,
+        rankings: fixture.rankings,
+        shouldPause: ({ processed }) =>
+          processed >= 1
+            ? { pause: true, resumeAfter: 8_000 }
+            : { pause: false },
+        now: () => 5_000
+      });
+
+      const result = ranking.recalculateChunk({
+        cursor: null,
+        limit: 1
+      });
+
+      expect(result).toMatchObject({
+        processed: 0,
+        nextCursor: null,
+        paused: true,
+        resumeAfter: 8_000
+      });
+      expect(activeScore(fixture.db, "article_liked")).toBeNull();
+    } finally {
+      fixture.db.close();
+    }
+  });
+
   it("orders recommended articles by score before chunk-local rerank_position and keeps latest date-based", () => {
     const db = openDatabase(tempDatabasePath(), { migrate: true });
     const feeds = new SqliteFeedRepository(db);
