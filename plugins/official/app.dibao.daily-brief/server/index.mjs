@@ -29,10 +29,11 @@ export default {
 
     ctx.api.get("/state", () => {
       const settings = readSettings(ctx);
-      const briefs = listBriefs(ctx);
+      const targets = readTargets(ctx);
+      const briefs = listBriefs(ctx, targets);
       return {
         settings,
-        targets: readTargets(ctx),
+        targets,
         briefs,
         latest: latestFromBriefs(briefs),
         generatedAt: ctx.now()
@@ -52,10 +53,11 @@ export default {
       const next = sanitizeSettings(body, readSettings(ctx));
       writeSettings(ctx, next);
       ensureSchedule(ctx, next);
-      const briefs = listBriefs(ctx);
+      const targets = readTargets(ctx);
+      const briefs = listBriefs(ctx, targets);
       return {
         settings: next,
-        targets: readTargets(ctx),
+        targets,
         briefs,
         latest: latestFromBriefs(briefs)
       };
@@ -66,9 +68,11 @@ export default {
       const force = body && typeof body === "object" && body.force === true;
       const hadTodayBrief = Boolean(ctx.storage.get(briefKey(ctx.now(), settings.timezone)));
       const brief = await generateBrief(ctx, settings, { force });
+      const targets = readTargets(ctx);
+      const briefs = listBriefs(ctx, targets);
       return {
-        brief,
-        briefs: listBriefs(ctx),
+        brief: hydrateBriefLabels(brief, targets),
+        briefs,
         generated: force || !hadTodayBrief
       };
     });
@@ -190,12 +194,13 @@ function countDiscoveredArticles(ctx, startAt, endAt) {
   return ctx.articles.countDiscovered({ startAt, endAt });
 }
 
-function listBriefs(ctx) {
+function listBriefs(ctx, targets = readTargets(ctx)) {
   return ctx.storage
     .listByPrefix("brief:")
     .map((item) => item.value)
     .sort((left, right) => right.generatedAt - left.generatedAt)
-    .slice(0, 30);
+    .slice(0, 30)
+    .map((brief) => hydrateBriefLabels(brief, targets));
 }
 
 function latestFromBriefs(briefs) {
@@ -267,6 +272,40 @@ function groupByFamily(articles) {
     groups.push(group);
   }
   return groups;
+}
+
+function hydrateBriefLabels(brief, targets) {
+  if (!brief || typeof brief !== "object") {
+    return brief;
+  }
+  const familyLabels = new Map((targets?.families || []).map((family) => [family.id, family.label]));
+  const clusterLabels = new Map((targets?.clusters || []).map((cluster) => [cluster.id, cluster.label]));
+  const articles = (brief.groups || []).flatMap((group) =>
+    (group.articles || []).map((article) => hydrateBriefArticleLabels(article, familyLabels, clusterLabels))
+  );
+  const groups = articles.length > 0 ? groupByFamily(articles) : null;
+  return {
+    ...brief,
+    topicCount: groups ? groups.length : brief.topicCount,
+    groups: groups ?? (brief.groups || []).map((group) => hydrateBriefGroupLabels(group, familyLabels, clusterLabels))
+  };
+}
+
+function hydrateBriefGroupLabels(group, familyLabels, clusterLabels) {
+  const articles = (group.articles || []).map((article) => hydrateBriefArticleLabels(article, familyLabels, clusterLabels));
+  return {
+    ...group,
+    label: familyLabels.get(group.id) || clusterLabels.get(group.id) || group.label,
+    articles
+  };
+}
+
+function hydrateBriefArticleLabels(article, familyLabels, clusterLabels) {
+  return {
+    ...article,
+    familyLabel: familyLabels.get(article.familyId) || article.familyLabel,
+    clusterLabel: clusterLabels.get(article.clusterId) || article.clusterLabel
+  };
 }
 
 function briefKey(now, timezone) {

@@ -889,14 +889,12 @@
       }
 
       function formatChineseDate(value, timezone) {
-        const parts = new Intl.DateTimeFormat("zh-CN", {
+        return new Intl.DateTimeFormat("zh-CN", {
           timeZone: timezone || "UTC",
           year: "numeric",
           month: "long",
           day: "numeric"
-        }).formatToParts(value);
-        const part = (type) => parts.find((item) => item.type === type)?.value || "";
-        return `${part("year")} 年 ${part("month")} ${part("day")} 日`;
+        }).format(value);
       }
 
       function dibaoArticleUrl(articleId) {

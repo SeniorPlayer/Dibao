@@ -1445,6 +1445,9 @@ export class PluginService {
     const familyLabels = this.familyLabelsById(
       Array.from(new Set(parsedRows.map((item) => item.familyId).filter((id) => !id.startsWith("source:"))))
     );
+    const clusterLabels = this.clusterLabelsById(
+      Array.from(new Set(parsedRows.map((item) => item.clusterId).filter((id): id is string => Boolean(id))))
+    );
 
     return parsedRows.map(({ row, familyId, familyLabel, clusterId, clusterLabel }) => {
       return {
@@ -1461,7 +1464,7 @@ export class PluginService {
         familyId,
         familyLabel: familyLabels.get(familyId) ?? familyLabel,
         clusterId,
-        clusterLabel,
+        clusterLabel: clusterId ? clusterLabels.get(clusterId) ?? clusterLabel : clusterLabel,
         reason: familyId.startsWith("source:") ? "source" : "interest-family",
         state: mapPluginArticleState(row)
       };
@@ -1505,6 +1508,25 @@ export class PluginService {
         `
       )
       .all(...familyIds) as Array<{ id: string; label: string }>;
+    return new Map(rows.map((row) => [row.id, row.label]));
+  }
+
+  private clusterLabelsById(clusterIds: string[]): Map<string, string> {
+    if (clusterIds.length === 0) {
+      return new Map();
+    }
+    const rows = this.options.db
+      .prepare(
+        `
+          select
+            c.id,
+            coalesce(nullif(l.manual_label, ''), nullif(l.auto_label, ''), nullif(c.label, ''), c.id) as label
+          from interest_clusters c
+          left join interest_cluster_labels l on l.cluster_id = c.id
+          where c.id in (${clusterIds.map(() => "?").join(", ")})
+        `
+      )
+      .all(...clusterIds) as Array<{ id: string; label: string }>;
     return new Map(rows.map((row) => [row.id, row.label]));
   }
 

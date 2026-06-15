@@ -2005,6 +2005,7 @@ describe("server API vertical slice", () => {
           expect.objectContaining({ id: "family_ai", label: "AI 产品与开发" })
         ])
       );
+      expect(generatedBrief.groups.map((group: { id: string }) => group.id)).not.toContain("cluster_ai");
       expect(generatedBrief).toMatchObject({
         receivedArticleCount: expect.any(Number),
         topicCount: expect.any(Number)
@@ -2037,6 +2038,40 @@ describe("server API vertical slice", () => {
         snapshotAt: 10_000
       });
 
+      const renamedCluster = await injectJson(app, "PATCH", "/api/recommendation/clusters/cluster_ai/label", {
+        manualLabel: "AI 编程代理"
+      });
+      expect(renamedCluster.statusCode, renamedCluster.body).toBe(200);
+      expect(renamedCluster.json()).toMatchObject({
+        data: {
+          ok: true,
+          clusterId: "cluster_ai",
+          displayLabel: "AI 编程代理",
+          labelSource: "manual"
+        }
+      });
+      const relabeledBriefs = await app.inject({
+        method: "GET",
+        url: "/api/plugins/app.dibao.daily-brief/api/briefs"
+      });
+      expect(relabeledBriefs.statusCode, relabeledBriefs.body).toBe(200);
+      expect(relabeledBriefs.json().data.latest.groups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "family_ai",
+            label: "AI 产品与开发",
+            articles: expect.arrayContaining([
+              expect.objectContaining({
+                articleId: "article_recommended",
+                familyLabel: "AI 产品与开发",
+                clusterLabel: "AI 编程代理"
+              })
+            ])
+          })
+        ])
+      );
+      expect(relabeledBriefs.json().data.latest.groups.map((group: { id: string }) => group.id)).not.toContain("cluster_ai");
+
       db.prepare("update articles set title = ?, summary = ?, status = 'deleted', deleted_at = ? where id = ?").run(
         "Deleted source article",
         null,
@@ -2056,8 +2091,15 @@ describe("server API vertical slice", () => {
         .find((article: { articleId: string }) => article.articleId === "article_recommended");
       expect(cachedArticle).toMatchObject({
         title: "Quiet ranking systems",
+        clusterLabel: "AI 编程代理",
         displaySummary: expect.stringContaining("Readable & useful summary.")
       });
+      expect(cachedGenerate.json().data.brief.groups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "family_ai", label: "AI 产品与开发" })
+        ])
+      );
+      expect(cachedGenerate.json().data.brief.groups.map((group: { id: string }) => group.id)).not.toContain("cluster_ai");
 
       const excludedCluster = await postJson(app, "/api/plugins/app.dibao.daily-brief/api/settings", {
         enabled: true,
