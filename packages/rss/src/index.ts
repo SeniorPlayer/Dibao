@@ -174,7 +174,7 @@ function parseRssItem(item: XmlNode, feedUrl: string, index: number): ParsedFeed
   const title = childText(item, "title") ?? guid ?? `Untitled item ${index + 1}`;
   const url =
     normalizeMaybeUrl(childText(item, "link"), feedUrl) ??
-    normalizeMaybeUrl(guid, feedUrl) ??
+    normalizeMaybeUrl(guid, feedUrl, false) ??
     fallbackItemUrl(feedUrl, title, guid, index);
   const summary = childText(item, "description");
   const contentHtml = childText(item, "content:encoded", "encoded", "content") ?? summary;
@@ -209,7 +209,7 @@ function parseAtomEntry(entry: XmlNode, feedUrl: string, index: number): ParsedF
   const title = childText(entry, "title") ?? guid ?? `Untitled entry ${index + 1}`;
   const url =
     atomLink(entry, feedUrl) ??
-    normalizeMaybeUrl(guid, feedUrl) ??
+    normalizeMaybeUrl(guid, feedUrl, false) ??
     fallbackItemUrl(feedUrl, title, guid, index);
   const summary = childText(entry, "summary");
   const contentHtml = childText(entry, "content") ?? summary;
@@ -456,13 +456,24 @@ function localName(name: string): string {
   return name.toLowerCase().split(":").pop() ?? name.toLowerCase();
 }
 
-function normalizeMaybeUrl(value: string | null | undefined, baseUrl: string): string | null {
+function normalizeMaybeUrl(
+  value: string | null | undefined,
+  baseUrl: string,
+  allowRelative = true
+): string | null {
   if (!value) {
     return null;
   }
 
   try {
-    const url = new URL(value.trim(), baseUrl);
+    const trimmed = value.trim();
+    if (!allowRelative && !/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) {
+      return null;
+    }
+    const url = new URL(trimmed, baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
     url.hash = "";
     url.username = "";
     url.password = "";

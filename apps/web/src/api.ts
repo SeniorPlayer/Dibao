@@ -1274,6 +1274,14 @@ export function createDibaoApi(fetcher: ApiFetch = fetch) {
       ).data;
     },
 
+    async logoutAll(): Promise<AuthOkResponse> {
+      return (
+        await request<AuthOkResponse>("/api/auth/logout-all", {
+          method: "POST"
+        })
+      ).data;
+    },
+
     async changePassword(currentPassword: string, newPassword: string): Promise<AuthOkResponse> {
       return (
         await request<AuthOkResponse>("/api/auth/password", {

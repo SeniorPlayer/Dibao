@@ -35,6 +35,7 @@ export interface AuthCredentialRepository {
 
 export interface SessionRepository {
   createSession(input: CreateSessionInput): SessionRow;
+  deleteAll(): void;
   deleteByHash(sessionHash: string): void;
   deleteExpired(now: number): void;
   findByHash(sessionHash: string): SessionRow | null;
@@ -159,6 +160,10 @@ export class SqliteSessionRepository implements SessionRepository {
 
   deleteByHash(sessionHash: string): void {
     this.db.prepare("delete from sessions where session_hash = ?").run(sessionHash);
+  }
+
+  deleteAll(): void {
+    this.db.prepare("delete from sessions").run();
   }
 
   deleteExpired(now: number): void {

@@ -1843,7 +1843,9 @@ export function safeArticleUrl(
   }
 
   try {
-    const url = new URL(value, baseUrl ?? window.location.origin);
+    const fallbackBaseUrl =
+      typeof window === "undefined" ? "http://localhost" : window.location.origin;
+    const url = new URL(value, baseUrl ?? fallbackBaseUrl);
     return protocols.includes(url.protocol) ? url.href : null;
   } catch {
     return null;

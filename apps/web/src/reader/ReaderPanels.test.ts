@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   measuredVirtualArticleWindow,
+  safeOriginalArticleUrl,
   scrolledPastArticleIdsForIgnoreTelemetry
 } from "./ReaderPanels.js";
+
+describe("reader original article link", () => {
+  it("allows only HTTP and HTTPS original URLs", () => {
+    expect(safeOriginalArticleUrl("https://example.com/article")).toBe("https://example.com/article");
+    expect(safeOriginalArticleUrl("http://example.com/article")).toBe("http://example.com/article");
+    expect(safeOriginalArticleUrl("javascript:alert(1)")).toBeNull();
+    expect(safeOriginalArticleUrl("data:text/html,hello")).toBeNull();
+    expect(safeOriginalArticleUrl("file:///etc/passwd")).toBeNull();
+  });
+});
 
 describe("article list ignore telemetry", () => {
   it("does not ignore restored rows until the user scrolls down again", () => {

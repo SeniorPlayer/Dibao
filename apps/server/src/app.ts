@@ -456,6 +456,8 @@ type BuildServerOptions = {
   fullContentFetcher?: typeof fetch;
   latestReleaseFetcher?: typeof fetch;
   pluginFetcher?: typeof fetch;
+  enableUserPluginInstall?: boolean;
+  pluginTrustedPublicKeys?: Record<string, string>;
   officialPluginsDir?: string;
   pluginDataDir?: string;
   pluginSecretKey?: string;
@@ -645,6 +647,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     pluginDataDir: options.pluginDataDir,
     secretKey: options.pluginSecretKey,
     fetcher: options.pluginFetcher,
+    enableUserPluginInstall: options.enableUserPluginInstall,
+    trustedPublicKeys: options.pluginTrustedPublicKeys,
     now: options.now,
     drainDueJobs: async () => drainDueJobsForPlugins ? await drainDueJobsForPlugins() : 0,
     logPerformance: (record) => {
@@ -1508,6 +1512,16 @@ export function buildServer(options: BuildServerOptions = {}) {
     };
   });
 
+  app.post("/api/auth/logout-all", async (_request, reply) => {
+    authService.logoutAll();
+    reply.header("set-cookie", serializeClearSessionCookie(cookieOptions));
+    return {
+      data: {
+        ok: true
+      }
+    };
+  });
+
   app.post<{ Body: ChangePasswordBody }>("/api/auth/password", async (request, reply) => {
     const parsed = parseChangePasswordBody(request.body);
     if (!parsed.ok) {
@@ -1515,7 +1529,15 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
 
     try {
-      await authService.changePassword(parsed.currentPassword, parsed.newPassword);
+      const session = await authService.changePassword(
+        parsed.currentPassword,
+        parsed.newPassword,
+        requestMeta(request)
+      );
+      reply.header(
+        "set-cookie",
+        serializeSessionCookie(session.token, session.expiresAt, cookieOptions)
+      );
       return {
         data: {
           ok: true
@@ -3167,6 +3189,7 @@ function isForegroundDeferrableJobType(type: JobType): boolean {
 const upgradeAllowedRoutes = new Set([
   "GET /api/auth/session",
   "POST /api/auth/logout",
+  "POST /api/auth/logout-all",
   "GET /api/setup/status",
   "GET /api/system/health",
   "GET /api/system/upgrade/status",

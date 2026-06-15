@@ -31,11 +31,30 @@ describe("plugin-sdk", () => {
       pluginPackage,
       privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
       publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+      keyId: "example",
       now: () => new Date("2026-06-01T00:00:00Z")
     });
 
-    expect(validatePluginPackage(signed)).toEqual({ ok: true });
-    expect(verifyPluginPackageSignature({ pluginPackage: signed })).toEqual({ ok: true });
+    expect(validatePluginPackage(signed)).toEqual({
+      ok: false,
+      errors: ["Plugin signature key is not trusted"]
+    });
+    expect(verifyPluginPackageSignature({ pluginPackage })).toEqual({
+      ok: false,
+      errors: ["Plugin signature is required"]
+    });
+    expect(verifyPluginPackageSignature({ pluginPackage: signed })).toEqual({
+      ok: false,
+      errors: ["Plugin signature key is not trusted"]
+    });
+    expect(
+      verifyPluginPackageSignature({
+        pluginPackage: signed,
+        trustedPublicKeys: {
+          example: publicKey.export({ format: "pem", type: "spki" }).toString()
+        }
+      })
+    ).toEqual({ ok: true });
     expect(pluginPackageSha256(pluginPackage)).toBe(pluginPackageSha256({ ...pluginPackage }));
     expect(
       verifyPluginPackageSignature({
@@ -45,6 +64,9 @@ describe("plugin-sdk", () => {
             ...signed.files,
             "web/index.html": "tampered"
           }
+        },
+        trustedPublicKeys: {
+          example: publicKey.export({ format: "pem", type: "spki" }).toString()
         }
       })
     ).toEqual({ ok: false, errors: ["Plugin signature verification failed"] });

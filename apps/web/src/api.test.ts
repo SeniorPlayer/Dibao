@@ -47,6 +47,7 @@ describe("web API client", () => {
     await api.setupAuth("Pls", "correct horse battery");
     await api.login("Pls", "correct horse battery");
     await api.changePassword("correct horse battery", "new correct horse battery");
+    await api.logoutAll();
     await api.logout();
 
     expect(calls).toEqual([
@@ -82,6 +83,12 @@ describe("web API client", () => {
           currentPassword: "correct horse battery",
           newPassword: "new correct horse battery"
         }
+      },
+      {
+        path: "/api/auth/logout-all",
+        method: "POST",
+        credentials: "same-origin",
+        body: null
       },
       {
         path: "/api/auth/logout",

@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
@@ -18,6 +19,8 @@ export type ControlledFetcher = (
   init?: RequestInit
 ) => Promise<ControlledFetchResponse>;
 
+export type HostnameResolver = (hostname: string) => Promise<string[]>;
+
 export type FetchPrivacyWarning = {
   url: string;
   hostname: string;
@@ -29,12 +32,20 @@ export type ControlledFetchTextOptions = {
   headers?: RequestInit["headers"];
   timeoutMs?: number;
   maxBytes?: number;
+  allowPrivateNetwork?: boolean;
+  allowCidrs?: string[];
+  maxRedirects?: number;
   onWarning?: (warning: FetchPrivacyWarning) => void;
+  resolveHostname?: HostnameResolver;
 };
 
 export class ControlledFetchError extends Error {
   constructor(
-    readonly code: "FETCH_TIMEOUT" | "FETCH_TOO_LARGE" | "FETCH_READ_FAILED",
+    readonly code:
+      | "FETCH_TIMEOUT"
+      | "FETCH_TOO_LARGE"
+      | "FETCH_READ_FAILED"
+      | "FETCH_PRIVATE_TARGET",
     message: string
   ) {
     super(message);
@@ -51,20 +62,19 @@ export async function controlledFetchText(
     DEFAULT_FETCH_TIMEOUT_MS
   );
   const maxBytes = normalizePositiveInteger(options.maxBytes, DEFAULT_FEED_FETCH_MAX_BYTES);
+  const maxRedirects = normalizeNonNegativeInteger(options.maxRedirects, 10);
   const fetcher = options.fetcher ?? fetch;
+  const privacyPolicy = privacyPolicyForOptions(options);
 
-  warnIfPrivateTarget(url, options.onWarning);
+  await assertAllowedFetchTarget(url, privacyPolicy, options.onWarning);
 
   const controller = new AbortController();
   let timedOut = false;
   let timeout: ReturnType<typeof setTimeout> | null = null;
+  let currentUrl = url;
+  let response: ControlledFetchResponse | null = null;
 
   try {
-    const fetchPromise = fetcher(url, {
-      headers: options.headers,
-      signal: controller.signal
-    });
-    fetchPromise.catch(() => undefined);
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         timedOut = true;
@@ -72,12 +82,38 @@ export async function controlledFetchText(
         reject(new ControlledFetchError("FETCH_TIMEOUT", `Fetch timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
-    const response = await Promise.race([
-      fetchPromise,
-      timeoutPromise
-    ]);
-    if (response.url && response.url !== url) {
-      warnIfPrivateTarget(response.url, options.onWarning);
+
+    for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
+      const fetchPromise = fetcher(currentUrl, {
+        headers: options.headers,
+        redirect: "manual",
+        signal: controller.signal
+      });
+      fetchPromise.catch(() => undefined);
+      response = await Promise.race([
+        fetchPromise,
+        timeoutPromise
+      ]);
+      const responseUrl = response.url && response.url !== currentUrl ? response.url : currentUrl;
+      await assertAllowedFetchTarget(responseUrl, privacyPolicy, options.onWarning);
+
+      const location = response.headers.get("location");
+      if (isRedirectStatus(response.status) && location) {
+        if (redirects >= maxRedirects) {
+          throw new ControlledFetchError(
+            "FETCH_READ_FAILED",
+            `Fetch exceeded ${maxRedirects} redirects`
+          );
+        }
+        currentUrl = new URL(location, responseUrl).toString();
+        await assertAllowedFetchTarget(currentUrl, privacyPolicy, options.onWarning);
+        continue;
+      }
+      break;
+    }
+
+    if (!response) {
+      throw new ControlledFetchError("FETCH_READ_FAILED", "Fetch did not return a response");
     }
 
     const contentLength = response.headers.get("content-length");
@@ -106,6 +142,16 @@ export async function controlledFetchText(
       clearTimeout(timeout);
     }
   }
+}
+
+export async function assertControlledFetchTarget(
+  url: string,
+  options: Pick<
+    ControlledFetchTextOptions,
+    "allowPrivateNetwork" | "allowCidrs" | "onWarning" | "resolveHostname"
+  > = {}
+): Promise<void> {
+  await assertAllowedFetchTarget(url, privacyPolicyForOptions(options), options.onWarning);
 }
 
 export function feedFetchMaxBytes(): number {
@@ -158,24 +204,89 @@ async function readResponseBody(response: ControlledFetchResponse, maxBytes: num
   }
 }
 
-function warnIfPrivateTarget(urlValue: string, onWarning?: (warning: FetchPrivacyWarning) => void): void {
-  if (!onWarning) {
-    return;
-  }
+type FetchPrivacyPolicy = {
+  allowPrivateNetwork: boolean;
+  allowCidrs: ParsedCidr[];
+  resolveHostname: HostnameResolver;
+};
 
+async function assertAllowedFetchTarget(
+  urlValue: string,
+  policy: FetchPrivacyPolicy,
+  onWarning?: (warning: FetchPrivacyWarning) => void
+): Promise<void> {
+  let url: URL;
   try {
-    const url = new URL(urlValue);
-    const hostname = url.hostname.toLowerCase().replace(/^\[/u, "").replace(/\]$/u, "");
-    const reason = privateTargetReason(hostname);
-    if (reason) {
-      onWarning({ url: url.toString(), hostname, reason });
-    }
+    url = new URL(urlValue);
   } catch {
     return;
   }
+
+  const hostname = normalizeHostname(url.hostname);
+  const hostnameReason = privateTargetReason(hostname);
+  const directIpAllowed = isAllowedPrivateIp(hostname, policy);
+  if (hostnameReason) {
+    const warning = { url: url.toString(), hostname, reason: hostnameReason };
+    onWarning?.(warning);
+    if (!policy.allowPrivateNetwork && !directIpAllowed) {
+      const resolvedAllowed = await hostnameResolvesOnlyToAllowedPrivateIps(hostname, policy);
+      if (!resolvedAllowed) {
+        throw privateTargetError(warning);
+      }
+    }
+    return;
+  }
+
+  if (isIP(hostname) !== 0) {
+    return;
+  }
+
+  const addresses = await resolveHostnameAddresses(hostname, policy.resolveHostname);
+  for (const address of addresses) {
+    const reason = privateTargetReason(address);
+    if (!reason) {
+      continue;
+    }
+    const warning = { url: url.toString(), hostname: address, reason };
+    onWarning?.(warning);
+    if (!policy.allowPrivateNetwork && !isAllowedPrivateIp(address, policy)) {
+      throw privateTargetError(warning);
+    }
+  }
+}
+
+async function hostnameResolvesOnlyToAllowedPrivateIps(
+  hostname: string,
+  policy: FetchPrivacyPolicy
+): Promise<boolean> {
+  const addresses = await resolveHostnameAddresses(hostname, policy.resolveHostname);
+  return addresses.length > 0 && addresses.every((address) => isAllowedPrivateIp(address, policy));
+}
+
+function privateTargetError(warning: FetchPrivacyWarning): ControlledFetchError {
+  return new ControlledFetchError(
+    "FETCH_PRIVATE_TARGET",
+    `Fetch target is blocked by private-network policy: ${warning.hostname} (${warning.reason})`
+  );
+}
+
+async function resolveHostnameAddresses(
+  hostname: string,
+  resolver: HostnameResolver
+): Promise<string[]> {
+  try {
+    return await resolver(hostname);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[/u, "").replace(/\]$/u, "");
 }
 
 function privateTargetReason(hostname: string): string | null {
+  hostname = normalizeHostname(hostname);
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     return "localhost";
   }
@@ -240,8 +351,135 @@ function readPositiveIntegerEnv(name: string): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function privacyPolicyForOptions(options: ControlledFetchTextOptions): FetchPrivacyPolicy {
+  return {
+    allowPrivateNetwork:
+      options.allowPrivateNetwork ?? readBooleanEnv("DIBAO_FETCH_ALLOW_PRIVATE") ?? false,
+    allowCidrs: parseCidrs(options.allowCidrs ?? readCsvEnv("DIBAO_FETCH_ALLOW_CIDRS")),
+    resolveHostname: options.resolveHostname ?? resolveDnsHostname
+  };
+}
+
+async function resolveDnsHostname(hostname: string): Promise<string[]> {
+  const results = await lookup(hostname, { all: true, verbatim: true });
+  return results.map((result) => result.address);
+}
+
+function readBooleanEnv(name: string): boolean | undefined {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  return ["1", "true", "yes", "on"].includes(value);
+}
+
+function readCsvEnv(name: string): string[] | undefined {
+  const value = process.env[name];
+  return value === undefined
+    ? undefined
+    : value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function normalizeNonNegativeInteger(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+type ParsedCidr = {
+  version: 4 | 6;
+  network: bigint;
+  bits: number;
+};
+
+function parseCidrs(values: string[] | undefined): ParsedCidr[] {
+  return (values ?? []).flatMap((value) => {
+    const [address, prefixValue] = value.split("/");
+    const version = isIP(address);
+    if (version !== 4 && version !== 6) {
+      return [];
+    }
+    const maxBits = version === 4 ? 32 : 128;
+    const bits =
+      prefixValue === undefined || prefixValue === ""
+        ? maxBits
+        : Number(prefixValue);
+    if (!Number.isInteger(bits) || bits < 0 || bits > maxBits) {
+      return [];
+    }
+    const parsedAddress = ipToBigInt(address, version);
+    if (parsedAddress === null) {
+      return [];
+    }
+    return [{
+      version,
+      network: applyCidrMask(parsedAddress, bits, maxBits),
+      bits
+    }];
+  });
+}
+
+function isAllowedPrivateIp(hostname: string, policy: FetchPrivacyPolicy): boolean {
+  const version = isIP(hostname);
+  if (version !== 4 && version !== 6) {
+    return false;
+  }
+  const parsed = ipToBigInt(hostname, version);
+  if (parsed === null) {
+    return false;
+  }
+  const maxBits = version === 4 ? 32 : 128;
+  return policy.allowCidrs.some((cidr) =>
+    cidr.version === version && applyCidrMask(parsed, cidr.bits, maxBits) === cidr.network
+  );
+}
+
+function ipToBigInt(address: string, version: 4 | 6): bigint | null {
+  return version === 4 ? ipv4ToBigInt(address) : ipv6ToBigInt(address);
+}
+
+function ipv4ToBigInt(address: string): bigint | null {
+  const parts = address.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return null;
+  }
+  return parts.reduce((value, part) => (value << 8n) + BigInt(part), 0n);
+}
+
+function ipv6ToBigInt(address: string): bigint | null {
+  const normalized = address.toLowerCase();
+  const halves = normalized.split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = halves.length === 2 ? 8 - left.length - right.length : 0;
+  const groups = halves.length === 2
+    ? [...left, ...Array.from({ length: missing }, () => "0"), ...right]
+    : left;
+  if (
+    groups.length !== 8 ||
+    missing < 0 ||
+    groups.some((group) => !/^[0-9a-f]{1,4}$/u.test(group))
+  ) {
+    return null;
+  }
+  return groups.reduce((value, group) => (value << 16n) + BigInt(Number.parseInt(group, 16)), 0n);
+}
+
+function applyCidrMask(value: bigint, bits: number, maxBits: number): bigint {
+  if (bits === 0) {
+    return 0n;
+  }
+  const shift = BigInt(maxBits - bits);
+  return (value >> shift) << shift;
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 function isAbortError(error: unknown): boolean {

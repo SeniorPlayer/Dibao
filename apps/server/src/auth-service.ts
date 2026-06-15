@@ -175,7 +175,11 @@ export class AuthService {
     this.options.sessions.deleteByHash(hashSessionToken(token));
   }
 
-  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  async changePassword(
+    currentPassword: string,
+    newPassword: string,
+    meta: AuthRequestMeta = {}
+  ): Promise<AuthSessionResult> {
     validatePasswordLengthForLogin(currentPassword);
     validatePassword(newPassword);
 
@@ -195,6 +199,13 @@ export class AuthService {
       PASSWORD_ALGO,
       this.now()
     );
+    const now = this.now();
+    this.options.sessions.deleteAll();
+    return this.createSession(meta, now);
+  }
+
+  logoutAll(): void {
+    this.options.sessions.deleteAll();
   }
 
   deleteExpiredSessions(): void {

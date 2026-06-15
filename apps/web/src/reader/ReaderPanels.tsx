@@ -22,6 +22,10 @@ export type PluginActionContext = {
   slot: string;
 };
 
+export function safeOriginalArticleUrl(articleUrl: string | null): string | null {
+  return safeArticleUrl(articleUrl, null, ["http:", "https:"]);
+}
+
 export function FeedPanel(props: {
   diagnosticsByFeedId: FeedDiagnosticsByFeedId;
   feedError: string | null;
@@ -1686,9 +1690,15 @@ export function ArticleDetailPanel(props: {
             {t.reader.backToList}
           </button>
           <header className={styles.readerHeader}>
-            <a href={props.article.url} rel="noreferrer" target="_blank">
-              {t.reader.originalLink}
-            </a>
+            {safeOriginalArticleUrl(props.article.url) ? (
+              <a
+                href={safeOriginalArticleUrl(props.article.url) ?? undefined}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {t.reader.originalLink}
+              </a>
+            ) : null}
             <h2 id="reader-title">{props.article.title}</h2>
             <p>
               {t.reader.meta(

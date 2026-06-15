@@ -215,7 +215,7 @@ describe("server API vertical slice", () => {
   it("installs and manages plugin packages through the plugin API", async () => {
     const db = createEmptyDatabase();
     const pluginDataDir = createTempDir();
-    const packageContent = JSON.stringify({
+    const signedPackage = signedPluginPackageFixture({
       manifest: {
         manifestVersion: 1,
         id: "com.example.plugin",
@@ -234,11 +234,18 @@ describe("server API vertical slice", () => {
       },
       updateUrl: "https://example.com/plugin-update.json"
     });
-    const app = buildServer({ db, logger: false, pluginDataDir, now: () => 10_000 });
+    const app = buildServer({
+      db,
+      logger: false,
+      pluginDataDir,
+      now: () => 10_000,
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: signedPackage.trustedPublicKeys
+    });
 
     try {
       const installed = await injectJson(app, "POST", "/api/plugins/install", {
-        package: packageContent
+        package: signedPackage.packageContent
       });
       expect(installed.statusCode, installed.body).toBe(200);
       expect(installed.json().data).toMatchObject({
@@ -351,11 +358,14 @@ describe("server API vertical slice", () => {
         `
       }
     });
+    const signedPackage = signedPluginPackageFixture(JSON.parse(packageContent));
     const app = buildServer({
       db,
       logger: false,
       pluginDataDir,
       pluginSecretKey: "test-plugin-secret-key",
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: signedPackage.trustedPublicKeys,
       pluginFetcher: async (_input, init) => {
         receivedAuthorizations.push(new Headers(init?.headers).get("authorization"));
         return new Response("delivered", {
@@ -370,7 +380,7 @@ describe("server API vertical slice", () => {
     });
 
     try {
-      expect((await injectJson(app, "POST", "/api/plugins/install", { package: packageContent })).statusCode).toBe(200);
+      expect((await injectJson(app, "POST", "/api/plugins/install", { package: signedPackage.packageContent })).statusCode).toBe(200);
       expect((await app.inject({ method: "POST", url: "/api/plugins/com.example.webhook/enable" })).statusCode).toBe(200);
 
       const secret = await injectJson(
@@ -390,6 +400,15 @@ describe("server API vertical slice", () => {
         db.prepare("select ciphertext from plugin_secrets where plugin_id = ? and key = ?")
           .get("com.example.webhook", "webhook.token")
       ).not.toEqual({ ciphertext: "secret-token" });
+
+      const blockedPrivateNetwork = await injectJson(
+        app,
+        "POST",
+        "/api/plugins/com.example.webhook/api/network",
+        { url: "http://127.0.0.1:8080/private" }
+      );
+      expect(blockedPrivateNetwork.statusCode, blockedPrivateNetwork.body).toBe(502);
+      expect(blockedPrivateNetwork.body).toContain("private-network policy");
 
       const network = await injectJson(
         app,
@@ -755,30 +774,61 @@ describe("server API vertical slice", () => {
   it("exposes article snapshots to plugins only with the articles read capability", async () => {
     const db = createFixtureDatabase();
     const pluginDataDir = createTempDir();
-    const app = buildServer({ db, logger: false, pluginDataDir });
+    const noPermissionPackage = signedPluginPackageFixture({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.no-article-snapshot",
+        name: "No Snapshot Permission",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        entry: { server: "server/index.mjs" },
+        capabilities: [],
+        contributes: {}
+      },
+      files: {
+        "server/index.mjs": `
+          export function activate(ctx) {
+            ctx.api.post("/snapshot/:id", ({ params }) => ctx.articles.snapshot(params.id));
+          }
+        `
+      }
+    });
+    const allowedPackage = signedPluginPackageFixture({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.article-snapshot",
+        name: "Snapshot Permission",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        entry: { server: "server/index.mjs" },
+        capabilities: ["articles:read"],
+        contributes: {}
+      },
+      files: {
+        "server/index.mjs": `
+          export function activate(ctx) {
+            ctx.api.post("/snapshot/:id", ({ params, body }) =>
+              ctx.articles.snapshot(params.id, { includeContent: body?.includeContent === true })
+            );
+          }
+        `
+      }
+    });
+    const app = buildServer({
+      db,
+      logger: false,
+      pluginDataDir,
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: {
+        ...noPermissionPackage.trustedPublicKeys,
+        ...allowedPackage.trustedPublicKeys
+      }
+    });
 
     try {
-      const noPermissionPackage = JSON.stringify({
-        manifest: {
-          manifestVersion: 1,
-          id: "com.example.no-article-snapshot",
-          name: "No Snapshot Permission",
-          version: "1.0.0",
-          publisher: "Example",
-          dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
-          entry: { server: "server/index.mjs" },
-          capabilities: [],
-          contributes: {}
-        },
-        files: {
-          "server/index.mjs": `
-            export function activate(ctx) {
-              ctx.api.post("/snapshot/:id", ({ params }) => ctx.articles.snapshot(params.id));
-            }
-          `
-        }
-      });
-      expect((await injectJson(app, "POST", "/api/plugins/install", { package: noPermissionPackage })).statusCode).toBe(200);
+      expect((await injectJson(app, "POST", "/api/plugins/install", { package: noPermissionPackage.packageContent })).statusCode).toBe(200);
       expect((await app.inject({ method: "POST", url: "/api/plugins/com.example.no-article-snapshot/enable" })).statusCode).toBe(200);
       const denied = await injectJson(
         app,
@@ -789,29 +839,7 @@ describe("server API vertical slice", () => {
       expect(denied.statusCode, denied.body).toBe(403);
       expect(denied.body).toContain("articles:read");
 
-      const allowedPackage = JSON.stringify({
-        manifest: {
-          manifestVersion: 1,
-          id: "com.example.article-snapshot",
-          name: "Snapshot Permission",
-          version: "1.0.0",
-          publisher: "Example",
-          dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
-          entry: { server: "server/index.mjs" },
-          capabilities: ["articles:read"],
-          contributes: {}
-        },
-        files: {
-          "server/index.mjs": `
-            export function activate(ctx) {
-              ctx.api.post("/snapshot/:id", ({ params, body }) =>
-                ctx.articles.snapshot(params.id, { includeContent: body?.includeContent === true })
-              );
-            }
-          `
-        }
-      });
-      expect((await injectJson(app, "POST", "/api/plugins/install", { package: allowedPackage })).statusCode).toBe(200);
+      expect((await injectJson(app, "POST", "/api/plugins/install", { package: allowedPackage.packageContent })).statusCode).toBe(200);
       expect((await app.inject({ method: "POST", url: "/api/plugins/com.example.article-snapshot/enable" })).statusCode).toBe(200);
 
       const basic = await injectJson(
@@ -857,21 +885,28 @@ describe("server API vertical slice", () => {
 
   it("rejects plugin packages that subscribe to unknown events", async () => {
     const db = createEmptyDatabase();
-    const app = buildServer({ db, logger: false, pluginDataDir: createTempDir() });
+    const signedPackage = signedPluginPackageFixture({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.bad-hooks",
+        name: "Bad Hooks",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        capabilities: [],
+        contributes: { hooks: ["unknown.event"] }
+      }
+    });
+    const app = buildServer({
+      db,
+      logger: false,
+      pluginDataDir: createTempDir(),
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: signedPackage.trustedPublicKeys
+    });
     try {
       const response = await injectJson(app, "POST", "/api/plugins/install", {
-        package: JSON.stringify({
-          manifest: {
-            manifestVersion: 1,
-            id: "com.example.bad-hooks",
-            name: "Bad Hooks",
-            version: "1.0.0",
-            publisher: "Example",
-            dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
-            capabilities: [],
-            contributes: { hooks: ["unknown.event"] }
-          }
-        })
+        package: signedPackage.packageContent
       });
       expect(response.statusCode, response.body).toBe(400);
       expect(response.body).toContain("Unsupported plugin hook");
@@ -883,34 +918,37 @@ describe("server API vertical slice", () => {
 
   it("enforces outbound network capability at runtime", async () => {
     const db = createEmptyDatabase();
+    const signedPackage = signedPluginPackageFixture({
+      manifest: {
+        manifestVersion: 1,
+        id: "com.example.no-network",
+        name: "No Network",
+        version: "1.0.0",
+        publisher: "Example",
+        dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
+        entry: { server: "server/index.mjs" },
+        capabilities: [],
+        contributes: {}
+      },
+      files: {
+        "server/index.mjs": `
+          export async function activate(ctx) {
+            ctx.api.post("/network", () => ctx.network.fetch({ url: "https://example.com" }));
+          }
+        `
+      }
+    });
     const app = buildServer({
       db,
       logger: false,
       pluginDataDir: createTempDir(),
-      pluginFetcher: async () => new Response("ok")
+      pluginFetcher: async () => new Response("ok"),
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: signedPackage.trustedPublicKeys
     });
     try {
       const response = await injectJson(app, "POST", "/api/plugins/install", {
-        package: JSON.stringify({
-          manifest: {
-            manifestVersion: 1,
-            id: "com.example.no-network",
-            name: "No Network",
-            version: "1.0.0",
-            publisher: "Example",
-            dibao: { minVersion: "0.1.0", maxVersion: "<1.0.0" },
-            entry: { server: "server/index.mjs" },
-            capabilities: [],
-            contributes: {}
-          },
-          files: {
-            "server/index.mjs": `
-              export async function activate(ctx) {
-                ctx.api.post("/network", () => ctx.network.fetch({ url: "https://example.com" }));
-              }
-            `
-          }
-        })
+        package: signedPackage.packageContent
       });
       expect(response.statusCode, response.body).toBe(200);
       await app.inject({ method: "POST", url: "/api/plugins/com.example.no-network/enable" });
@@ -926,7 +964,9 @@ describe("server API vertical slice", () => {
   it("installs plugin packages from update metadata URLs", async () => {
     const db = createEmptyDatabase();
     const pluginDataDir = createTempDir();
-    const packageContent = JSON.stringify({
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+    const pluginPackage = {
       manifest: {
         manifestVersion: 1,
         id: "com.example.remote",
@@ -937,11 +977,28 @@ describe("server API vertical slice", () => {
         capabilities: ["articles:read"],
         contributes: {}
       }
-    });
+    };
+    const packageContent = JSON.stringify(signPluginPackage({
+      pluginPackage,
+      privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      publicKeyPem,
+      keyId: "remote"
+    }));
+    const disabledApp = buildServer({ db, logger: false, pluginDataDir });
+    try {
+      const disabled = await injectJson(disabledApp, "POST", "/api/plugins/install", {
+        package: packageContent
+      });
+      expect(disabled.statusCode, disabled.body).toBe(403);
+    } finally {
+      await disabledApp.close();
+    }
     const app = buildServer({
       db,
       logger: false,
       pluginDataDir,
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: { remote: publicKeyPem },
       pluginFetcher: async (input) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const body = url.endsWith("latest.json")
@@ -980,6 +1037,7 @@ describe("server API vertical slice", () => {
     const db = createEmptyDatabase();
     const pluginDataDir = createTempDir();
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
     const pluginPackage = {
       manifest: {
         manifestVersion: 1,
@@ -1008,15 +1066,42 @@ describe("server API vertical slice", () => {
     const signed = signPluginPackage({
       pluginPackage,
       privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
-      publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString()
+      publicKeyPem,
+      keyId: "signed"
     });
-    const app = buildServer({ db, logger: false, pluginDataDir, now: () => 10_000 });
+    const app = buildServer({
+      db,
+      logger: false,
+      pluginDataDir,
+      now: () => 10_000,
+      enableUserPluginInstall: true,
+      pluginTrustedPublicKeys: { signed: publicKeyPem }
+    });
 
     try {
+      const unsigned = await injectJson(app, "POST", "/api/plugins/install", {
+        package: JSON.stringify(pluginPackage)
+      });
+      expect(unsigned.statusCode, unsigned.body).toBe(400);
+      expect(unsigned.body).toContain("Plugin signature is required");
+
+      const selfSigned = signPluginPackage({
+        pluginPackage,
+        privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+        publicKeyPem,
+        keyId: "self-signed"
+      });
+      const rejectedSelfSigned = await injectJson(app, "POST", "/api/plugins/install", {
+        package: JSON.stringify(selfSigned)
+      });
+      expect(rejectedSelfSigned.statusCode, rejectedSelfSigned.body).toBe(400);
+      expect(rejectedSelfSigned.body).toContain("Plugin signature key is not trusted");
+
       const installed = await injectJson(app, "POST", "/api/plugins/install", {
         package: JSON.stringify(signed)
       });
       expect(installed.statusCode, installed.body).toBe(200);
+      expect(installed.json().data.trustLevel).toBe("trusted");
 
       const tampered = {
         ...signed,
@@ -1463,6 +1548,11 @@ describe("server API vertical slice", () => {
         password: "correct horse battery"
       });
       const cookie = cookieHeaderFromSetCookie(setup.headers["set-cookie"]);
+      const secondLogin = await postJson(app, "/api/auth/login", {
+        username: "Pls",
+        password: "correct horse battery"
+      });
+      const secondCookie = cookieHeaderFromSetCookie(secondLogin.headers["set-cookie"]);
 
       const unauthenticated = await postJson(app, "/api/auth/password", {
         currentPassword: "correct horse battery",
@@ -1475,6 +1565,14 @@ describe("server API vertical slice", () => {
         newPassword: "new correct horse battery"
       });
       expect(wrongCurrent.statusCode, wrongCurrent.body).toBe(401);
+      const secondAfterWrongCurrent = await app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: {
+          cookie: secondCookie
+        }
+      });
+      expect(secondAfterWrongCurrent.json().data.authenticated).toBe(true);
 
       const changed = await injectJsonWithCookie(app, "POST", "/api/auth/password", cookie, {
         currentPassword: "correct horse battery",
@@ -1482,6 +1580,38 @@ describe("server API vertical slice", () => {
       });
       expect(changed.statusCode, changed.body).toBe(200);
       expect(changed.json()).toEqual({ data: { ok: true } });
+      expectSessionCookieAttributes(changed.headers["set-cookie"], false);
+      const newCookie = cookieHeaderFromSetCookie(changed.headers["set-cookie"]);
+
+      const firstOldSession = await app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: {
+          cookie
+        }
+      });
+      expect(firstOldSession.json().data.authenticated).toBe(false);
+
+      const secondOldSession = await app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: {
+          cookie: secondCookie
+        }
+      });
+      expect(secondOldSession.json().data.authenticated).toBe(false);
+
+      const currentSession = await app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: {
+          cookie: newCookie
+        }
+      });
+      expect(currentSession.json().data).toMatchObject({
+        authenticated: true,
+        username: "Pls"
+      });
 
       const oldLogin = await postJson(app, "/api/auth/login", {
         username: "Pls",
@@ -9824,6 +9954,27 @@ function expectClearSessionCookie(value: string | string[] | undefined): void {
   expect(cookie).toContain("HttpOnly");
   expect(cookie).toContain("SameSite=Lax");
   expect(cookie).toContain("Path=/");
+}
+
+function signedPluginPackageFixture(pluginPackage: {
+  manifest: unknown;
+  files?: Record<string, string>;
+  updateUrl?: string;
+}): { packageContent: string; trustedPublicKeys: Record<string, string> } {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const keyId = `test-${Math.random().toString(36).slice(2)}`;
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  return {
+    packageContent: JSON.stringify(signPluginPackage({
+      pluginPackage,
+      privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      publicKeyPem,
+      keyId
+    })),
+    trustedPublicKeys: {
+      [keyId]: publicKeyPem
+    }
+  };
 }
 
 async function postMultipartOpml(app: ReturnType<typeof buildServer>, xml: string) {

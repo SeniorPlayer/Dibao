@@ -27,6 +27,10 @@ import type {
   PluginSecretMetadata,
   PluginScheduleRow
 } from "@dibao/db";
+import {
+  assertControlledFetchTarget,
+  controlledFetchText
+} from "./controlled-fetch.js";
 import { PermanentJobFailure, type JobHandler } from "./job-runner.js";
 
 export const PLUGIN_CAPABILITIES = [
@@ -72,6 +76,8 @@ const PLUGIN_OUTBOUND_TIMEOUT_MS = 10_000;
 const PLUGIN_OUTBOUND_MAX_REQUEST_BYTES = 256 * 1024;
 const PLUGIN_OUTBOUND_MAX_RESPONSE_BYTES = 512 * 1024;
 const PLUGIN_OUTBOUND_MAX_REDIRECTS = 3;
+const PLUGIN_PACKAGE_FETCH_MAX_BYTES = 5 * 1024 * 1024;
+const PLUGIN_UPDATE_METADATA_MAX_BYTES = 512 * 1024;
 const PLUGIN_DELIVERY_FLUSH_TIMEOUT_MS = 15_000;
 const PLUGIN_DELIVERY_FLUSH_POLL_MS = 250;
 const PLUGIN_DELIVERY_FLUSH_RETRY_DELAY_MS = 60_000;
@@ -250,6 +256,8 @@ export type PluginServiceOptions = {
   officialPluginsDir?: string;
   pluginDataDir?: string;
   fetcher?: typeof fetch;
+  enableUserPluginInstall?: boolean;
+  trustedPublicKeys?: Record<string, string>;
   secretKey?: string;
   now?: () => number;
   drainDueJobs?: () => Promise<number>;
@@ -388,6 +396,8 @@ type PluginArticleStateDbRow = {
 export class PluginService {
   private readonly now: () => number;
   private readonly fetcher: typeof fetch;
+  private readonly enableUserPluginInstall: boolean;
+  private readonly trustedPublicKeys: Record<string, string>;
   private readonly secretCodec: PluginSecretCodec;
   private readonly secretKeyStatus: { source: "environment" | "fallback_file" | "ephemeral"; persistent: boolean };
   private readonly runtimes = new Map<string, Promise<PluginRuntime>>();
@@ -399,6 +409,12 @@ export class PluginService {
   constructor(private readonly options: PluginServiceOptions) {
     this.now = options.now ?? Date.now;
     this.fetcher = options.fetcher ?? fetch;
+    this.enableUserPluginInstall =
+      options.enableUserPluginInstall ??
+      readBooleanEnv("DIBAO_ENABLE_UNTRUSTED_PLUGINS") ??
+      false;
+    this.trustedPublicKeys =
+      options.trustedPublicKeys ?? readTrustedPublicKeysEnv("DIBAO_PLUGIN_TRUSTED_KEYS_JSON");
     this.officialPluginsDir = resolvePluginPath(
       options.officialPluginsDir ??
         process.env.DIBAO_OFFICIAL_PLUGINS_DIR ??
@@ -636,6 +652,7 @@ export class PluginService {
       previousStatus?: PluginInstallRow["status"];
     }
   ): Promise<PluginListItem> {
+    this.assertUserPluginInstallEnabled();
     if (input.expectedSha256) {
       const actual = createHash("sha256").update(packageContent).digest("hex");
       if (actual !== input.expectedSha256) {
@@ -649,7 +666,8 @@ export class PluginService {
         files: parsed.files,
         updateUrl: parsed.updateUrl,
         signature: parsed.signature
-      }
+      },
+      trustedPublicKeys: this.trustedPublicKeys
     });
     if (!signatureResult.ok) {
       throw new PluginServiceError(
@@ -678,23 +696,12 @@ export class PluginService {
       previousStatus?: PluginInstallRow["status"];
     } = {}
   ): Promise<PluginListItem> {
-    const response = await this.fetcher(url);
-    if (!response.ok) {
-      throw new PluginServiceError(400, "PROVIDER_ERROR", `Plugin package fetch failed: ${response.status}`);
-    }
-    const content = await response.text();
+    this.assertUserPluginInstallEnabled();
+    const content = await this.fetchPluginText(url, PLUGIN_PACKAGE_FETCH_MAX_BYTES);
     const metadata = parsePluginUpdateMetadataContent(content);
     const packageUrl = stringOrNull(metadata?.packageUrl);
     if (metadata && packageUrl) {
-      const packageResponse = await this.fetcher(packageUrl);
-      if (!packageResponse.ok) {
-        throw new PluginServiceError(
-          400,
-          "PROVIDER_ERROR",
-          `Plugin package fetch failed: ${packageResponse.status}`
-        );
-      }
-      const packageContent = await packageResponse.text();
+      const packageContent = await this.fetchPluginText(packageUrl, PLUGIN_PACKAGE_FETCH_MAX_BYTES);
       return this.installFromPackageContent(packageContent, {
         sourceType: isGitHubUrl(url) ? "github_release" : "url",
         sourceUrl: packageUrl,
@@ -1719,11 +1726,43 @@ export class PluginService {
   }
 
   private async fetchUpdateMetadata(url: string): Promise<PluginUpdateMetadata> {
-    const response = await this.fetcher(url);
-    if (!response.ok) {
-      throw new PluginServiceError(400, "PROVIDER_ERROR", `Plugin update fetch failed: ${response.status}`);
+    this.assertUserPluginInstallEnabled();
+    const body = await this.fetchPluginText(url, PLUGIN_UPDATE_METADATA_MAX_BYTES);
+    return JSON.parse(body) as PluginUpdateMetadata;
+  }
+
+  private async fetchPluginText(url: string, maxBytes: number): Promise<string> {
+    try {
+      const result = await controlledFetchText(url, {
+        fetcher: this.fetcher,
+        headers: { accept: "application/json, application/octet-stream, */*;q=0.8" },
+        maxBytes,
+        timeoutMs: PLUGIN_OUTBOUND_TIMEOUT_MS
+      });
+      if (!result.response.ok) {
+        throw new PluginServiceError(
+          400,
+          "PROVIDER_ERROR",
+          `Plugin package fetch failed: ${result.response.status}`
+        );
+      }
+      return result.body;
+    } catch (error) {
+      if (error instanceof PluginServiceError) {
+        throw error;
+      }
+      throw new PluginServiceError(400, "PROVIDER_ERROR", redactText(errorMessage(error)));
     }
-    return await response.json() as PluginUpdateMetadata;
+  }
+
+  private assertUserPluginInstallEnabled(): void {
+    if (!this.enableUserPluginInstall) {
+      throw new PluginServiceError(
+        403,
+        "FORBIDDEN",
+        "User-installed plugins are disabled"
+      );
+    }
   }
 
   private requireInstall(pluginId: string): PluginInstallRow {
@@ -2039,7 +2078,7 @@ export class PluginService {
       status,
       official: false,
       bundled: false,
-      trustLevel: "untrusted",
+      trustLevel: "trusted",
       lastError: compatibility.ok ? null : compatibility.reason,
       now: this.now()
     });
@@ -2706,6 +2745,7 @@ async function performPluginFetch(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.input.timeoutMs);
   try {
+    await assertControlledFetchTarget(input.input.url);
     const response = await input.fetcher(input.input.url, {
       method: input.input.method,
       headers: {
@@ -2806,6 +2846,36 @@ function isSensitiveHeader(name: string): boolean {
 
 function redactText(value: string): string {
   return value.replace(/(authorization|api[-_]?key|token|secret|signature)(["'\s:=]+)([^"',\s]+)/giu, "$1$2[redacted]");
+}
+
+function readBooleanEnv(name: string): boolean | undefined {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  return ["1", "true", "yes", "on"].includes(value);
+}
+
+function readTrustedPublicKeysEnv(name: string): Record<string, string> {
+  const value = process.env[name];
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const keys: Record<string, string> = {};
+    for (const [keyId, publicKeyPem] of Object.entries(parsed)) {
+      if (typeof keyId === "string" && typeof publicKeyPem === "string" && publicKeyPem.trim()) {
+        keys[keyId] = publicKeyPem;
+      }
+    }
+    return keys;
+  } catch {
+    return {};
+  }
 }
 
 function mapPluginSecretMetadataItem(metadata: PluginSecretMetadata): PluginSecretMetadataItem {

@@ -133,19 +133,23 @@ export function signPluginPackage(input: {
 export function verifyPluginPackageSignature(input: {
   pluginPackage: DibaoPluginPackage;
   trustedPublicKeys?: Record<string, string>;
+  requireSignature?: boolean;
 }): DibaoPluginValidationResult {
   const signature = input.pluginPackage.signature;
   if (!signature) {
-    return { ok: true };
+    return input.requireSignature === false
+      ? { ok: true }
+      : { ok: false, errors: ["Plugin signature is required"] };
   }
   if (signature.algorithm !== "ed25519" || !signature.signature) {
     return { ok: false, errors: ["Plugin signature is invalid"] };
   }
-  const publicKeyPem =
-    (signature.keyId ? input.trustedPublicKeys?.[signature.keyId] : undefined) ??
-    signature.publicKeyPem;
+  if (!signature.keyId) {
+    return { ok: false, errors: ["Plugin signature keyId is required"] };
+  }
+  const publicKeyPem = input.trustedPublicKeys?.[signature.keyId];
   if (!publicKeyPem) {
-    return { ok: false, errors: ["Plugin signature has no public key"] };
+    return { ok: false, errors: ["Plugin signature key is not trusted"] };
   }
   const ok = verifyPayload(
     null,
@@ -187,7 +191,10 @@ export function validatePluginPackage(pluginPackage: DibaoPluginPackage): DibaoP
       }
     }
   }
-  const signatureResult = verifyPluginPackageSignature({ pluginPackage });
+  const signatureResult = verifyPluginPackageSignature({
+    pluginPackage,
+    requireSignature: false
+  });
   if (!signatureResult.ok) {
     errors.push(...signatureResult.errors);
   }
