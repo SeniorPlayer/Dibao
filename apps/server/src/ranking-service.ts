@@ -43,6 +43,7 @@ export type RankingRecalculateChunkResult = {
   nextCursor: string | null;
   paused?: boolean;
   resumeAfter?: number;
+  pauseReason?: "foreground" | "time_budget";
 };
 
 export type RankExplanationReasonType =
@@ -338,13 +339,21 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
       paged &&
       maxChunkDurationMs > 0 &&
       performance.now() - chunkStartedAt >= maxChunkDurationMs;
+    const timeBudgetPauseResult = (): RankingRecalculateChunkResult => ({
+      processed: 0,
+      nextCursor: startingCursor,
+      paused: true,
+      resumeAfter: this.now() + RANKING_TIME_BUDGET_RESUME_DELAY_MS,
+      pauseReason: "time_budget"
+    });
     const initialPause = paged ? this.pauseDecision(0, startingCursor) : null;
     if (initialPause?.pause) {
       return {
         processed: 0,
         nextCursor: startingCursor,
         paused: true,
-        resumeAfter: initialPause.resumeAfter
+        resumeAfter: initialPause.resumeAfter,
+        pauseReason: "foreground"
       };
     }
 
@@ -362,13 +371,31 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
       limit: page?.limit,
       embeddingIndexId: activeIndexId
     });
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const candidates = candidateSet.candidates;
     const now = this.now();
     const clusters = activeIndexId ? this.clusterVectorsFor(activeIndexId) : [];
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const recentIntent = activeIndexId ? this.recentIntentVectorsFor(activeIndexId) : [];
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const lexicalFeatures = this.lexicalFeaturesFor(candidates);
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const duplicateFeatures = this.duplicateFeaturesFor(candidates);
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const sourceFeatures = this.sourceFeaturesFor(candidates);
+    if (timeBudgetExceeded()) {
+      return timeBudgetPauseResult();
+    }
     const ftrlModel = this.ftrlModel();
     const duplicateStats = duplicateStatsFor(candidates, duplicateFeatures);
     const rerankWindowId = `${activeRankContext}:${now}`;
@@ -377,6 +404,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
     let processed = 0;
     let lastProcessedArticleId: string | null = startingCursor;
     let pauseDecision: RankingPauseDecision | null = null;
+    let pauseReason: RankingRecalculateChunkResult["pauseReason"] | null = null;
     const activeRankContextInput: UpsertRankContextInput | null = activeIndexId
       ? {
         id: activeRankContext,
@@ -405,6 +433,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
       const decision = this.pauseDecision(processed, lastProcessedArticleId);
       if (decision.pause) {
         pauseDecision = decision;
+        pauseReason = "foreground";
         return true;
       }
       if (timeBudgetExceeded()) {
@@ -412,6 +441,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
           pause: true,
           resumeAfter: this.now() + RANKING_TIME_BUDGET_RESUME_DELAY_MS
         };
+        pauseReason = "time_budget";
         return true;
       }
       return false;
@@ -422,6 +452,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
         const decision = this.pauseDecision(processed, lastProcessedArticleId);
         if (decision.pause) {
           pauseDecision = decision;
+          pauseReason = "foreground";
           break;
         }
         if (timeBudgetExceeded()) {
@@ -429,6 +460,7 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
             pause: true,
             resumeAfter: this.now() + RANKING_TIME_BUDGET_RESUME_DELAY_MS
           };
+          pauseReason = "time_budget";
           break;
         }
       }
@@ -553,11 +585,13 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
       const decision = this.pauseDecision(processed, lastProcessedArticleId);
       if (decision.pause) {
         pauseDecision = decision;
+        pauseReason = "foreground";
       } else if (timeBudgetExceeded()) {
         pauseDecision = {
           pause: true,
           resumeAfter: this.now() + RANKING_TIME_BUDGET_RESUME_DELAY_MS
         };
+        pauseReason = "time_budget";
       }
     }
 
@@ -571,7 +605,8 @@ export class RecommendationRankingService implements ArticleRankingRecalculator 
       ...(pauseDecision?.pause
         ? {
             paused: true,
-            resumeAfter: pauseDecision.resumeAfter
+            resumeAfter: pauseDecision.resumeAfter,
+            pauseReason: pauseReason ?? "foreground"
           }
         : {})
     };

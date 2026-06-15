@@ -140,6 +140,7 @@ export function FeedPanel(props: {
 
 export function ArticleListPanel(props: {
   articleError: string | null;
+  articleLoadingNotice?: string | null;
   articleView: ArticleView;
   articles: ArticleListItem[];
   favoriteSort: FavoriteArticleSort;
@@ -422,6 +423,9 @@ export function ArticleListPanel(props: {
       ) : null}
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
+      {props.articleLoadingNotice ? (
+        <p className={styles.settingsNotice}>{props.articleLoadingNotice}</p>
+      ) : null}
       {props.readerCommandError ? (
         <p className={styles.errorText}>{props.readerCommandError}</p>
       ) : null}
@@ -804,6 +808,7 @@ function MarkScopeReadConfirmDialog(props: {
 
 export function SearchResultsPanel(props: {
   articleError: string | null;
+  articleLoadingNotice?: string | null;
   articles: ArticleListItem[];
   feedFolders: FeedFolder[];
   feeds: Feed[];
@@ -993,6 +998,9 @@ export function SearchResultsPanel(props: {
       </form>
 
       {props.articleError ? <p className={styles.errorText}>{props.articleError}</p> : null}
+      {props.articleLoadingNotice ? (
+        <p className={styles.settingsNotice}>{props.articleLoadingNotice}</p>
+      ) : null}
       {props.readerCommandError ? (
         <p className={styles.errorText}>{props.readerCommandError}</p>
       ) : null}

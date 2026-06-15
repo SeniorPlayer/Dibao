@@ -144,6 +144,7 @@ const LazySetupProviderPanel = lazy(() =>
 const IGNORE_TELEMETRY_MAX_IN_FLIGHT = 3;
 const IGNORE_TELEMETRY_TIMEOUT_MS = 8_000;
 const ARTICLE_LIST_REQUEST_TIMEOUT_MS = 10_000;
+const ARTICLE_LIST_FAILURE_TIMEOUT_MS = ARTICLE_LIST_REQUEST_TIMEOUT_MS * 3;
 const ARTICLE_DETAIL_REQUEST_TIMEOUT_MS = 12_000;
 const ARTICLE_STATE_OVERLAY_STORAGE_KEY = "dibao:article-state-overlay:v1";
 const ARTICLE_STATE_OVERLAY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -175,6 +176,23 @@ async function withRequestTimeout<T>(
   try {
     return await run(controller.signal);
   } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function withLongLoadingNotice<T>(
+  noticeAfterMs: number,
+  timeoutMs: number,
+  onNotice: () => void,
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController();
+  const noticeId = window.setTimeout(onNotice, noticeAfterMs);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await run(controller.signal);
+  } finally {
+    window.clearTimeout(noticeId);
     window.clearTimeout(timeoutId);
   }
 }
@@ -336,6 +354,7 @@ export function App() {
   const [refreshingFeedId, setRefreshingFeedId] = useState<string | null>(null);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [articleError, setArticleError] = useState<string | null>(null);
+  const [articleLoadingNotice, setArticleLoadingNotice] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [explanationError, setExplanationError] = useState<string | null>(null);
@@ -1064,6 +1083,7 @@ export function App() {
     articleRequestVersion.current = requestVersion;
     setIsArticlesLoading(true);
     setArticleError(null);
+    setArticleLoadingNotice(null);
     setLoadMoreError(null);
     setNextArticleCursor(null);
     setArticles([]);
@@ -1085,16 +1105,25 @@ export function App() {
         sort: articleSortForView(view, sort, laterSort)
       };
       const requestStartedAt = performance.now();
-      const response = await withRequestTimeout(ARTICLE_LIST_REQUEST_TIMEOUT_MS, (signal) =>
-        dibaoApi.listArticles({
-          ...requestInput,
-          includeUnreadCount: false,
-          signal
-        })
+      const response = await withLongLoadingNotice(
+        ARTICLE_LIST_REQUEST_TIMEOUT_MS,
+        ARTICLE_LIST_FAILURE_TIMEOUT_MS,
+        () => {
+          if (requestVersion === articleRequestVersion.current) {
+            setArticleLoadingNotice(t.articles.loadingSlow);
+          }
+        },
+        (signal) =>
+          dibaoApi.listArticles({
+            ...requestInput,
+            includeUnreadCount: false,
+            signal
+          })
       );
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
+      setArticleLoadingNotice(null);
       const responseArticles = articleListWithKnownLocalStates(
         response.data,
         articleStateById.current,
@@ -1154,6 +1183,7 @@ export function App() {
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
+      setArticleLoadingNotice(null);
       setArticleError(userMessageForError(error, t.errors.api));
       setArticles([]);
       setUnreadCount(0);
@@ -1164,13 +1194,14 @@ export function App() {
         setIsArticlesLoading(false);
       }
     }
-  }, [appPage.type, t.errors.api]);
+  }, [appPage.type, t.articles.loadingSlow, t.errors.api]);
 
   const loadSearchArticles = useCallback(async (form: SearchFormState) => {
     const requestVersion = articleRequestVersion.current + 1;
     articleRequestVersion.current = requestVersion;
     setIsArticlesLoading(true);
     setArticleError(null);
+    setArticleLoadingNotice(null);
     setLoadMoreError(null);
     setNextArticleCursor(null);
     setArticles([]);
@@ -1192,16 +1223,25 @@ export function App() {
         limit: 50
       };
       const requestStartedAt = performance.now();
-      const response = await withRequestTimeout(ARTICLE_LIST_REQUEST_TIMEOUT_MS, (signal) =>
-        dibaoApi.searchArticles({
-          ...requestInput,
-          includeUnreadCount: false,
-          signal
-        })
+      const response = await withLongLoadingNotice(
+        ARTICLE_LIST_REQUEST_TIMEOUT_MS,
+        ARTICLE_LIST_FAILURE_TIMEOUT_MS,
+        () => {
+          if (requestVersion === articleRequestVersion.current) {
+            setArticleLoadingNotice(t.articles.loadingSlow);
+          }
+        },
+        (signal) =>
+          dibaoApi.searchArticles({
+            ...requestInput,
+            includeUnreadCount: false,
+            signal
+          })
       );
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
+      setArticleLoadingNotice(null);
       const responseArticles = articleListWithKnownLocalStates(
         response.data,
         articleStateById.current,
@@ -1258,6 +1298,7 @@ export function App() {
       if (requestVersion !== articleRequestVersion.current) {
         return;
       }
+      setArticleLoadingNotice(null);
       setArticleError(userMessageForError(error, t.errors.api));
       setArticles([]);
       setUnreadCount(0);
@@ -1268,7 +1309,7 @@ export function App() {
         setIsArticlesLoading(false);
       }
     }
-  }, [t.errors.api]);
+  }, [t.articles.loadingSlow, t.errors.api]);
 
   useEffect(() => {
     if (appStage.type !== "reader") {
@@ -3283,6 +3324,7 @@ export function App() {
           >
             <SearchResultsPanel
               articleError={articleError}
+              articleLoadingNotice={articleLoadingNotice}
               articles={articles}
               feedFolders={feedFolders}
               feeds={feeds}
@@ -3385,6 +3427,7 @@ export function App() {
 
             <ArticleListPanel
               articleError={articleError}
+              articleLoadingNotice={articleLoadingNotice}
               articleView={currentArticleView}
               articles={articles}
               feedCount={feeds.length}

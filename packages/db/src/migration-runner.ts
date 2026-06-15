@@ -72,6 +72,9 @@ const behaviorProjectionQueuePath = fileURLToPath(
 const articleStateInteractionProjectionPath = fileURLToPath(
   new URL("../migrations/024_article_state_interaction_projection.sql", import.meta.url)
 );
+const recommendedRankSortIndexPath = fileURLToPath(
+  new URL("../migrations/025_recommended_rank_sort_index.sql", import.meta.url)
+);
 
 export function loadDefaultMigrations(): Migration[] {
   return [
@@ -189,6 +192,11 @@ export function loadDefaultMigrations(): Migration[] {
       version: "024",
       name: "article_state_interaction_projection",
       sql: readFileSync(articleStateInteractionProjectionPath, "utf8")
+    },
+    {
+      version: "025",
+      name: "recommended_rank_sort_index",
+      sql: readFileSync(recommendedRankSortIndexPath, "utf8")
     }
   ];
 }

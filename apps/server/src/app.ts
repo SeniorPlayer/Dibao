@@ -683,6 +683,7 @@ export function buildServer(options: BuildServerOptions = {}) {
           nextLimit: record.nextLimit,
           hasNextCursor: record.nextCursor !== null,
           paused: record.paused,
+          pauseReason: record.pauseReason ?? null,
           resumeAfter: timestampToIso(record.resumeAfter)
         },
         "job.performance"

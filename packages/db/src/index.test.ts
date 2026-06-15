@@ -198,6 +198,7 @@ describe("db package", () => {
       expect(hasIndex(db, "idx_jobs_status_priority_run_after")).toBe(true);
       expect(hasIndex(db, "idx_article_states_last_action_at")).toBe(true);
       expect(hasIndex(db, "idx_article_states_last_ignored_at")).toBe(true);
+      expect(hasIndex(db, "idx_article_rank_scores_context_recommended_order")).toBe(true);
     } finally {
       db.close();
     }
@@ -240,7 +241,8 @@ describe("db package", () => {
         "021",
         "022",
         "023",
-        "024"
+        "024",
+        "025"
       ]);
       expect(hasColumn(db, "article_states", "liked_at")).toBe(true);
       expect(hasColumn(db, "article_states", "last_action_at")).toBe(true);
@@ -808,7 +810,8 @@ describe("db package", () => {
         "021",
         "022",
         "023",
-        "024"
+        "024",
+        "025"
       ]);
 
       expect(getAppliedMigrations(db).find((migration) => migration.version === "004")?.checksum).toBe(checksum004);

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { JobRepository, JobRow } from "@dibao/db";
 import { PermanentJobFailure } from "./job-runner.js";
-import type { ArticleRankingRecalculator } from "./ranking-service.js";
+import type { ArticleRankingRecalculator, RankingRecalculateChunkResult } from "./ranking-service.js";
 
 export const RANKING_RECALCULATE_JOB_TYPE = "ranking_recalculate" as const;
 export const RANKING_RECALCULATE_ARTICLE_LIMIT = 500;
@@ -37,6 +37,7 @@ export type RankingRecalculateJobServiceOptions = {
     nextLimit: number;
     nextCursor: string | null;
     paused: boolean;
+    pauseReason?: "foreground" | "time_budget";
     resumeAfter: number | null;
   }) => void;
 };
@@ -121,7 +122,7 @@ export class RankingRecalculateJobService {
     } else {
       const limit = normalizeRankingChunkLimit(payload.limit);
       const startedAt = performance.now();
-      const result = this.options.ranking.recalculateChunk
+      const result: RankingRecalculateChunkResult = this.options.ranking.recalculateChunk
         ? this.options.ranking.recalculateChunk({
             cursor: payload.cursor ?? null,
             limit
@@ -131,7 +132,7 @@ export class RankingRecalculateJobService {
             nextCursor: null
           };
       const durationMs = performance.now() - startedAt;
-      const nextLimit = result.paused === true && result.processed === 0
+      const nextLimit = result.paused === true && result.processed === 0 && result.pauseReason !== "time_budget"
         ? limit
         : adaptiveNextLimit(
             limit,
@@ -146,6 +147,7 @@ export class RankingRecalculateJobService {
         nextLimit,
         nextCursor: result.nextCursor,
         paused: result.paused === true,
+        pauseReason: result.pauseReason,
         resumeAfter: result.resumeAfter ?? null
       });
       if (result.nextCursor || result.paused === true) {

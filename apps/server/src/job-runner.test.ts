@@ -1790,6 +1790,68 @@ describe("job runner foundation", () => {
       db.close();
     }
   });
+
+  it("shrinks time-budget paused full ranking chunks even when no article was written", async () => {
+    const db = createEmptyDatabase();
+    try {
+      const jobs = new SqliteJobRepository(db);
+      const rankingJobs = new RankingRecalculateJobService({
+        jobs,
+        ranking: {
+          recalculateArticle() {
+            return 1;
+          },
+          recalculateArticles(articleIds: string[]) {
+            return articleIds.length;
+          },
+          recalculateAll() {
+            return 0;
+          },
+          recalculateChunk() {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 5) {
+              // Keep the fixture deterministic enough for adaptive chunk sizing.
+            }
+            return {
+              processed: 0,
+              nextCursor: "cursor_slow",
+              paused: true,
+              pauseReason: "time_budget",
+              resumeAfter: 42_000
+            };
+          }
+        },
+        jobIdFactory: () => "job_rank_smaller",
+        now: () => 10_000,
+        targetChunkMs: 1
+      });
+      jobs.enqueue({
+        id: "job_rank_slow",
+        type: RANKING_RECALCULATE_JOB_TYPE,
+        payloadJson: JSON.stringify({ cursor: "cursor_slow", limit: 8 }),
+        maxAttempts: 2,
+        runAfter: 10_000,
+        now: 10_000
+      });
+      const runner = new JobRunner({
+        jobs,
+        handlers: {
+          [RANKING_RECALCULATE_JOB_TYPE]: (job) => {
+            rankingJobs.handleRankingRecalculateJob(job);
+          }
+        },
+        now: () => 10_000
+      });
+
+      await expect(runner.drainDue()).resolves.toBe(1);
+      expect(JSON.parse(jobs.findById("job_rank_smaller")?.payloadJson ?? "{}")).toEqual({
+        cursor: "cursor_slow",
+        limit: 4
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createEmptyDatabase(): DibaoDatabase {
