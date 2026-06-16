@@ -118,6 +118,42 @@ describe("server API vertical slice", () => {
     }
   });
 
+  it("records foreground activity for login requests", async () => {
+    const databasePath = tempDatabasePath();
+    const app = buildServer({
+      databasePath,
+      logger: false,
+      now: () => 23_456,
+      recordForegroundActivity: true,
+      foregroundActivityWriteThrottleMs: 0,
+      webDistDir: false
+    });
+
+    try {
+      const response = await postJson(app, "/api/auth/login", {
+        username: "Pls",
+        password: "correct horse battery"
+      });
+
+      expect(response.statusCode, response.body).toBe(409);
+      const signalPath = join(dirname(databasePath), "foreground-activity.json");
+      await waitForCondition(async () => {
+        try {
+          return readFileSync(signalPath, "utf8").length > 0;
+        } catch {
+          return false;
+        }
+      });
+      expect(JSON.parse(readFileSync(signalPath, "utf8"))).toEqual({
+        lastAt: 23_456,
+        route: "/api/auth/login",
+        method: "POST"
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("reports database errors when the lightweight connection check fails", () => {
     const db = {
       prepare: (sql: string) => ({

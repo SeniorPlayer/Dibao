@@ -1304,6 +1304,7 @@ export const zhCN = {
   errors: {
     api: {
       requestFailed: "请求失败，请稍后重试。",
+      databaseBusy: "系统正在处理后台维护，请稍后重试。",
       httpError: (status: number) => `请求失败（HTTP ${status}）。`
     }
   }
@@ -2620,6 +2621,7 @@ export const enUS = {
   errors: {
     api: {
       requestFailed: "Request failed. Please try again.",
+      databaseBusy: "Dibao is busy with background maintenance. Please try again shortly.",
       httpError: (status: number) => `Request failed (HTTP ${status}).`
     }
   }
@@ -3925,6 +3927,7 @@ export const jaJP = {
   errors: {
     api: {
       requestFailed: "リクエストに失敗しました。もう一度お試しください。",
+      databaseBusy: "邸報はバックグラウンドメンテナンス中です。少し待ってから再試行してください。",
       httpError: (status: number) => `リクエストに失敗しました（HTTP ${status}）。`
     }
   }

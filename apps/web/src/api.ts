@@ -1153,6 +1153,7 @@ export class ApiRequestError extends Error {
 
 export type ApiErrorMessages = {
   requestFailed: string;
+  databaseBusy: string;
   httpError: (status: number) => string;
 };
 
@@ -2181,6 +2182,9 @@ export const dibaoApi = createDibaoApi();
 
 export function userMessageForError(error: unknown, messages: ApiErrorMessages): string {
   if (error instanceof ApiRequestError) {
+    if (error.code === "DATABASE_BUSY") {
+      return messages.databaseBusy;
+    }
     return error.hasUserMessage && error.message ? error.message : messages.httpError(error.status);
   }
 

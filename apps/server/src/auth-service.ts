@@ -4,6 +4,7 @@ import type {
   AuthCredentialRepository,
   SessionRepository
 } from "@dibao/db";
+import { isSqliteBusyError } from "./sqlite-errors.js";
 
 export const AUTH_CREDENTIAL_ID = "single_user";
 export const PASSWORD_ALGO = "scrypt:v1";
@@ -20,6 +21,9 @@ export const SESSION_TOKEN_BYTES = 32;
 export const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 export const DEFAULT_AUTH_MAX_FAILED_ATTEMPTS = 5;
 export const DEFAULT_AUTH_LOCKOUT_MS = 15 * 60 * 1000;
+export const DEFAULT_SESSION_TOUCH_THROTTLE_MS = 5 * 60 * 1000;
+export const DEFAULT_SESSION_CREATE_BUSY_RETRY_DELAYS_MS = [50, 150, 350] as const;
+export const DATABASE_BUSY_RETRY_AFTER_MS = 5_000;
 
 export type AuthSessionStatus = {
   setupCompleted: boolean;
@@ -56,12 +60,17 @@ export type AuthServiceOptions = {
   now?: () => number;
   maxFailedLoginAttempts?: number;
   loginLockoutMs?: number;
+  sessionTouchThrottleMs?: number;
+  sessionCreateBusyRetryDelaysMs?: readonly number[];
+  onSessionTouchError?: (error: unknown) => void;
 };
 
 export class AuthService {
   private readonly now: () => number;
   private readonly maxFailedLoginAttempts: number;
   private readonly loginLockoutMs: number;
+  private readonly sessionTouchThrottleMs: number;
+  private readonly sessionCreateBusyRetryDelaysMs: readonly number[];
   private readonly loginFailures = new Map<
     string,
     { firstFailedAt: number; failedAttempts: number; lockedUntil: number | null }
@@ -77,6 +86,12 @@ export class AuthService {
       options.loginLockoutMs ?? readNonNegativeIntegerEnv("DIBAO_AUTH_LOCKOUT_MS"),
       DEFAULT_AUTH_LOCKOUT_MS
     );
+    this.sessionTouchThrottleMs = normalizeNonNegativeInteger(
+      options.sessionTouchThrottleMs,
+      DEFAULT_SESSION_TOUCH_THROTTLE_MS
+    );
+    this.sessionCreateBusyRetryDelaysMs =
+      options.sessionCreateBusyRetryDelaysMs ?? DEFAULT_SESSION_CREATE_BUSY_RETRY_DELAYS_MS;
   }
 
   async setup(
@@ -103,7 +118,7 @@ export class AuthService {
     });
     this.options.settings.setJson("setup.completed", true, now);
 
-    return this.createSession(meta, now);
+    return await this.createSession(meta, now);
   }
 
   async login(
@@ -132,7 +147,7 @@ export class AuthService {
     }
 
     this.clearFailedLogin(normalizedUsername, meta);
-    return this.createSession(meta, this.now());
+    return await this.createSession(meta, this.now());
   }
 
   getSessionStatus(token: string | null): AuthSessionStatus {
@@ -163,7 +178,19 @@ export class AuthService {
       return false;
     }
 
-    this.options.sessions.touchSession(session.id, now);
+    if (
+      session.lastSeenAt === null ||
+      now - session.lastSeenAt >= this.sessionTouchThrottleMs
+    ) {
+      try {
+        this.options.sessions.touchSession(session.id, now);
+      } catch (error) {
+        if (!isSqliteBusyError(error)) {
+          throw error;
+        }
+        this.options.onSessionTouchError?.(error);
+      }
+    }
     return true;
   }
 
@@ -201,7 +228,7 @@ export class AuthService {
     );
     const now = this.now();
     this.options.sessions.deleteAll();
-    return this.createSession(meta, now);
+    return await this.createSession(meta, now);
   }
 
   logoutAll(): void {
@@ -212,18 +239,40 @@ export class AuthService {
     this.options.sessions.deleteExpired(this.now());
   }
 
-  private createSession(meta: AuthRequestMeta, now: number): AuthSessionResult {
+  private async createSession(meta: AuthRequestMeta, now: number): Promise<AuthSessionResult> {
     const token = randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
     const expiresAt = now + SESSION_DURATION_MS;
-
-    this.options.sessions.createSession({
+    const input = {
       id: `session_${randomBytes(16).toString("hex")}`,
       sessionHash: hashSessionToken(token),
       createdAt: now,
       expiresAt,
       userAgent: normalizeUserAgent(meta.userAgent),
       ipHash: meta.ip ? hashMetadata(meta.ip) : null
-    });
+    };
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        this.options.sessions.createSession(input);
+        break;
+      } catch (error) {
+        if (
+          !isSqliteBusyError(error) ||
+          attempt >= this.sessionCreateBusyRetryDelaysMs.length
+        ) {
+          if (isSqliteBusyError(error)) {
+            throw new AuthServiceError(
+              503,
+              "DATABASE_BUSY",
+              "Dibao is busy with background maintenance. Please try again shortly.",
+              { retryAfterMs: DATABASE_BUSY_RETRY_AFTER_MS }
+            );
+          }
+          throw error;
+        }
+        await delay(this.sessionCreateBusyRetryDelaysMs[attempt] ?? 0);
+      }
+    }
 
     return {
       token,
@@ -285,6 +334,10 @@ export class AuthService {
   private loginRateLimitEnabled(): boolean {
     return this.maxFailedLoginAttempts > 0 && this.loginLockoutMs > 0;
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 export function hashSessionToken(token: string): string {

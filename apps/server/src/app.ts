@@ -73,6 +73,7 @@ import {
   serializeSessionCookie
 } from "./auth-cookie.js";
 import { AuthService, AuthServiceError } from "./auth-service.js";
+import { isSqliteBusyError } from "./sqlite-errors.js";
 import { ArticleRetentionService } from "./article-retention-service.js";
 import {
   CoreDatabaseMigrationService,
@@ -952,7 +953,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     settings,
     now: options.now,
     maxFailedLoginAttempts: options.authMaxFailedLoginAttempts,
-    loginLockoutMs: options.authLoginLockoutMs
+    loginLockoutMs: options.authLoginLockoutMs,
+    onSessionTouchError: (error) => {
+      app.log.warn({ error, route: "auth.session.touch" }, "database is busy while touching session");
+    }
   });
   const articleRetentionService = new ArticleRetentionService({
     settings,
@@ -1246,6 +1250,9 @@ export function buildServer(options: BuildServerOptions = {}) {
 
   app.setErrorHandler((error, request, reply) => {
     request.log.error(error);
+    if (isSqliteBusyError(error)) {
+      return sendDatabaseBusyError(reply);
+    }
     return sendApiError(reply, 500, "INTERNAL_ERROR", "Internal server error");
   });
 
@@ -3154,6 +3161,9 @@ function isForegroundActivityRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/api/articles") ||
     pathname === "/api/auth/session" ||
+    pathname === "/api/auth/login" ||
+    pathname === "/api/auth/setup" ||
+    pathname === "/api/auth/password" ||
     pathname === "/api/setup/status" ||
     pathname.startsWith("/api/reader") ||
     pathname.startsWith("/api/recommendation") ||
@@ -6386,6 +6396,17 @@ function sendApiError(
   return reply.status(statusCode).send({ error });
 }
 
+function sendDatabaseBusyError(reply: FastifyReply) {
+  reply.header("Retry-After", "5");
+  return sendApiError(
+    reply,
+    503,
+    "DATABASE_BUSY",
+    "Dibao is busy with background maintenance. Please try again shortly.",
+    { retryAfterMs: 5_000 }
+  );
+}
+
 function sendFeedIngestionError(reply: FastifyReply, error: unknown) {
   if (error instanceof FeedIngestionError) {
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
@@ -6404,6 +6425,9 @@ function sendFeedDiscoveryError(reply: FastifyReply, error: unknown) {
 
 function sendAuthError(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthServiceError) {
+    if (error.code === "DATABASE_BUSY") {
+      reply.header("Retry-After", "5");
+    }
     return sendApiError(reply, error.statusCode, error.code, error.message, error.details);
   }
 

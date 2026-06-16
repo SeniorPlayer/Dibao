@@ -1547,5 +1547,11 @@ describe("web API client", () => {
         dictionaries["en-US"].errors.api
       )
     ).toBe("Request failed (HTTP 500).");
+    expect(
+      userMessageForError(
+        new ApiRequestError(503, "DATABASE_BUSY", "Internal server error"),
+        dictionaries["zh-CN"].errors.api
+      )
+    ).toBe(dictionaries["zh-CN"].errors.api.databaseBusy);
   });
 });
