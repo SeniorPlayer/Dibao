@@ -233,7 +233,7 @@ Hook phases:
 - `veto`: can reject an operation with a user-visible plugin error.
 - `effect`: runs after the core transaction commits and is allowed to enqueue plugin jobs.
 
-Default rule: hot user paths use `observe` or post-commit `effect` only. A hook must not synchronously run ranking recalculation, embedding generation, index rebuilds, broad diagnostics, network calls or long plugin work from article open/action/scroll paths.
+Default rule: hot user paths use `observe` or post-commit `effect` only. A hook must not synchronously run ranking recalculation, embedding generation, index rebuilds, broad diagnostics, network calls or long plugin work from article open/action/scroll paths. Any plugin feature that touches background jobs, SQLite write paths or diagnostics must also follow the runtime performance rules in [Runtime Performance Guidelines](./runtime-performance.md).
 
 Initial hook catalog:
 

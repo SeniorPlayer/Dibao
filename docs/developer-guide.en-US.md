@@ -1,6 +1,6 @@
 # Dibao Developer Guide
 
-Last updated: 2026-05-31
+Last updated: 2026-06-16
 
 This is the developer documentation entry point maintained from `0.2.0` onward. Developer documentation is maintained only in Simplified Chinese and English. Plugin development is a sub-unit of this guide and is also maintained as standalone files.
 
@@ -55,6 +55,7 @@ Read:
 - [Plugin development guide](./plugin-development.en-US.md)
 - [插件开发指南](./plugin-development.zh-CN.md)
 - [Plugin system design](./plugin-system-design.md)
+- [Runtime performance guidelines](./runtime-performance.md)
 
 Plugin development docs are maintained in Chinese and English only. Other UI locales do not receive separate developer documentation.
 
@@ -65,3 +66,4 @@ Plugin development docs are maintained in Chinese and English only. Other UI loc
 - Plugin package directories, plugin data directories, and the user SQLite database must survive Docker rebuilds.
 - Core database migrations must default to the app's user-visible blocking migration gate; deployment scripts must not bypass it by running migrations directly.
 - Changes that require embedding recomputation, vector-index rebuilds, or recommendation-profile rebuilds must use an explicit data-upgrade flow and must not run implicitly on ordinary request paths.
+- Changes that touch background jobs, SQLite write locks, hot request paths, diagnostics, or plugin hooks must follow the [runtime performance guidelines](./runtime-performance.md).

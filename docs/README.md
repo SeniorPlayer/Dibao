@@ -21,6 +21,7 @@ specific test notes, and generated validation evidence are kept outside Git in
 - [API contract](./api-contract.md)
 - [Developer guide (zh-CN)](./developer-guide.zh-CN.md)
 - [Developer guide (en-US)](./developer-guide.en-US.md)
+- [Runtime performance guidelines](./runtime-performance.md)
 - [Profile algorithm v0](./profile-algorithm-v0.md)
 - [Recommendation v2/v3 design](./recommendation-v2-v3.md)
 - [Plugin system design](./plugin-system-design.md)

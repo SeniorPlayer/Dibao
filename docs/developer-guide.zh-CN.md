@@ -1,6 +1,6 @@
 # 邸报开发者指南
 
-Last updated: 2026-05-31
+Last updated: 2026-06-16
 
 本文是从 `0.2.0` 开始维护的开发者文档入口。开发者文档只提供简体中文和英文两个版本；插件开发文档是本指南的一个子单元，同时也作为独立文件维护。
 
@@ -55,6 +55,7 @@ npm run ops:migrate:core
 - [插件开发指南](./plugin-development.zh-CN.md)
 - [Plugin development guide](./plugin-development.en-US.md)
 - [插件系统设计](./plugin-system-design.md)
+- [运行时性能准则](./runtime-performance.md)
 
 插件开发文档固定为中英文双语，不再为其他 UI 语言单独维护开发者文档。
 
@@ -65,3 +66,4 @@ npm run ops:migrate:core
 - 插件目录、插件数据目录和用户 SQLite 数据库必须在 Docker 重建后保留。
 - Core 数据库 migration 必须默认走应用内用户可见阻塞迁移门；部署脚本不能绕过该入口直接执行迁移。
 - 会导致 embedding 重算、向量索引重建或推荐画像重建的变更必须走明确的数据升级流程，不能在普通请求路径隐式执行。
+- 触及后台任务、SQLite 写锁、热路径请求、诊断接口或插件 Hook 的变更，必须先阅读并遵守 [运行时性能准则](./runtime-performance.md)。
