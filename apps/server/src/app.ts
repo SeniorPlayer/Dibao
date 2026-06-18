@@ -3169,6 +3169,7 @@ const anonymousRoutes = new Set([
   "POST /api/auth/setup",
   "POST /api/auth/login",
   "POST /api/auth/logout",
+  "GET /api/plugins/ui.css",
   "GET /api/system/health"
 ]);
 

@@ -1505,13 +1505,15 @@ function PluginSettingsTabPanel(props: {
       hidden={!props.active}
       aria-labelledby={`settings-plugin-${props.plugin.id}-${props.tab.id}`}
     >
-      <iframe
-        className={styles.pluginSettingsFrame}
-        ref={frameRef}
-        sandbox="allow-scripts allow-forms"
-        src={`${baseUrl}?${params.toString()}`}
-        title={props.tab.label}
-      />
+      {props.active ? (
+        <iframe
+          className={styles.pluginSettingsFrame}
+          ref={frameRef}
+          sandbox="allow-scripts allow-forms"
+          src={`${baseUrl}?${params.toString()}`}
+          title={props.tab.label}
+        />
+      ) : null}
     </section>
   );
 }
