@@ -13,8 +13,6 @@ const SUMMARY_MAX_LENGTH = 280;
 
 export default {
   async activate(ctx) {
-    await ensureSchedule(ctx);
-
     ctx.hooks.on("maintenance.tick", async () => {
       await ensureSchedule(ctx);
     });
@@ -76,6 +74,10 @@ export default {
         briefs,
         generated: force || !hadTodayBrief
       };
+    });
+
+    void ensureSchedule(ctx).catch(() => {
+      // Activation must stay quick; maintenance.tick and settings saves retry schedule sync.
     });
   }
 };
