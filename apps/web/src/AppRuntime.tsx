@@ -250,6 +250,7 @@ export function App() {
   const initialSearchForm = useMemo(() => searchFormFromLocation(), []);
   const initialArticleStateOverlay = useMemo(() => readArticleStateOverlay(), []);
   const [appStage, setAppStage] = useState<AppStage>({ type: "auth-loading" });
+  const [authUsername, setAuthUsername] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [setupSourceError, setSetupSourceError] = useState<string | null>(null);
@@ -683,6 +684,7 @@ export function App() {
         const session = await dibaoApi.getAuthSession();
         if (!cancelled) {
           const nextStage = stageForAuthSession(session);
+          setAuthUsername(session.authenticated ? session.username : null);
           if (nextStage.type === "welcome" || nextStage.type === "login") {
             resetReaderState();
           }
@@ -691,6 +693,7 @@ export function App() {
       } catch (error) {
         if (!cancelled) {
           setAuthError(userMessageForError(error, t.errors.api));
+          setAuthUsername(null);
           resetReaderState();
           setAppStage({ type: "login" });
         }
@@ -1598,10 +1601,12 @@ export function App() {
     try {
       if (mode === "setup") {
         await dibaoApi.setupAuth(username, password, telemetryEnabled);
+        setAuthUsername(username.trim());
         resetReaderState();
         setAppStage({ type: "setup-sources" });
       } else {
         await dibaoApi.login(username, password);
+        setAuthUsername(username.trim());
         setAppStage({ type: "setup-status-loading" });
       }
     } catch (error) {
@@ -1616,6 +1621,7 @@ export function App() {
 
     try {
       await dibaoApi.logout();
+      setAuthUsername(null);
       setAppStage({ type: "login" });
       resetReaderState();
     } catch (error) {
@@ -2914,7 +2920,7 @@ export function App() {
           noticeText ??
           (isSettingsLoading || isEmbeddingLoading ? t.settings.loading : t.settings.status)
         : appPage.type === "plugin"
-          ? pluginError ?? activePlugin?.name ?? "Plugin"
+          ? pluginError
         : appPage.type === "algorithm-transparency"
           ? recommendationStatusError ??
             (isRecommendationStatusLoading
@@ -3175,9 +3181,12 @@ export function App() {
             <h1 id="page-title">{pageTitle}</h1>
           </div>
           <div className={styles.topbarMeta}>
-            <span className={styles.statusText} aria-live="polite">
-              {topbarStatus}
-            </span>
+            {topbarStatus ? (
+              <span className={styles.statusText} aria-live="polite">
+                {topbarStatus}
+              </span>
+            ) : null}
+            {authUsername ? <span className={styles.accountName}>{authUsername}</span> : null}
             {logoutError ? <span className={styles.logoutError}>{logoutError}</span> : null}
             <button
               className={styles.secondaryButton}
