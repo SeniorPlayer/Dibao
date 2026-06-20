@@ -1,4 +1,4 @@
-const CACHE_VERSION = "dibao-pwa-v3";
+const CACHE_VERSION = "dibao-pwa-v4";
 const APP_SHELL_CACHE = `${CACHE_VERSION}:app-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}:runtime`;
 
@@ -27,7 +27,7 @@ const STATIC_PATHS = new Set([
 ]);
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(precacheAppShell());
+  event.waitUntil(precacheAppShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {

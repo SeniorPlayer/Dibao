@@ -149,7 +149,13 @@ const ARTICLE_DETAIL_REQUEST_TIMEOUT_MS = 12_000;
 const ARTICLE_STATE_OVERLAY_STORAGE_KEY = "dibao:article-state-overlay:v1";
 const ARTICLE_STATE_OVERLAY_TTL_MS = 24 * 60 * 60 * 1000;
 const ARTICLE_STATE_OVERLAY_LIMIT = 500;
-const AUTH_GATE_RETRY_DELAYS_MS = [500, 1500, 3000] as const;
+const AUTH_GATE_RETRY_DELAYS_MS = [500, 1500, 3000, 5000, 10_000, 30_000] as const;
+
+function authGateRetryDelayMs(attempt: number): number {
+  return AUTH_GATE_RETRY_DELAYS_MS[
+    Math.min(attempt, AUTH_GATE_RETRY_DELAYS_MS.length - 1)
+  ];
+}
 
 type IgnoredArticleQueueItem = {
   articleId: string;
@@ -697,15 +703,12 @@ export function App() {
             setAppStage(nextStage);
           }
           return;
-        } catch (error) {
-          if (attempt >= AUTH_GATE_RETRY_DELAYS_MS.length) {
-            if (!cancelled) {
-              setAuthError(userMessageForError(error, t.errors.api));
-              setAppStage({ type: "auth-loading" });
-            }
-            return;
+        } catch {
+          if (!cancelled) {
+            setAuthError(null);
+            setAppStage({ type: "auth-loading" });
           }
-          await delay(AUTH_GATE_RETRY_DELAYS_MS[attempt]);
+          await delay(authGateRetryDelayMs(attempt));
         }
       }
     }
@@ -766,15 +769,12 @@ export function App() {
             setAppStage(nextStage);
           }
           return;
-        } catch (error) {
-          if (attempt >= AUTH_GATE_RETRY_DELAYS_MS.length) {
-            if (!cancelled) {
-              setAuthError(userMessageForError(error, t.errors.api));
-              setAppStage({ type: "setup-status-loading" });
-            }
-            return;
+        } catch {
+          if (!cancelled) {
+            setAuthError(null);
+            setAppStage({ type: "setup-status-loading" });
           }
-          await delay(AUTH_GATE_RETRY_DELAYS_MS[attempt]);
+          await delay(authGateRetryDelayMs(attempt));
         }
       }
     }

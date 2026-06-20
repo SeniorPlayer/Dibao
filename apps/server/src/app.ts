@@ -3203,6 +3203,7 @@ function isForegroundActivityRoute(pathname: string): boolean {
 function isForegroundDeferrableJobType(type: JobType): boolean {
   return (
     type === "feed_refresh" ||
+    type === BEHAVIOR_EVENT_PROJECT_JOB_TYPE ||
     type === "embedding_generate" ||
     type === "profile_event_process" ||
     type === "ranking_recalculate" ||
