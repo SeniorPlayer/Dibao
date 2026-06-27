@@ -2,8 +2,8 @@ name: Build JS Bundle
 
 on:
   push:
-    branches: [ main ]          # 按需修改触发分支
-  workflow_dispatch:            # 允许手动触发
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -16,38 +16,48 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest   # 可指定版本，如 "1.1.0"
+          bun-version: latest
 
-      # 1. 安装依赖（会基于锁定文件安装）
       - name: Install dependencies
         run: bun install --frozen-lockfile
-        # 如果有 bun.lockb，则使用它；否则如果只有 package-lock.json，bun 也会自动识别。
-        # --frozen-lockfile 确保锁定文件不被更新，若锁定文件不存在则报错（避免意外）。
 
-      # 2. 执行项目构建（生成 dist/ 等产物）
+      # ========== 核心构建 ==========
       - name: Build packages
         run: bun run build
         env:
-          # 如果有构建时需要但不应硬编码的环境变量，可在此传入（例如从 secrets 读取）
           NODE_ENV: production
-          # 示例：如果需要 sentry 配置，可传入
+          # 如果构建需要其他环境变量（如 DIBAO_SENTRY_CONFIG），请通过 GitHub Secrets 传入
           # DIBAO_SENTRY_CONFIG: ${{ secrets.SENTRY_CONFIG }}
 
-      # 3. 清理不需要的大目录（减小 artifact 体积）
+      # ========== 关键诊断：列出构建产物 ==========
+      - name: List build outputs
+        run: |
+          echo "===== apps/server/dist ====="
+          ls -la apps/server/dist || echo "⚠️ apps/server/dist 不存在！"
+          echo "===== apps/web/dist ====="
+          ls -la apps/web/dist || echo "⚠️ apps/web/dist 不存在！"
+          echo "===== 整个 apps 目录结构 ====="
+          find apps -type f -name "*.js" | head -20
+
+      # ========== 如果产物缺失，让 job 失败 ==========
+      - name: Fail if build outputs missing
+        run: |
+          if [ ! -d "apps/server/dist" ] || [ ! -d "apps/web/dist" ]; then
+            echo "❌ 构建产物缺失！请检查 build 脚本。"
+            exit 1
+          fi
+          echo "✅ 构建产物存在。"
+
+      # ========== 清理不必要的文件（减小 artifact） ==========
       - name: Cleanup unnecessary files
         run: |
-          # 删除 node_modules（避免把 Linux 编译的原生模块带到本地）
-          rm -rf node_modules
-          # 删除 .git 目录（版本历史体积巨大，不需要）
-          rm -rf .git
-          # 可选：删除 .github 目录（工作流定义，不需要）
-          rm -rf .github
-          # 可选：如果项目有测试数据、日志等，也可删除，但此处保留
+          rm -rf node_modules .git .github
+          # 可选：删除测试、日志等
+          # find . -name "*.test.js" -delete
 
-      # 4. 上传整个剩余项目作为 artifact
+      # ========== 上传整个目录（此时包含 dist） ==========
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dibao-build
-          path: ./   # 上传当前目录的全部内容（已被清理）
-          # 如果 artifact 过大，可考虑压缩，但 GitHub 会自动压缩成 zip，不需要额外配置。
+          path: ./
